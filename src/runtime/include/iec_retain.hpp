@@ -625,6 +625,56 @@ inline size_t blob_size2(const Host& host) noexcept {
     return static_cast<size_t>(HEADER_SIZE) + p + t;
 }
 
+namespace detail {
+
+/** Write leaf `l`'s payload slot at `slot`. Returns its width. */
+inline uint32_t pack_leaf(uint8_t* slot, const debug::RetainLeafInfo& l, const Host& host) noexcept {
+    const uint32_t w = leaf_width(l.tag, l.cap);
+    if (is_text(l.tag)) {
+        const uint16_t room = static_cast<uint16_t>(w - 1u);
+        uint16_t n = host.read_text(l.arr, l.elem, slot + 1, room);
+        if (n > room) n = room;
+        if (l.tag == debug::TAG_WSTRING) n &= static_cast<uint16_t>(~1u);
+        slot[0] = static_cast<uint8_t>(l.tag == debug::TAG_WSTRING ? n / 2u : n);
+        memset(slot + 1 + n, 0, room - n);
+    } else if (host.read(l.arr, l.elem, slot) != w) {
+        // One unreadable leaf costs its own value, not every other one.
+        memset(slot, 0, w);
+    }
+    return w;
+}
+
+/**
+ * Add leaf `l` to the trailer at `out + at`: extends the open run, or starts an
+ * entry. Returns the bytes added.
+ */
+inline uint32_t pack_entry(uint8_t* out, size_t at, const debug::RetainLeafInfo& l, EntryCursor& e,
+                           uint8_t** count_field, uint16_t* entries) noexcept {
+    if (e.extends(l)) {
+        ++e.count;
+        put_u16(*count_field, e.count);
+        return 0;
+    }
+    e.open = true;
+    e.run = l.index != debug::RETAIN_NO_INDEX;
+    e.id = l.id;
+    e.tag = l.tag;
+    e.cap = l.cap;
+    e.first = l.index;
+    e.count = 1;
+    put_u32(out + at, l.id);
+    out[at + 4] = static_cast<uint8_t>(l.tag | (e.run ? TRAILER_RUN_FLAG : 0));
+    out[at + 5] = l.cap;
+    ++*entries;
+    if (!e.run) return ENTRY_SINGLE;
+    put_u32(out + at + 6, static_cast<uint32_t>(l.index));
+    *count_field = out + at + 10;
+    put_u16(*count_field, 1);
+    return ENTRY_RUN;
+}
+
+}  // namespace detail
+
 /**
  * Serialise every retained leaf as a format-2 blob. Returns bytes written, or 0
  * if nothing is retained, `cap` is too small, or the blob would exceed BLOB_MAX.
@@ -642,20 +692,7 @@ inline size_t pack2(uint8_t* out, size_t cap, const Host& host) noexcept {
     for (uint16_t i = 0; i < debug::retain_var_count; ++i) {
         debug::RetainLeafInfo l;
         if (!host.leaf(i, &l)) return 0;
-        const uint32_t w = leaf_width(l.tag, l.cap);
-        uint8_t* slot = out + at;
-        if (is_text(l.tag)) {
-            const uint16_t room = static_cast<uint16_t>(w - 1u);
-            uint16_t n = host.read_text(l.arr, l.elem, slot + 1, room);
-            if (n > room) n = room;
-            if (l.tag == debug::TAG_WSTRING) n &= static_cast<uint16_t>(~1u);
-            slot[0] = static_cast<uint8_t>(l.tag == debug::TAG_WSTRING ? n / 2u : n);
-            memset(slot + 1 + n, 0, room - n);
-        } else if (host.read(l.arr, l.elem, slot) != w) {
-            // One unreadable leaf costs its own value, not every other one.
-            memset(slot, 0, w);
-        }
-        at += w;
+        at += detail::pack_leaf(out + at, l, host);
     }
 
     // Trailer: entries first, then its two header fields once the count is known.
@@ -667,30 +704,7 @@ inline size_t pack2(uint8_t* out, size_t cap, const Host& host) noexcept {
     for (uint16_t i = 0; i < debug::retain_var_count; ++i) {
         debug::RetainLeafInfo l;
         if (!host.leaf(i, &l)) return 0;
-        if (e.extends(l)) {
-            ++e.count;
-            put_u16(count_field, e.count);
-            continue;
-        }
-        e.open = true;
-        e.run = l.index != debug::RETAIN_NO_INDEX;
-        e.id = l.id;
-        e.tag = l.tag;
-        e.cap = l.cap;
-        e.first = l.index;
-        e.count = 1;
-        put_u32(out + at, l.id);
-        out[at + 4] = static_cast<uint8_t>(l.tag | (e.run ? TRAILER_RUN_FLAG : 0));
-        out[at + 5] = l.cap;
-        if (e.run) {
-            put_u32(out + at + 6, static_cast<uint32_t>(l.index));
-            count_field = out + at + 10;
-            put_u16(count_field, 1);
-            at += ENTRY_RUN;
-        } else {
-            at += ENTRY_SINGLE;
-        }
-        ++entries;
+        at += detail::pack_entry(out, at, l, e, &count_field, &entries);
     }
     put_u16(out + trailer_at, static_cast<uint16_t>(trailer));
     put_u16(out + trailer_at + 2, entries);
@@ -704,6 +718,130 @@ inline size_t pack2(uint8_t* out, size_t cap, const Host& host) noexcept {
     crc = crc32(out + HEADER_SIZE, payload + trailer, crc);
     put_u32(out + 10, crc ^ 0xFFFFFFFFu);
     return total;
+}
+
+/**
+ * An incremental format-2 pack: exactly the bytes pack2() writes, made over
+ * several calls that each do a bounded amount of work, so a host can pack from
+ * a low-priority task without holding it for the whole blob. No allocation;
+ * the state is this struct. The layout (layout2()) is constant for a program,
+ * so a host computes it once and passes it to every begin.
+ */
+struct Packer2 {
+    enum Phase : uint8_t { Idle, Payload, Trailer, Checksum, Done, Failed };
+    uint8_t*  out         = nullptr;
+    uint32_t  payload     = 0;
+    uint32_t  trailer     = 0;
+    uint32_t  at          = 0;  // next byte written
+    uint32_t  crc_at      = 0;  // next byte the checksum covers
+    uint32_t  crc         = 0;
+    uint16_t  next        = 0;  // next leaf
+    uint16_t  entries     = 0;
+    uint8_t*  count_field = nullptr;
+    detail::EntryCursor e;
+    Phase     phase       = Idle;
+
+    /** Bytes of the finished blob; 0 until Done. */
+    size_t size() const noexcept {
+        return phase == Done ? static_cast<size_t>(HEADER_SIZE) + payload + trailer : 0;
+    }
+};
+
+/**
+ * Start a pack into `out`. False, leaving the packer Failed, when nothing is
+ * retained, `out` is null, the blob would exceed BLOB_MAX, or `cap` is short.
+ */
+inline bool pack2_begin(Packer2& p, uint8_t* out, size_t cap, uint32_t payload, uint32_t trailer) noexcept {
+    p = Packer2{};
+    const size_t total = static_cast<size_t>(HEADER_SIZE) + payload + trailer;
+    if (debug::retain_var_count == 0 || out == nullptr || total > BLOB_MAX || cap < total) {
+        p.phase = Packer2::Failed;
+        return false;
+    }
+    p.out = out;
+    p.payload = payload;
+    p.trailer = trailer;
+    put_u16(out + 0, MAGIC);
+    out[2] = FORMAT_V2;
+    out[3] = 0;
+    put_u32(out + 4, debug::retain_layout_hash);
+    put_u16(out + 8, static_cast<uint16_t>(payload));
+    p.crc = crc32(out, 10);
+    p.at = HEADER_SIZE;
+    p.crc_at = HEADER_SIZE;
+    p.phase = Packer2::Payload;
+    return true;
+}
+
+/**
+ * Advance a pack by at most `budget` leaves (payload, then trailer), or
+ * `budget` x 8 checksum bytes. Returns the phase reached: Done when the blob is
+ * complete (size() bytes at `out`), Failed when a leaf could not be described
+ * or the layout no longer matches.
+ */
+inline Packer2::Phase pack2_step(Packer2& p, const Host& host, uint16_t budget) noexcept {
+    if (budget == 0) budget = 1;
+    const uint32_t payload_end = HEADER_SIZE + p.payload;
+    const uint32_t blob_end = payload_end + p.trailer;
+    switch (p.phase) {
+        case Packer2::Payload:
+            for (uint16_t n = 0; n < budget && p.next < debug::retain_var_count; ++n) {
+                debug::RetainLeafInfo l;
+                if (!host.leaf(p.next, &l) || p.at + leaf_width(l.tag, l.cap) > payload_end) {
+                    p.phase = Packer2::Failed;
+                    return p.phase;
+                }
+                p.at += detail::pack_leaf(p.out + p.at, l, host);
+                ++p.next;
+            }
+            if (p.next < debug::retain_var_count) return p.phase;
+            if (p.at != payload_end) {
+                p.phase = Packer2::Failed;
+                return p.phase;
+            }
+            p.next = 0;
+            p.at += TRAILER_HEADER;
+            p.phase = Packer2::Trailer;
+            return p.phase;
+        case Packer2::Trailer:
+            for (uint16_t n = 0; n < budget && p.next < debug::retain_var_count; ++n) {
+                debug::RetainLeafInfo l;
+                if (!host.leaf(p.next, &l)) {
+                    p.phase = Packer2::Failed;
+                    return p.phase;
+                }
+                const uint32_t need =
+                    p.e.extends(l) ? 0u : (l.index != debug::RETAIN_NO_INDEX ? ENTRY_RUN : ENTRY_SINGLE);
+                if (p.at + need > blob_end) {
+                    p.phase = Packer2::Failed;
+                    return p.phase;
+                }
+                p.at += detail::pack_entry(p.out, p.at, l, p.e, &p.count_field, &p.entries);
+                ++p.next;
+            }
+            if (p.next < debug::retain_var_count) return p.phase;
+            if (p.at != blob_end) {
+                p.phase = Packer2::Failed;
+                return p.phase;
+            }
+            put_u16(p.out + payload_end, static_cast<uint16_t>(p.trailer));
+            put_u16(p.out + payload_end + 2, p.entries);
+            p.phase = Packer2::Checksum;
+            return p.phase;
+        case Packer2::Checksum: {
+            const uint32_t chunk = static_cast<uint32_t>(budget) * 8u;
+            const uint32_t left = blob_end - p.crc_at;
+            const uint32_t n = left < chunk ? left : chunk;
+            p.crc = crc32(p.out + p.crc_at, n, p.crc);
+            p.crc_at += n;
+            if (p.crc_at < blob_end) return p.phase;
+            put_u32(p.out + 10, p.crc ^ 0xFFFFFFFFu);
+            p.phase = Packer2::Done;
+            return p.phase;
+        }
+        default:
+            return p.phase;
+    }
 }
 
 // -----------------------------------------------------------------------------

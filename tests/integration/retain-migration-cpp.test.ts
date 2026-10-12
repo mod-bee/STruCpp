@@ -83,6 +83,24 @@ int main(int argc, char** argv) {
       if (!strcmp(cmd, "save") && n != retain::blob_size2(kHost)) { printf("SIZEMISMATCH\\n"); return 3; }
       FILE* f = fopen(argv[++i], "wb"); fwrite(blob, 1, n, f); fclose(f);
       printf("SAVED %zu\\n", n);
+    } else if (!strcmp(cmd, "savestep")) {  // savestep <budget> <cap> <file>
+      static uint8_t blob[65535];
+      unsigned budget = (unsigned)atoi(argv[++i]);
+      size_t cap = (size_t)atol(argv[++i]);
+      uint32_t pay = 0, trl = 0;
+      retain::layout2(kHost, &pay, &trl);
+      retain::Packer2 pk;
+      memset(blob, 0xA5, sizeof blob);
+      if (!retain::pack2_begin(pk, blob, cap, pay, trl)) { printf("BEGINFAIL\\n"); ++i; continue; }
+      unsigned steps = 0;
+      while (pk.phase != retain::Packer2::Done && pk.phase != retain::Packer2::Failed && steps < 1000000) {
+        retain::pack2_step(pk, kHost, (uint16_t)budget);
+        ++steps;
+      }
+      // A finished packer stays finished: more steps change nothing.
+      retain::pack2_step(pk, kHost, (uint16_t)budget);
+      FILE* f = fopen(argv[++i], "wb"); fwrite(blob, 1, pk.size(), f); fclose(f);
+      printf("STEPPED %zu %u %u\\n", pk.size(), steps, (unsigned)pk.phase);
     } else if (!strcmp(cmd, "load")) {
       static uint8_t blob[65535];
       FILE* f = fopen(argv[++i], "rb"); size_t n = fread(blob, 1, sizeof blob, f); fclose(f);
@@ -324,6 +342,33 @@ describeIfGpp("retain format 2: migration by name between two real programs", ()
     expect(size).toBe(14 + 265 + 64);
     expect(base.map.retainBlobSize).toBe(size);
     expect(base.map.retainFormat).toBe(2);
+  });
+
+  it("incremental pack (Packer2) writes the same bytes as pack2 at every step size, and restores", () => {
+    const size = fs.statSync(blob).size;
+    const whole = fs.readFileSync(blob);
+    for (const budget of [1, 2, 3, 5, 13, 64, 65535]) {
+      const file = path.join(tempDir, `base.step${budget}`);
+      const out = run(base.bin, ["set", blob + ".values", "savestep", String(budget), "65535", file]);
+      const m = /STEPPED (\d+) (\d+) (\d+)/.exec(out)!;
+      expect(+m[1]!).toBe(size);
+      expect(+m[3]!).toBe(4); // Done
+      // Bounded work per call: 13 leaves and their trailer, then the checksum in chunks.
+      if (budget === 1) expect(+m[2]!).toBeGreaterThan(26);
+      expect(fs.readFileSync(file).equals(whole)).toBe(true);
+      const { report, values } = loadInto(base, file);
+      expect(report).toMatchObject({ result: OK, format: 2, kept: 13 });
+      for (const [k, v] of Object.entries(VALUES)) expect(values[k]).toEqual(v);
+    }
+  });
+
+  it("incremental pack refuses a buffer too small for the blob, writing nothing past it", () => {
+    const size = fs.statSync(blob).size;
+    const file = path.join(tempDir, "base.short");
+    const out = run(base.bin, ["savestep", "8", String(size - 1), file]);
+    expect(out).toContain("BEGINFAIL");
+    const ok = run(base.bin, ["savestep", "8", String(size), file]);
+    expect(ok).toMatch(/STEPPED \d+ \d+ 4/);
   });
 
   it("format 1 blob of the same layout still loads (strings capped at 126, as before)", () => {
@@ -635,6 +680,15 @@ END_CONFIGURATION`;
       expect(paths.filter((p) => /SCRATCH|CMD/.test(p))).toEqual([]);
       // 4 zones x (Sp, Mode, Runs, Hist[1], Hist[2])
       expect(paths.length).toBe(20);
+    });
+
+    it("incremental pack of block arrays (runs in the trailer) matches pack2 byte for byte", () => {
+      const whole = fs.readFileSync(saved);
+      for (const budget of [1, 4, 7, 1000]) {
+        const file = path.join(tempDir, `zones-4.step${budget}`);
+        run(base.bin, ["set", saved + ".values", "savestep", String(budget), "65535", file]);
+        expect(fs.readFileSync(file).equals(whole)).toBe(true);
+      }
     });
 
     it("[1..4] -> [1..5]: the four zones kept, the fifth at its initial values", () => {
