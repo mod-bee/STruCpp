@@ -517,6 +517,9 @@ export interface TaskDeclaration extends ASTNode {
   kind: "TaskDeclaration";
   name: string;
   properties: Map<string, Expression>;
+  /** `{CORE := n}` pragmas after the parameter list, as written (checked by
+   *  the project model). Absent when there are none. */
+  corePragmas?: { image: string; line: number; column: number }[];
 }
 
 /**

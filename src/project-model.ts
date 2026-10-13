@@ -150,6 +150,8 @@ export interface TaskDecl {
   name: string;
   interval?: TimeValue;
   priority?: number;
+  /** CPU core from `{CORE := n}` (IEC §6.2 pragma); absent = Auto. */
+  core?: number;
   programInstances: ProgramInstanceDecl[];
 }
 
@@ -534,6 +536,21 @@ export class ProjectModelBuilder {
       this.processConfiguration(config);
     }
 
+    // strucpp_task_core() answers for one configuration: the one a runtime loads.
+    const pinned = ast.configurations.filter((c) =>
+      c.resources.some((r) =>
+        r.tasks.some((t) => (t.corePragmas ?? []).length > 0),
+      ),
+    );
+    if (pinned.length > 1) {
+      const second = pinned[1]!;
+      this.addError(
+        `Configuration ${second.name}: task cores ({CORE := n}) can be set in one configuration only`,
+        second.sourceSpan.startLine,
+        second.sourceSpan.startCol,
+      );
+    }
+
     // Third pass: validate VAR_EXTERNAL references
     this.validateExternalReferences();
 
@@ -811,13 +828,47 @@ export class ProjectModelBuilder {
       }
     }
 
+    const core = this.taskCore(task);
+
     // Use conditional spreading for optional properties to comply with exactOptionalPropertyTypes
     return {
       name: task.name,
       programInstances: [],
       ...(interval !== undefined ? { interval } : {}),
       ...(priority !== undefined ? { priority } : {}),
+      ...(core !== undefined ? { core } : {}),
     };
+  }
+
+  /**
+   * The task's CPU core from its `{CORE := n}` pragma (IEC 61131-3 §6.2: a
+   * pragma's syntax and meaning are the Implementer's). n is a whole number
+   * 0..63; the runtime places a core the target lacks on its own (Auto).
+   */
+  private taskCore(task: TaskDeclaration): number | undefined {
+    const pragmas = task.corePragmas ?? [];
+    if (pragmas.length === 0) return undefined;
+    if (pragmas.length > 1) {
+      const second = pragmas[1]!;
+      this.addError(
+        `Task ${task.name}: the core is given more than once`,
+        second.line,
+        second.column,
+      );
+      return undefined;
+    }
+    const pragma = pragmas[0]!;
+    const m = /^\{\s*CORE\s*:=\s*(\d+)\s*\}$/i.exec(pragma.image);
+    const core = m ? Number(m[1]) : NaN;
+    if (!(core >= 0 && core <= 63)) {
+      this.addError(
+        `Task ${task.name}: ${pragma.image} is not a core; write {CORE := n} with n a whole number from 0 to 63`,
+        pragma.line,
+        pragma.column,
+      );
+      return undefined;
+    }
+    return core;
   }
 
   /**

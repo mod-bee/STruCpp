@@ -2307,6 +2307,7 @@ export class CodeGenerator {
       for (const config of this.projectModel.configurations) {
         this.generateConfigurationImplementationFromModel(config);
       }
+      this.generateTaskCoreTable(this.projectModel.configurations);
     } else {
       for (const config of ast.configurations) {
         this.generateConfigurationImplementation(config);
@@ -4531,6 +4532,40 @@ export class CodeGenerator {
     this.emitHeader("    size_t get_resource_count() const override;");
     this.emitHeader("};");
     this.emitHeader("");
+  }
+
+  /**
+   * `strucpp_task_core(resource, task)`: the CPU core of each task from its
+   * `{CORE := n}` pragma (IEC §6.2), -1 for Auto, by the indices of the
+   * configuration's resources[] and their tasks[]. Emitted only when a task has
+   * a core, so a project without one compiles to the C++ it always did; a
+   * runtime treats a missing symbol as every task Auto. TaskInstance is left
+   * as it is: the Linux runtime reads that array by its layout.
+   */
+  private generateTaskCoreTable(configs: ProjectModel["configurations"]): void {
+    const config = configs.find((c) =>
+      c.resources.some((r) => r.tasks.some((t) => t.core !== undefined)),
+    );
+    if (!config) return;
+    this.emit(
+      "// Task CPU cores ({CORE := n}); -1 = Auto (the runtime places the task).",
+    );
+    this.emit(
+      'extern "C" int32_t strucpp_task_core(uint32_t resource, uint32_t task) {',
+    );
+    config.resources.forEach((resource, r) => {
+      const cores = resource.tasks.map((t) => t.core ?? -1);
+      if (cores.every((c) => c === -1)) return;
+      this.emit(`    if (resource == ${r}) {`);
+      this.emit(
+        `        static const int8_t cores[${cores.length}] = {${cores.join(", ")}};`,
+      );
+      this.emit(`        return task < ${cores.length} ? cores[task] : -1;`);
+      this.emit("    }");
+    });
+    this.emit("    return -1;");
+    this.emit("}");
+    this.emit("");
   }
 
   /**

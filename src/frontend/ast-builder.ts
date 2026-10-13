@@ -1414,11 +1414,18 @@ export class ASTBuilder {
       }
     }
 
+    const corePragmas = getAllTokens(children.TaskCorePragma).map((t) => ({
+      image: t.image,
+      line: t.startLine ?? 0,
+      column: t.startColumn ?? 0,
+    }));
+
     return {
       kind: "TaskDeclaration",
       sourceSpan: nodeToSourceSpan(node),
       name,
       properties,
+      ...(corePragmas.length > 0 ? { corePragmas } : {}),
     };
   }
 
