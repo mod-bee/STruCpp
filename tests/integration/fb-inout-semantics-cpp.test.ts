@@ -535,7 +535,7 @@ PROGRAM Main
   END_VAR
   t(r := local);
   tg(r := g);             (* under g's lock, bound to g itself *)
-  pr(a := g2, b := g.n);  (* under g2's lock; g cannot be held: a copy *)
+  pr(a := g2, b := g.n);  (* under the call lock: g2 and g both held, bound *)
   sb(b := w.3);           (* a bit: a copy beside the call *)
   s5 := 'ab';
   gr(s := s5);            (* another length: a copy beside the call *)
@@ -576,11 +576,12 @@ int main() {
 }
 `,
     );
-    // g.n: tg +1, pr +2; v: again +1+2 (both in-outs on v). TG.R and PR.A
-    // stay bound to the global itself; PR.B, SB.B and GR.S were the call's
-    // copies: unbound after it, so the debugger has no value for them.
+    // g.n: tg +1, pr +2; v: again +1+2 (both in-outs on v). TG.R, PR.A and
+    // PR.B stay bound to the globals themselves (PR.B under the call lock);
+    // SB.B and GR.S were the call's copies: unbound after it, so the debugger
+    // has no value for them.
     expect(out).toBe(
-      "local=1,10,hello,100,1 dbg=1,10,100,1 tag=hello g=3,3 v=3 g2=1 pr=1,-1 w=8 sb=-1 s5=abxyz gr=1 bound=1,1",
+      "local=1,10,hello,100,1 dbg=1,10,100,1 tag=hello g=3,3 v=3 g2=1 pr=1,3 w=8 sb=-1 s5=abxyz gr=1 bound=1,1",
     );
   });
 });

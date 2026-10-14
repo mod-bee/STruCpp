@@ -543,6 +543,10 @@ export class CodeGenerator {
     | { rootUpper: string; hoist: (code: string) => string }
     | undefined;
 
+  /** Set while a call is emitted under the call lock (withCallLock): the
+   *  globals already held in its scope (GlobalHold). */
+  private callLockHeld: Set<string> | undefined;
+
   /** Store AST for looking up program bodies when using project model */
   protected ast?: CompilationUnit;
 
@@ -3832,6 +3836,20 @@ export class CodeGenerator {
       this.emit(`    ${retType} ${funcName}_result;`);
       this.currentFunctionName = func.name;
       this.enterScope(func.varBlocks);
+      // VAR_EXTERNAL (IEC 61131-3 Ed.3 6.6.2.2): the body reaches the global
+      // through its GlobalVar, locked like a PROGRAM's or a block's access.
+      const savedRefs = this.globalRefs;
+      this.globalRefs = new Map(
+        this.collectFBExternals(
+          func as unknown as CompilationUnit["functionBlocks"][0],
+        ).map((e) => [
+          e.name.toUpperCase(),
+          {
+            acc: `(&strucpp::${e.name})->`,
+            composite: !isElementaryType(e.typeName),
+          },
+        ]),
+      );
 
       // Declare local variables (VAR, VAR_TEMP) — same pattern as method locals
       for (const block of func.varBlocks) {
@@ -3855,6 +3873,7 @@ export class CodeGenerator {
       } else if (this.options.sourceComments) {
         this.emit("    // Empty function body");
       }
+      this.globalRefs = savedRefs;
       this.exitScope();
       this.currentFunctionName = undefined;
       this.emit(`    return ${funcName}_result;`);
@@ -6842,11 +6861,23 @@ export class CodeGenerator {
     const lockable = bound.find(
       (g) => this.splitBitTarget(g).part === undefined,
     );
+    // A function that takes a global's lock itself runs under the call lock,
+    // holding every global it binds there (withCallLock).
+    const callLock =
+      lockable !== undefined &&
+      (this.pouMayTakeGlobalLock(nameUpper) ||
+        bound.some(
+          (g) =>
+            g.name.toUpperCase() !== lockable.name.toUpperCase() &&
+            this.splitBitTarget(g).part === undefined,
+        ));
     const lockUpper =
-      lockable === undefined || this.pouMayTakeGlobalLock(nameUpper)
-        ? undefined
-        : lockable.name.toUpperCase();
+      lockable === undefined ? undefined : lockable.name.toUpperCase();
     const temps: string[] = [];
+    if (callLock) {
+      temps.push(`strucpp::GlobalCallLock __gcl${this.tempVarCounter++};`);
+    }
+    const held = new Set<string>();
     const after: string[] = [];
     const overrides = new Map(this.argOverrides ?? []);
     for (const arg of expr.arguments) {
@@ -6858,6 +6889,16 @@ export class CodeGenerator {
         const { base, part } = this.splitBitTarget(global);
         if (upper === lockUpper && part === undefined) {
           overrides.set(v, this.renderLockedTail(global, temps));
+          continue;
+        }
+        if (callLock && part === undefined) {
+          const savedHeld = this.callLockHeld;
+          this.callLockHeld = held;
+          try {
+            overrides.set(v, this.heldStorage(global, ref, "", temps));
+          } finally {
+            this.callLockHeld = savedHeld;
+          }
           continue;
         }
         const tmp = `__gca${this.tempVarCounter++}`;
@@ -7862,51 +7903,67 @@ export class CodeGenerator {
             isDereference: false,
           };
     if (this.isGlobalAccess(instanceExpr)) {
-      this.generateLockedFBInvocation(
-        call,
-        instanceExpr.name.toUpperCase(),
-        this.globalRefOf(instanceExpr.name)!,
-        instanceExpr,
-        this.getFBInvocationType(
-          call.functionName,
-          call.instance !== undefined,
+      const instanceFbType = this.getFBInvocationType(
+        call.functionName,
+        call.instance !== undefined,
+      );
+      this.withCallLock(
+        this.callNeedsCallLock(
+          call,
+          instanceFbType,
+          instanceExpr.name.toUpperCase(),
         ),
         indent,
+        (inner) =>
+          this.generateLockedFBInvocation(
+            call,
+            instanceExpr.name.toUpperCase(),
+            this.globalRefOf(instanceExpr.name)!,
+            instanceExpr,
+            instanceFbType,
+            inner,
+          ),
       );
       return;
     }
 
     // An in-out bound to a shared global is bound to the global's own storage
-    // with the call under that global's lock, when the block takes no global
-    // lock itself (no lock is ever taken inside another).
+    // with the call under that global's lock; a block that takes a global's
+    // lock itself is called under the call lock as well (withCallLock).
     const lockFbType = this.getFBInvocationType(
       call.functionName,
       call.instance !== undefined,
     );
     const boundGlobal = this.fbInoutBoundGlobal(call, lockFbType);
-    if (
-      boundGlobal !== undefined &&
-      lockFbType !== undefined &&
-      !this.pouMayTakeGlobalLock(lockFbType)
-    ) {
-      let target =
-        call.instance !== undefined
-          ? this.generateExpression(call.instance)
-          : rawName.includes(".")
-            ? this.dottedInstanceName(rawName, call.sourceSpan)
-            : this.instanceBaseName(rawName);
-      if (call.instance !== undefined && this.mayTakeLock(call.instance)) {
-        const ptr = `__gfi${this.tempVarCounter++}`;
-        this.emit(`${indent}auto* ${ptr} = &(${target});`);
-        target = `(*${ptr})`;
-      }
-      this.generateLockedFBInvocation(
-        call,
-        boundGlobal.name.toUpperCase(),
-        this.globalRefOf(boundGlobal.name)!,
-        target,
-        lockFbType,
+    if (boundGlobal !== undefined && lockFbType !== undefined) {
+      this.withCallLock(
+        this.callNeedsCallLock(
+          call,
+          lockFbType,
+          boundGlobal.name.toUpperCase(),
+        ),
         indent,
+        (inner) => {
+          let target =
+            call.instance !== undefined
+              ? this.generateExpression(call.instance)
+              : rawName.includes(".")
+                ? this.dottedInstanceName(rawName, call.sourceSpan)
+                : this.instanceBaseName(rawName);
+          if (call.instance !== undefined && this.mayTakeLock(call.instance)) {
+            const ptr = `__gfi${this.tempVarCounter++}`;
+            this.emit(`${inner}auto* ${ptr} = &(${target});`);
+            target = `(*${ptr})`;
+          }
+          this.generateLockedFBInvocation(
+            call,
+            boundGlobal.name.toUpperCase(),
+            this.globalRefOf(boundGlobal.name)!,
+            target,
+            lockFbType,
+            inner,
+          );
+        },
       );
       return;
     }
@@ -8231,6 +8288,108 @@ export class CodeGenerator {
   }
 
   /**
+   * Whether a block call locked on `lockUpper` needs the call lock: the block
+   * may take a global's lock itself (VAR_EXTERNAL, an interface), or the call
+   * binds an in-out to another shared global.
+   */
+  private callNeedsCallLock(
+    call: FunctionCallExpression,
+    fbTypeName: string | undefined,
+    lockUpper: string,
+  ): boolean {
+    if (fbTypeName === undefined) return false;
+    if (this.pouMayTakeGlobalLock(fbTypeName)) return true;
+    const upper = fbTypeName.toUpperCase();
+    const inouts = this.fbInoutParams.get(upper);
+    const refs = this.fbRefInoutParams.get(upper);
+    const vlas = this.fbVlaInoutParams.get(upper);
+    const slots = this.fbArgSlots(call.arguments, fbTypeName);
+    return call.arguments.some((arg) => {
+      if (arg.isOutput) return false;
+      const slot = slots.get(arg)?.toUpperCase();
+      if (
+        slot === undefined ||
+        (inouts?.has(slot) !== true &&
+          refs?.has(slot) !== true &&
+          vlas?.has(slot) !== true)
+      ) {
+        return false;
+      }
+      const v = arg.value;
+      return (
+        v.kind === "VariableExpression" &&
+        this.isGlobalAccess(v) &&
+        v.name.toUpperCase() !== lockUpper &&
+        this.splitBitTarget(v).part === undefined
+      );
+    });
+  }
+
+  /**
+   * Emit a call (`emitCall`) that works on shared globals in place. When it
+   * `needed` the call lock (callNeedsCallLock), the call runs in a scope
+   * holding it (strucpp::GlobalCallLock), and every other global it binds is
+   * held there too (GlobalHold), so it works on their own storage rather than
+   * on a copy stored back after the call, which would undo another task's
+   * write (IEC 61131-3 Ed.3 6.8.2 g).
+   */
+  private withCallLock(
+    needed: boolean,
+    indent: string,
+    emitCall: (indent: string) => void,
+  ): void {
+    if (!needed) {
+      emitCall(indent);
+      return;
+    }
+    const saved = this.callLockHeld;
+    this.emit(`${indent}{`);
+    this.emit(
+      `${indent}  strucpp::GlobalCallLock __gcl${this.tempVarCounter++};`,
+    );
+    this.callLockHeld = new Set<string>();
+    try {
+      emitCall(`${indent}  `);
+    } finally {
+      this.callLockHeld = saved;
+    }
+    this.emit(`${indent}}`);
+  }
+
+  /**
+   * Under the call lock: hold `ref`'s global for the rest of the scope (once
+   * per global), and return the storage `expr` names on it; lock-taking index
+   * expressions are evaluated first, into `temps` (emitted as statements when
+   * `temps` is undefined).
+   */
+  private heldStorage(
+    expr: VariableExpression,
+    ref: GlobalRef,
+    indent: string,
+    temps?: string[],
+  ): string {
+    const held = this.callLockHeld!;
+    const upper = expr.name.toUpperCase();
+    const hold = (code: string): void => {
+      if (temps !== undefined) temps.push(code);
+      else this.emit(`${indent}${code}`);
+    };
+    if (!held.has(upper)) {
+      held.add(upper);
+      hold(
+        `strucpp::GlobalHold __gh${this.tempVarCounter++}(${ref.acc.slice(0, -2)});`,
+      );
+    }
+    return this.renderAccessTail(`(${ref.acc}value)`, expr, upper, (idx) => {
+      const code = this.generateExpression(idx);
+      if (!this.mayTakeLock(idx)) return code;
+      const tmp = `__gi${this.tempVarCounter++}`;
+      hold(`auto ${tmp} = ${code};`);
+      return tmp;
+    });
+  }
+
+  /**
    * Call of a function block under one shared global's lock (`lockUpper`):
    * an instance held in that global (`instance` is its access path), or a
    * local instance (`instance` is its C++) with an in-out bound into it.
@@ -8336,6 +8495,30 @@ export class CodeGenerator {
           // the binding stays, as the caller's variable's does.
           const ptr = `__iop${this.tempVarCounter++}`;
           lockedBind.push(`auto* ${ptr} = &(${lv});`);
+          bindInLock(member, ptr);
+        } else {
+          inputs.push({ member, code: isRef ? `&${lv}` : lv });
+          if (!isRef && !isVla) lockedBack.push({ lv, member });
+        }
+        settled.add(arg);
+      } else if (
+        paramName &&
+        isInout &&
+        global !== undefined &&
+        this.callLockHeld !== undefined &&
+        this.splitBitTarget(global).part === undefined
+      ) {
+        // Under the call lock another global is held as well, and its in-out
+        // bound to its own storage like the locked global's.
+        const lv = this.heldStorage(
+          global,
+          this.globalRefOf(global.name)!,
+          indent,
+        );
+        const member = this.fbParamMemberName(paramName, fbTypeName);
+        if (upper !== undefined && valueInouts.has(upper)) {
+          const ptr = `__iop${this.tempVarCounter++}`;
+          this.emit(`${indent}auto* ${ptr} = &(${lv});`);
           bindInLock(member, ptr);
         } else {
           inputs.push({ member, code: isRef ? `&${lv}` : lv });

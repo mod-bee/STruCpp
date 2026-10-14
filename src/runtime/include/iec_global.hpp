@@ -186,6 +186,55 @@ class GlobalVar {
 #endif
 };
 
+/**
+ * The call lock, for a block or function call that works on shared globals in
+ * place (VAR_IN_OUT, a global instance) and may itself take a global's lock
+ * (VAR_EXTERNAL, an interface). Such a call takes this lock first, then holds
+ * each global it works on (GlobalHold) until it returns, so the call reads and
+ * writes the globals' own storage and no other task's write to them is undone
+ * (IEC 61131-3 Ed.3 6.8.2 g; Table 13: an in-out is the caller's variable).
+ * Every other access holds one global's lock for one step and waits for no
+ * lock while holding it, so only the holder of the call lock ever waits for a
+ * lock while holding one: no two tasks can wait for each other.
+ */
+#ifdef STRUCPP_THREADED
+namespace detail {
+inline GlobalMutex& call_mutex() {
+    static GlobalMutex m;
+    return m;
+}
+}  // namespace detail
+
+class GlobalCallLock {
+   public:
+    GlobalCallLock() { detail::call_mutex().lock(); }
+    ~GlobalCallLock() { detail::call_mutex().unlock(); }
+    GlobalCallLock(const GlobalCallLock&) = delete;
+    GlobalCallLock& operator=(const GlobalCallLock&) = delete;
+};
+
+/** A global's own lock held for a scope (under the call lock). */
+class GlobalHold {
+   public:
+    template <typename V>
+    explicit GlobalHold(GlobalVar<V>* g) : m_(g->lock_handle()) { m_->lock(); }
+    ~GlobalHold() { m_->unlock(); }
+    GlobalHold(const GlobalHold&) = delete;
+    GlobalHold& operator=(const GlobalHold&) = delete;
+
+   private:
+    detail::GlobalMutex* m_;
+};
+#else
+class GlobalCallLock {};
+
+class GlobalHold {
+   public:
+    template <typename V>
+    explicit GlobalHold(GlobalVar<V>*) {}
+};
+#endif
+
 }  // namespace strucpp
 
 #endif  // STRUCPP_IEC_GLOBAL_HPP

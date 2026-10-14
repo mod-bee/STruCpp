@@ -1,8 +1,8 @@
 /**
  * Shared globals under concurrent tasks: every access to a global is locked,
- * no global lock is taken while another is held (except a global FB
- * instance's lock around its own call), and the result is the same C++ in a
- * single-thread build.
+ * a global lock is taken while another is held only under the call lock (a
+ * call that works on globals in place and takes a global's lock itself), and
+ * the result is the same C++ in a single-thread build.
  *
  * Each case compiles the generated code three ways — STRUCPP_THREADED (std
  * locks), STRUCPP_THREADED + STRUCPP_PLATFORM_THREADS (stub platform locks
@@ -534,7 +534,8 @@ int main() {
   cfg.INSTC.run();
   cfg.INSTC.run();
   CHECK(strucpp::DEV.value.SPARE[0] == 10);
-  CHECK(MAX_HELD() == 1);
+  // instC holds the call lock and DEV while its block reads gOther.
+  CHECK(MAX_HELD() <= 3);
   return fails ? 1 : 0;
 }`,
     );
@@ -555,11 +556,112 @@ int main() {
     expect(result.cppCode).toMatch(
       /\[&\]\{ auto (__gca\d+) = GSTEP->read\(\); return GCOUNT->with_lock\(\[&\]\(auto\* __glk\)\{ return BUMPV\(\(\*__glk\), \1\); \}\); \}\(\)/,
     );
-    // A block that takes another global's lock gets a copy, stored back after.
+    // A block that takes another global's lock is called under the call
+    // lock, viewing the global's own array inside its lock (no copy).
     expect(result.cppCode).toMatch(
-      /auto (__gva\d+) = DEV->with_lock\(\[&\]\(auto\* __glk\)\{ return \(\*__glk\)\.SPARE; \}\);\s*ADDER\.ARR = \1;\s*ADDER\(\);/,
+      /strucpp::GlobalCallLock __gcl\d+;\s*DEV->with_lock\(\[&\]\(auto\* __glk\)\{\s*auto& __fbi = ADDER;\s*__fbi\.ARR = \(\*__glk\)\.SPARE;\s*__fbi\(\);/,
     );
     expectNoNestedLocks(result.cppCode);
+  }, 120000);
+
+  it("loses no other task's write when a block that takes locks works on a global in place", () => {
+    // IEC 61131-3 Ed.3 6.8.2 g) and Table 13: a VAR_IN_OUT is the caller's
+    // own variable. A block that takes another global's lock (VAR_EXTERNAL,
+    // an interface) once worked on a copy that was stored back after the call,
+    // undoing what another task wrote into the same global meanwhile.
+    const source = `
+      TYPE Rec : STRUCT count : DINT; hits : DINT; END_STRUCT; END_TYPE
+      FUNCTION_BLOCK Owner
+        VAR_EXTERNAL gStep : DINT; END_VAR
+        VAR_IN_OUT data : Rec; other : Rec; END_VAR
+        data.count := data.count + gStep;
+        other.count := other.count + gStep;
+      END_FUNCTION_BLOCK
+      FUNCTION StepF : BOOL
+        VAR_EXTERNAL gStep : DINT; END_VAR
+        VAR_IN_OUT r : Rec; END_VAR
+        r.count := r.count + gStep;
+        StepF := TRUE;
+      END_FUNCTION
+      FUNCTION_BLOCK Plain
+        VAR_IN_OUT data : Rec; END_VAR
+        data.count := data.count + 1;
+      END_FUNCTION_BLOCK
+      INTERFACE I_Step
+        METHOD Step : DINT END_METHOD
+      END_INTERFACE
+      FUNCTION_BLOCK Stepper IMPLEMENTS I_Step
+        VAR_EXTERNAL gStep : DINT; END_VAR
+        METHOD PUBLIC Step : DINT
+          Step := gStep;
+        END_METHOD
+      END_FUNCTION_BLOCK
+      FUNCTION OwnF : BOOL
+        VAR_INPUT st : I_Step; END_VAR
+        VAR_IN_OUT r : Rec; q : Rec; END_VAR
+        r.count := r.count + st.Step();
+        q.count := q.count + st.Step();
+        OwnF := TRUE;
+      END_FUNCTION
+      PROGRAM Main
+        VAR_EXTERNAL dev : Rec; aux : Rec; gPlain : Plain; END_VAR
+        VAR own : Owner; stp : Stepper; ok : BOOL; END_VAR
+        own(data := dev, other := aux);
+        ok := OwnF(stp, aux, dev);
+        gPlain(data := dev);
+        ok := StepF(aux);
+      END_PROGRAM
+      PROGRAM Comms
+        VAR_EXTERNAL dev : Rec; aux : Rec; END_VAR
+        dev.hits := dev.hits + 1;
+        aux.hits := aux.hits + 1;
+      END_PROGRAM
+      CONFIGURATION Cfg
+        VAR_GLOBAL dev : Rec; aux : Rec; gStep : DINT := 1; gPlain : Plain; END_VAR
+        RESOURCE Res ON PLC
+          TASK t1(INTERVAL := T#20ms, PRIORITY := 0);
+          TASK t2(INTERVAL := T#10ms, PRIORITY := 1);
+          PROGRAM main WITH t1 : Main;
+          PROGRAM comms WITH t2 : Comms;
+        END_RESOURCE
+      END_CONFIGURATION
+    `;
+    const result = buildAndRun(
+      "inout-no-lost-write",
+      source,
+      `int main() {
+  strucpp::Configuration_CFG cfg;
+  const int N = 20000;
+#ifdef STRUCPP_THREADED
+  std::thread ta([&] { for (int i = 0; i < N; ++i) cfg.MAIN.run(); });
+  std::thread tb([&] { for (int i = 0; i < N; ++i) cfg.COMMS.run(); });
+  ta.join();
+  tb.join();
+#else
+  for (int i = 0; i < N; ++i) { cfg.MAIN.run(); cfg.COMMS.run(); }
+#endif
+  CHECK(strucpp::DEV.value.COUNT == 3 * N);
+  CHECK(strucpp::DEV.value.HITS == N);
+  CHECK(strucpp::AUX.value.COUNT == 3 * N);
+  CHECK(strucpp::AUX.value.HITS == N);
+  return fails ? 1 : 0;
+}`,
+    );
+    // No copy of the global is stored back after the call.
+    expect(result.cppCode).not.toMatch(/__gva\d+ = DEV->with_lock/);
+    expect(result.cppCode).not.toMatch(/__gva\d+ = AUX->with_lock/);
+    // A global instance's call binds another global in place under the call
+    // lock, though its block takes no lock itself.
+    expect(result.cppCode).toMatch(
+      /strucpp::GlobalCallLock __gcl\d+;\s*strucpp::GlobalHold __gh\d+\(DEV\);\s*auto\* (__iop\d+) = &\(\(DEV->value\)\);\s*GPLAIN->with_lock/,
+    );
+    // A FUNCTION reaches its VAR_EXTERNAL through the global's lock.
+    expect(result.cppCode).toContain("(&strucpp::GSTEP)->read()");
+    // A function that takes a lock binds both globals in place under the
+    // call lock.
+    expect(result.cppCode).toMatch(
+      /strucpp::GlobalCallLock __gcl\d+; strucpp::GlobalHold __gh\d+\(DEV\); return AUX->with_lock/,
+    );
   }, 120000);
 
   it("binds outputs, bits, FB instances and indexed elements of globals by reference", () => {
