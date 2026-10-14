@@ -141,15 +141,16 @@ export const ExternalPragma = createToken({
 });
 
 /**
- * A task's CPU core: `TASK t(INTERVAL := T#10ms, PRIORITY := 0) {CORE := 1};`.
+ * A task's settings: `TASK t(INTERVAL := T#10ms, PRIORITY := 0) {CORE := 1, STOP_ON_STUCK := FALSE, STACK := 8192};`.
  * IEC 61131-3 §6.2 leaves a pragma's syntax and meaning to the Implementer;
- * this is the one pragma STruC++ gives one. The token takes any `{CORE ...}`
- * so a malformed one reaches the TASK and is refused there, naming the task;
- * every other `{...}` is lexed as before.
+ * this is the one pragma STruC++ gives one. The token takes any `{...}` that
+ * starts with one of its keys (CORE, STOP_ON_STUCK, STACK), so a malformed one
+ * reaches the TASK and is refused there, naming the task; every other `{...}`
+ * is lexed as before.
  */
-export const TaskCorePragma = createToken({
-  name: "TaskCorePragma",
-  pattern: /\{\s*CORE\b[^{}]*\}/i,
+export const TaskPragma = createToken({
+  name: "TaskPragma",
+  pattern: /\{\s*(?:CORE|STOP_ON_STUCK|STACK)\b[^{}]*\}/i,
   line_breaks: true,
 });
 
@@ -830,7 +831,7 @@ export const allTokens = [
 
   // External code pragma
   ExternalPragma,
-  TaskCorePragma,
+  TaskPragma,
 
   // Multi-character operators (before single-character)
   DoubleDot,

@@ -152,6 +152,11 @@ export interface TaskDecl {
   priority?: number;
   /** CPU core from `{CORE := n}` (IEC §6.2 pragma); absent = Auto. */
   core?: number;
+  /** From `{STOP_ON_STUCK := TRUE|FALSE}`: whether a stuck scan of this task
+   *  stops the PLC; absent = TRUE (the runtime's default). */
+  stopOnStuck?: boolean;
+  /** Stack in bytes from `{STACK := n}`; absent = the target's default. */
+  stack?: number;
   programInstances: ProgramInstanceDecl[];
 }
 
@@ -536,16 +541,17 @@ export class ProjectModelBuilder {
       this.processConfiguration(config);
     }
 
-    // strucpp_task_core() answers for one configuration: the one a runtime loads.
+    // strucpp_task_core() and its siblings answer for one configuration: the
+    // one a runtime loads.
     const pinned = ast.configurations.filter((c) =>
       c.resources.some((r) =>
-        r.tasks.some((t) => (t.corePragmas ?? []).length > 0),
+        r.tasks.some((t) => (t.taskPragmas ?? []).length > 0),
       ),
     );
     if (pinned.length > 1) {
       const second = pinned[1]!;
       this.addError(
-        `Configuration ${second.name}: task cores ({CORE := n}) can be set in one configuration only`,
+        `Configuration ${second.name}: task settings ({CORE := n}, {STOP_ON_STUCK := b}, {STACK := n}) can be set in one configuration only`,
         second.sourceSpan.startLine,
         second.sourceSpan.startCol,
       );
@@ -828,7 +834,7 @@ export class ProjectModelBuilder {
       }
     }
 
-    const core = this.taskCore(task);
+    const { core, stopOnStuck, stack } = this.taskSettings(task);
 
     // Use conditional spreading for optional properties to comply with exactOptionalPropertyTypes
     return {
@@ -837,38 +843,82 @@ export class ProjectModelBuilder {
       ...(interval !== undefined ? { interval } : {}),
       ...(priority !== undefined ? { priority } : {}),
       ...(core !== undefined ? { core } : {}),
+      ...(stopOnStuck !== undefined ? { stopOnStuck } : {}),
+      ...(stack !== undefined ? { stack } : {}),
     };
   }
 
   /**
-   * The task's CPU core from its `{CORE := n}` pragma (IEC 61131-3 §6.2: a
-   * pragma's syntax and meaning are the Implementer's). n is a whole number
-   * 0..63; the runtime places a core the target lacks on its own (Auto).
+   * The task's settings from its pragmas after the parameter list (IEC
+   * 61131-3 §6.2: a pragma's syntax and meaning are the Implementer's):
+   * `{CORE := n, STOP_ON_STUCK := FALSE, STACK := n}`, in any order, in one
+   * pragma or several, each key at most once.
+   *
+   * - CORE: the CPU core, a whole number 0..63; the runtime places a core the
+   *   target lacks on its own (Auto).
+   * - STOP_ON_STUCK: TRUE (the default) or FALSE; FALSE keeps the PLC and the
+   *   other tasks running when this task is stuck in one scan (it is still
+   *   detected and reported).
+   * - STACK: the task's stack in bytes, a whole number 1024..67108864; the
+   *   runtime uses its default for a size it cannot give.
    */
-  private taskCore(task: TaskDeclaration): number | undefined {
-    const pragmas = task.corePragmas ?? [];
-    if (pragmas.length === 0) return undefined;
-    if (pragmas.length > 1) {
-      const second = pragmas[1]!;
-      this.addError(
-        `Task ${task.name}: the core is given more than once`,
-        second.line,
-        second.column,
-      );
-      return undefined;
+  private taskSettings(task: TaskDeclaration): {
+    core?: number;
+    stopOnStuck?: boolean;
+    stack?: number;
+  } {
+    const settings: { core?: number; stopOnStuck?: boolean; stack?: number } =
+      {};
+    const seen = new Set<string>();
+    for (const pragma of task.taskPragmas ?? []) {
+      const refuse = (why: string) =>
+        this.addError(
+          `Task ${task.name}: ${pragma.image} ${why}`,
+          pragma.line,
+          pragma.column,
+        );
+      const body = pragma.image.replace(/^\{|\}$/g, "");
+      for (const entry of body.split(",")) {
+        const m = /^\s*([A-Za-z_]\w*)\s*:=\s*(\S(?:.*\S)?)\s*$/.exec(entry);
+        const key = m ? m[1]!.toUpperCase() : "";
+        const value = m ? m[2]! : "";
+        if (key !== "CORE" && key !== "STOP_ON_STUCK" && key !== "STACK") {
+          refuse(
+            "is not a task setting; write {CORE := n}, {STOP_ON_STUCK := TRUE|FALSE} or {STACK := n}, separated by commas",
+          );
+          continue;
+        }
+        if (seen.has(key)) {
+          refuse(`gives ${key} more than once`);
+          continue;
+        }
+        seen.add(key);
+        if (key === "CORE") {
+          const core = /^\d+$/.test(value) ? Number(value) : NaN;
+          if (core >= 0 && core <= 63) settings.core = core;
+          else
+            refuse(
+              "is not a core; write {CORE := n} with n a whole number from 0 to 63",
+            );
+        } else if (key === "STOP_ON_STUCK") {
+          const upper = value.toUpperCase();
+          if (upper === "TRUE" || upper === "FALSE")
+            settings.stopOnStuck = upper === "TRUE";
+          else
+            refuse(
+              "is not a setting; write {STOP_ON_STUCK := TRUE} or {STOP_ON_STUCK := FALSE}",
+            );
+        } else {
+          const stack = /^\d+$/.test(value) ? Number(value) : NaN;
+          if (stack >= 1024 && stack <= 67108864) settings.stack = stack;
+          else
+            refuse(
+              "is not a stack size; write {STACK := n} with n a whole number of bytes from 1024 to 67108864",
+            );
+        }
+      }
     }
-    const pragma = pragmas[0]!;
-    const m = /^\{\s*CORE\s*:=\s*(\d+)\s*\}$/i.exec(pragma.image);
-    const core = m ? Number(m[1]) : NaN;
-    if (!(core >= 0 && core <= 63)) {
-      this.addError(
-        `Task ${task.name}: ${pragma.image} is not a core; write {CORE := n} with n a whole number from 0 to 63`,
-        pragma.line,
-        pragma.column,
-      );
-      return undefined;
-    }
-    return core;
+    return settings;
   }
 
   /**

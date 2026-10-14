@@ -2312,6 +2312,8 @@ export class CodeGenerator {
         this.generateConfigurationImplementationFromModel(config);
       }
       this.generateTaskCoreTable(this.projectModel.configurations);
+      this.generateTaskStopOnStuckTable(this.projectModel.configurations);
+      this.generateTaskStackTable(this.projectModel.configurations);
     } else {
       for (const config of ast.configurations) {
         this.generateConfigurationImplementation(config);
@@ -4583,6 +4585,77 @@ export class CodeGenerator {
       this.emit("    }");
     });
     this.emit("    return -1;");
+    this.emit("}");
+    this.emit("");
+  }
+
+  /**
+   * `strucpp_task_stop_on_stuck(resource, task)`: 1 when a stuck scan of the
+   * task stops the PLC (the default), 0 when it only reports it and the PLC
+   * keeps running, from its `{STOP_ON_STUCK := TRUE|FALSE}` pragma (IEC §6.2).
+   * Emitted only when a task has the setting; a runtime treats a missing symbol
+   * as every task stopping the PLC, as before the setting existed.
+   */
+  private generateTaskStopOnStuckTable(
+    configs: ProjectModel["configurations"],
+  ): void {
+    const config = configs.find((c) =>
+      c.resources.some((r) => r.tasks.some((t) => t.stopOnStuck !== undefined)),
+    );
+    if (!config) return;
+    this.emit(
+      "// Stop the PLC when the task is stuck ({STOP_ON_STUCK := b}); 1 = stop (the default).",
+    );
+    this.emit(
+      'extern "C" int32_t strucpp_task_stop_on_stuck(uint32_t resource, uint32_t task) {',
+    );
+    config.resources.forEach((resource, r) => {
+      const stops = resource.tasks.map((t) =>
+        t.stopOnStuck === false ? 0 : 1,
+      );
+      if (stops.every((v) => v === 1)) return;
+      this.emit(`    if (resource == ${r}) {`);
+      this.emit(
+        `        static const int8_t stops[${stops.length}] = {${stops.join(", ")}};`,
+      );
+      this.emit(`        return task < ${stops.length} ? stops[task] : 1;`);
+      this.emit("    }");
+    });
+    this.emit("    return 1;");
+    this.emit("}");
+    this.emit("");
+  }
+
+  /**
+   * `strucpp_task_stack(resource, task)`: the task's stack in bytes from its
+   * `{STACK := n}` pragma (IEC §6.2), 0 for the target's default. Emitted only
+   * when a task has a stack; a runtime treats a missing symbol as every task on
+   * its default stack.
+   */
+  private generateTaskStackTable(
+    configs: ProjectModel["configurations"],
+  ): void {
+    const config = configs.find((c) =>
+      c.resources.some((r) => r.tasks.some((t) => t.stack !== undefined)),
+    );
+    if (!config) return;
+    this.emit(
+      "// Task stacks in bytes ({STACK := n}); 0 = the target's default.",
+    );
+    this.emit(
+      'extern "C" uint32_t strucpp_task_stack(uint32_t resource, uint32_t task) {',
+    );
+    config.resources.forEach((resource, r) => {
+      const stacks = resource.tasks.map((t) => t.stack ?? 0);
+      if (stacks.every((v) => v === 0)) return;
+      this.emit(`    if (resource == ${r}) {`);
+      this.emit(
+        `        static const uint32_t stacks[${stacks.length}] = {${stacks.map((v) => `${v}u`).join(", ")}};`,
+      );
+      this.emit(`        return task < ${stacks.length} ? stacks[task] : 0u;`);
+      this.emit("    }");
+    });
+    this.emit("    return 0u;");
     this.emit("}");
     this.emit("");
   }

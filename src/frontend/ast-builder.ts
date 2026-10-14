@@ -1414,7 +1414,7 @@ export class ASTBuilder {
       }
     }
 
-    const corePragmas = getAllTokens(children.TaskCorePragma).map((t) => ({
+    const taskPragmas = getAllTokens(children.TaskPragma).map((t) => ({
       image: t.image,
       line: t.startLine ?? 0,
       column: t.startColumn ?? 0,
@@ -1425,7 +1425,7 @@ export class ASTBuilder {
       sourceSpan: nodeToSourceSpan(node),
       name,
       properties,
-      ...(corePragmas.length > 0 ? { corePragmas } : {}),
+      ...(taskPragmas.length > 0 ? { taskPragmas } : {}),
     };
   }
 

@@ -958,8 +958,8 @@ export class STParser extends CstParser {
       },
     });
     this.CONSUME(tokens.RParen);
-    // IEC §6.2 pragma: the task's CPU core (TaskCorePragma).
-    this.MANY(() => this.CONSUME(tokens.TaskCorePragma));
+    // IEC §6.2 pragma: the task's settings (TaskPragma).
+    this.MANY(() => this.CONSUME(tokens.TaskPragma));
     this.CONSUME(tokens.Semicolon);
   });
 
