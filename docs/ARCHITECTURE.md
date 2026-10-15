@@ -164,6 +164,28 @@ All program/function variables are wrapped in `IECVar<T>` which provides transpa
 - **Function Blocks**: C++ classes with member variables, `operator()()` method for the FB body, and generated methods/properties. Supports ABSTRACT (pure virtual), FINAL, EXTENDS (inheritance), and IMPLEMENTS (interfaces).
 - **Programs**: C++ classes with global instances, connected to CONFIGURATION/RESOURCE/TASK structure
 
+### PLC Data Block (`plcDataBlock`, `--plc-data-block`)
+
+Off by default; without it the output is unchanged. With it, the configuration's
+VAR_GLOBALs and the configuration instance are members of one `strucpp::PlcData`
+struct instead of file-scope objects, so a runtime can place all program data
+where it chooses (for example external RAM on a board that has it):
+
+- `strucpp_plc_data_create()` (in `configuration.cpp`) takes storage from the
+  runtime's `strucpp_platform_plc_data_alloc(size)` (aligned like `malloc`), sets
+  `strucpp::plc_data` and constructs the block. It returns false when there is no
+  storage. The runtime calls it before any program, retain restore or debugger
+  access.
+- Scan code is unchanged: programs and function blocks already reach globals
+  through pointers bound in their constructors. Only those constructors, the
+  per-global lock switch and located-global binding name `plc_data->NAME`.
+- The debug tables hold each variable's offset inside `PlcData` (an `offsetof` /
+  `element_offset` chain; the block starts with a header, so 0 still means "no
+  variable"). They stay constant data. `debug_dispatch.hpp` adds the block's
+  address when built with `-DSTRUCPP_PLC_DATA_BLOCK=1`; every translation unit
+  must use that define (`generated_debug.cpp` refuses to build without it).
+- Exactly one CONFIGURATION is required.
+
 ### Line Mapping
 
 The code generator tracks ST source line -> C++ output line correspondence, stored in `lineMap`. This enables debugger integration and meaningful error reporting against the original ST source. Optional `#line` directives and source comments can be emitted for direct C++ debugging.

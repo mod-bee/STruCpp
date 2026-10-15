@@ -754,6 +754,23 @@ export function compile(
 ): CompileResult {
   const pipeline = runPipeline(source, options, false);
 
+  // The PLC data block holds one configuration: the one a runtime builds.
+  const configurationCount = pipeline.projectModel?.configurations.length ?? 0;
+  if (
+    pipeline.mergedOptions.plcDataBlock === true &&
+    pipeline.errors.length === 0 &&
+    configurationCount !== 1
+  ) {
+    pipeline.errors.push({
+      message:
+        `The PLC data block needs exactly one CONFIGURATION; the program has ` +
+        `${configurationCount}.`,
+      line: 0,
+      column: 0,
+      severity: "error",
+    });
+  }
+
   if (pipeline.errors.length > 0 || !pipeline.ast) {
     return {
       success: false,
@@ -794,6 +811,7 @@ export function compile(
     ...(pipeline.mergedOptions.emitChunkMarkers
       ? { emitChunkMarkers: true }
       : {}),
+    ...(pipeline.mergedOptions.plcDataBlock ? { plcDataBlock: true } : {}),
   });
   codegen.setProjectModel(pipeline.projectModel!);
 
@@ -844,7 +862,10 @@ export function compile(
       pipeline.ast,
       pipeline.projectModel,
       pipeline.symbolTables,
-      { md5: pipeline.mergedOptions.md5 ?? "" },
+      {
+        md5: pipeline.mergedOptions.md5 ?? "",
+        ...(pipeline.mergedOptions.plcDataBlock ? { plcDataBlock: true } : {}),
+      },
     );
     debugTableCpp = dbg.debugTableCpp;
     debugMap = dbg.debugMap;

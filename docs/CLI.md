@@ -128,6 +128,7 @@ Format is auto-detected. Extracts ST source from the binary/ZIP format, compiles
 | `-o, --output <path>` | Output file (compile) or directory (library/test modes) |
 | `--line-directives`   | Emit `#line` directives in C++ output                   |
 | `--source-comments`   | Include ST source as C++ comments                       |
+| `--plc-data-block`    | Globals + configuration in one runtime-built block (see ARCHITECTURE.md) |
 | `--no-line-mapping`   | Disable ST-to-C++ line mapping                          |
 | `-O <level>`          | Optimization level: 0, 1, or 2 (default: 0)             |
 

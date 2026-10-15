@@ -89,6 +89,17 @@ export interface CompileOptions {
    * Production compiles leave it off and see no output change.
    */
   emitChunkMarkers?: boolean;
+
+  /**
+   * Keep the configuration's VAR_GLOBALs and the configuration instance in one
+   * block, `strucpp::PlcData`, that the runtime builds at start-up
+   * (`strucpp_plc_data_create()`) in storage from
+   * `strucpp_platform_plc_data_alloc()`, so a board can place it, e.g. in
+   * external RAM. Debug tables then hold offsets inside the block instead of
+   * addresses. Needs exactly one configuration, and every translation unit
+   * built with `-DSTRUCPP_PLC_DATA_BLOCK=1`. Off: output is unchanged.
+   */
+  plcDataBlock?: boolean;
 }
 
 /**

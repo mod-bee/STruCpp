@@ -329,6 +329,10 @@ export interface CodeGenOptions {
    *  for function-level tree-shaking. Off by default — production
    *  compiles produce identical output regardless. */
   emitChunkMarkers?: boolean;
+
+  /** See `CompileOptions.plcDataBlock`: the configuration's globals and the
+   *  configuration live in one runtime-allocated `PlcData` block. */
+  plcDataBlock?: boolean;
 }
 
 /**
@@ -687,6 +691,12 @@ export class CodeGenerator {
    * emitFileScopeGlobals.
    */
   private fileScopeGlobalDefinitions: string[] = [];
+  /**
+   * With `plcDataBlock`: the member declaration of each configuration
+   * VAR_GLOBAL inside `PlcData`, in the order the header would have declared
+   * them.
+   */
+  private plcDataMembers: string[] = [];
   /** Upper-cased names of every variable the unit declares (see runtimeFunction). */
   private declaredVariableNames = new Set<string>();
 
@@ -2208,6 +2218,10 @@ export class CodeGenerator {
       }
     }
 
+    if (this.options.plcDataBlock && this.projectModel) {
+      this.emitPlcDataDeclaration(this.projectModel.configurations[0]!);
+    }
+
     // Generate located variables descriptor array declaration
     this.generateLocatedVarsDeclaration();
 
@@ -2258,6 +2272,8 @@ export class CodeGenerator {
     //    lives here (multiple-TU defs would link-fail with "multiple
     //    definition of …").
     this.startTranslationUnit("configuration.cpp");
+
+    if (this.options.plcDataBlock) this.emitPlcDataDefinition();
 
     // The storage of the configuration VAR_GLOBALs the header declares.
     if (this.fileScopeGlobalDefinitions.length > 0) {
@@ -3674,7 +3690,7 @@ export class CodeGenerator {
         ? getProjectNamespace(this.projectModel)
         : "strucpp";
       for (const e of externalDecls) {
-        fbInits.push(`${e.name}(&${ns}::${e.name})`);
+        fbInits.push(`${e.name}(&${this.globalStorage(e.name, ns)})`);
       }
     }
     for (const block of fb.varBlocks) {
@@ -3847,7 +3863,7 @@ export class CodeGenerator {
         ).map((e) => [
           e.name.toUpperCase(),
           {
-            acc: `(&strucpp::${e.name})->`,
+            acc: `(&${this.globalStorage(e.name, "strucpp")})->`,
             composite: !isElementaryType(e.typeName),
           },
         ]),
@@ -4283,9 +4299,94 @@ export class CodeGenerator {
     );
   }
 
+  /**
+   * The C++ lvalue of configuration VAR_GLOBAL `name`: the file-scope object,
+   * or with `plcDataBlock` its member of the runtime-built `PlcData` block.
+   * `qualifier` is the namespace to name it from, when one is needed.
+   */
+  private globalStorage(name: string, qualifier?: string): string {
+    const scope = qualifier !== undefined ? `${qualifier}::` : "";
+    return this.options.plcDataBlock
+      ? `${scope}plc_data->${name}`
+      : `${scope}${name}`;
+  }
+
+  /**
+   * `PlcData`: every configuration VAR_GLOBAL, then the configuration. Emitted
+   * after the configuration class, the last type it needs. The leading header
+   * keeps every member's offset non-zero, so a debug entry's offset 0 still
+   * means "no variable".
+   */
+  private emitPlcDataDeclaration(config: ConfigurationDecl): void {
+    this.emitHeader(
+      "// Every configuration VAR_GLOBAL and the configuration, in one block the",
+    );
+    this.emitHeader(
+      "// runtime builds at start-up: strucpp_plc_data_create() takes storage from",
+    );
+    this.emitHeader(
+      "// strucpp_platform_plc_data_alloc() (aligned like malloc) and constructs it.",
+    );
+    this.emitHeader("struct PlcData {");
+    this.emitHeader("    uint32_t plc__header = 0;");
+    for (const member of this.plcDataMembers) this.emitHeader(member);
+    this.emitHeader(`    Configuration_${config.name} plc__config;`);
+    this.emitHeader("};");
+    this.emitHeader("");
+    this.emitHeader(
+      "/** Storage for the block: sizeof(PlcData) bytes, aligned like malloc; null if there is none. */",
+    );
+    this.emitHeader(
+      'extern "C" void* strucpp_platform_plc_data_alloc(size_t size);',
+    );
+    this.emitHeader(
+      "/** Builds the block once (later calls return true); false if there is no storage. */",
+    );
+    this.emitHeader('extern "C" bool strucpp_plc_data_create(void);');
+    this.emitHeader("");
+  }
+
+  /** The `PlcData` pointer and the function that builds the block. */
+  private emitPlcDataDefinition(): void {
+    this.emit("// The PLC data block (declared in the header).");
+    this.emit("PlcData* plc_data = nullptr;");
+    this.emit("");
+    this.emit(
+      "static_assert(alignof(PlcData) <= alignof(std::max_align_t), " +
+        '"PlcData needs more than malloc alignment");',
+    );
+    this.emit("");
+    this.emit('extern "C" bool strucpp_plc_data_create(void) {');
+    this.emit("    if (plc_data != nullptr) return true;");
+    this.emit(
+      "    void* storage = strucpp_platform_plc_data_alloc(sizeof(PlcData));",
+    );
+    this.emit("    if (storage == nullptr) return false;");
+    this.emit(
+      "    // Set before construction: constructors bind pointers into the block.",
+    );
+    this.emit("    plc_data = static_cast<PlcData*>(storage);");
+    this.emit("    new (storage) PlcData();");
+    this.emit("    return true;");
+    this.emit("}");
+    this.emit("");
+  }
+
   private emitFileScopeGlobals(phase: "early" | "late"): void {
-    if (phase === "early") this.fileScopeGlobalDefinitions = [];
+    if (phase === "early") {
+      this.fileScopeGlobalDefinitions = [];
+      this.plcDataMembers = [];
+    }
     if (!this.projectModel) return;
+    if (phase === "early" && this.options.plcDataBlock) {
+      this.emitHeader(
+        "// The configuration's VAR_GLOBALs and the configuration itself live in " +
+          "one block the runtime builds at start-up (see PlcData below).",
+      );
+      this.emitHeader("struct PlcData;");
+      this.emitHeader("extern PlcData* plc_data;");
+      this.emitHeader("");
+    }
     const seen = new Set<string>();
     let emittedAny = false;
     for (const config of this.projectModel.configurations) {
@@ -4309,7 +4410,11 @@ export class CodeGenerator {
           ? `${cppType}${rawInit}`
           : rawInit;
 
-        if (!emittedAny) {
+        if (this.options.plcDataBlock) {
+          this.plcDataMembers.push(
+            `    GlobalVar<${cppType}> ${gvar.name}{${initVal}};`,
+          );
+        } else if (!emittedAny) {
           this.emitHeader(
             "// Configuration VAR_GLOBAL storage — file-scope so every POU " +
               "(program or nested function block) reaches the one canonical " +
@@ -4323,10 +4428,12 @@ export class CodeGenerator {
         // is not constexpr — which on a board build cost several KB of flash
         // per POU. Still a real object: generated_debug.cpp takes `&name`
         // into PROGMEM.
-        this.emitHeader(`extern GlobalVar<${cppType}> ${gvar.name};`);
-        this.fileScopeGlobalDefinitions.push(
-          `GlobalVar<${cppType}> ${gvar.name}{${initVal}};`,
-        );
+        if (!this.options.plcDataBlock) {
+          this.emitHeader(`extern GlobalVar<${cppType}> ${gvar.name};`);
+          this.fileScopeGlobalDefinitions.push(
+            `GlobalVar<${cppType}> ${gvar.name}{${initVal}};`,
+          );
+        }
 
         // A located VAR_GLOBAL (`AT %IX/%QX/%MW ...`) enters the located-vars
         // descriptor so the runtime binds it to the I/O image. Owner "@config"
@@ -4435,7 +4542,9 @@ export class CodeGenerator {
       );
       if (prog && prog.varExternal.length > 0) {
         // Pass a pointer to each canonical GlobalVar<V> member.
-        const args = prog.varExternal.map((ext) => `&${ext.name}`).join(", ");
+        const args = prog.varExternal
+          .map((ext) => `&${this.globalStorage(ext.name)}`)
+          .join(", ");
         inits.push(`${inst.instanceName}(${args})`);
       } else {
         inits.push(`${inst.instanceName}()`);
@@ -10048,9 +10157,14 @@ export class CodeGenerator {
       this.emit("    (void)g;");
       this.emit("    return nullptr;");
     } else {
+      if (this.options.plcDataBlock) {
+        this.emit("    if (plc_data == nullptr) return nullptr;");
+      }
       this.emit("    switch (g) {");
       globals.forEach((g, i) =>
-        this.emit(`        case ${i}: return ${g.name}.lock_handle();`),
+        this.emit(
+          `        case ${i}: return ${this.globalStorage(g.name)}.lock_handle();`,
+        ),
       );
       this.emit("        default: return nullptr;");
       this.emit("    }");
@@ -10171,7 +10285,11 @@ export class CodeGenerator {
   ): string {
     const element =
       locVar.elementIndex === undefined ? "" : `[${locVar.elementIndex}]`;
-    return `${locVar.varName}${memberAccess}${element}.raw_ptr()`;
+    const storage =
+      locVar.programName === "@config"
+        ? this.globalStorage(locVar.varName)
+        : locVar.varName;
+    return `${storage}${memberAccess}${element}.raw_ptr()`;
   }
 
   /**

@@ -48,6 +48,13 @@
 #include <avr/pgmspace.h>
 #endif
 
+#if defined(STRUCPP_PLC_DATA_BLOCK) && STRUCPP_PLC_DATA_BLOCK
+namespace strucpp {
+struct PlcData;
+extern PlcData* plc_data;
+}  // namespace strucpp
+#endif
+
 namespace strucpp { namespace debug {
 
 // ---------------------------------------------------------------------------
@@ -489,18 +496,42 @@ constexpr PtrOps ptr_ops[TAG__COUNT] = {
  * already treats as "no such leaf". The IndirectRef lives with the tables (in
  * PROGMEM on AVR, read with the same near accessors as the entries).
  */
+#if defined(STRUCPP_PLC_DATA_BLOCK) && STRUCPP_PLC_DATA_BLOCK
+/**
+ * PLC data block (STRUCPP_PLC_DATA_BLOCK): a table location is an offset inside
+ * the block built at start-up, not an address. Null for offset 0 (no variable)
+ * and before the block exists, which every handler treats as "no such leaf".
+ */
+inline void* plc_data_location(const void* offset) noexcept {
+    if (offset == nullptr || plc_data == nullptr) return nullptr;
+    return reinterpret_cast<uint8_t*>(plc_data) + reinterpret_cast<uintptr_t>(offset);
+}
+#endif
+
 inline void* resolve_indirect(const void* p) noexcept {
     if (!p) return nullptr;
 #if defined(__AVR__)
     const uint8_t* r = static_cast<const uint8_t*>(p);
     const uintptr_t binding = pgm_read_word(r);
     const uintptr_t offset = pgm_read_word(r + sizeof(void*));
+#if defined(STRUCPP_PLC_DATA_BLOCK) && STRUCPP_PLC_DATA_BLOCK
+    void* const* slot = static_cast<void* const*>(plc_data_location(reinterpret_cast<const void*>(binding)));
+    if (!slot) return nullptr;
+    void* target = *slot;
+#else
     void* target = *reinterpret_cast<void* const*>(binding);
+#endif
 #else
     const IndirectRef* r = static_cast<const IndirectRef*>(p);
     const uintptr_t offset = r->offset;
     void* target;
+#if defined(STRUCPP_PLC_DATA_BLOCK) && STRUCPP_PLC_DATA_BLOCK
+    const void* slot = plc_data_location(r->binding);
+    if (!slot) return nullptr;
+    std::memcpy(&target, slot, sizeof target);
+#else
     std::memcpy(&target, r->binding, sizeof target);
+#endif
 #endif
     if (!target) return nullptr;
     return static_cast<uint8_t*>(target) + offset;
@@ -563,6 +594,9 @@ inline Entry read_entry(uint8_t arr, uint16_t elem) noexcept {
     out = debug_arrays[arr][elem];
 #endif
     if (out.flags & LEAF_FLAG_INDIRECT) out.ptr = resolve_indirect(out.ptr);
+#if defined(STRUCPP_PLC_DATA_BLOCK) && STRUCPP_PLC_DATA_BLOCK
+    else out.ptr = plc_data_location(out.ptr);
+#endif
     return out;
 }
 

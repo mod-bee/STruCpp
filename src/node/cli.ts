@@ -14,6 +14,7 @@
  *   --no-line-mapping         Disable line mapping
  *   --line-directives         Include #line directives
  *   --source-comments         Include ST source as comments
+ *   --plc-data-block          Globals + configuration in one runtime-built block
  *   -O, --optimize <level>    Optimization level (0, 1, 2)
  *   --build                   Compile to executable binary with interactive REPL
  *   --gpp <path>              Custom g++ path (default: g++)
@@ -72,6 +73,7 @@ interface CLIOptions {
   lineMapping: boolean;
   lineDirectives: boolean;
   sourceComments: boolean;
+  plcDataBlock: boolean;
   optimizationLevel: 0 | 1 | 2;
   showHelp: boolean;
   showVersion: boolean;
@@ -142,6 +144,7 @@ function parseArgs(args: string[]): CLIOptions {
     lineMapping: true,
     lineDirectives: false,
     sourceComments: false,
+    plcDataBlock: false,
     optimizationLevel: 0,
     showHelp: false,
     showVersion: false,
@@ -175,6 +178,8 @@ function parseArgs(args: string[]): CLIOptions {
       options.lineDirectives = true;
     } else if (arg === "--source-comments") {
       options.sourceComments = true;
+    } else if (arg === "--plc-data-block") {
+      options.plcDataBlock = true;
     } else if (arg === "-o" || arg === "--output") {
       i++;
       const nextArg = args[i];
@@ -306,6 +311,9 @@ Options:
   --no-line-mapping         Disable line mapping
   --line-directives         Include #line directives in output
   --source-comments         Include ST source as comments
+  --plc-data-block          Keep the configuration's globals and the configuration
+                            in one block the runtime builds at start-up (build
+                            with -DSTRUCPP_PLC_DATA_BLOCK=1)
   -O, --optimize <level>    Optimization level (0, 1, 2)
   --build                   Compile to executable with interactive REPL
   --gpp <path>              Custom g++ path (default: g++)
@@ -1042,6 +1050,7 @@ async function main(): Promise<void> {
     headerFileName,
     fileName: basename(inputPath),
   };
+  if (options.plcDataBlock) compileOptions.plcDataBlock = true;
   if (additionalSources.length > 0) {
     compileOptions.additionalSources = additionalSources;
   }
