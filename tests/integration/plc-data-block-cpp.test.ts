@@ -49,7 +49,7 @@ VAR_EXTERNAL
   total : DINT; flag : BOOL; pr : Pair; arr : ARRAY[1..3] OF INT;
   lamp : BOOL; shared : Counter;
 END_VAR
-VAR c : Counter; d : Doubler; v : DINT := 3; r : DINT; END_VAR
+VAR c : Counter; d : Doubler; v : DINT := 3; r : DINT; label : STRING := 'x'; END_VAR
 VAR RETAIN kept : DINT := 7; END_VAR
   c(step := 2);
   d(x := v);

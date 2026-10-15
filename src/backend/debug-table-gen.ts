@@ -2195,9 +2195,11 @@ function renderCpp(
     rootType: "::strucpp::PlcData",
     typeKey: "@plcdata",
   };
+  const blockNode = (expr: string): { type: string; offset: string } =>
+    offsetNode(blockRoot, leafSteps(`.${expr}`));
   const location = (expr: string, ptrType: string): string =>
     plcDataBlock
-      ? `(${ptrType})${offsetNode(blockRoot, leafSteps(`.${expr}`)).offset}`
+      ? `(${ptrType})${blockNode(expr).offset}`
       : `(${ptrType})&${expr}`;
   const lines: string[] = [];
   lines.push("// SPDX-License-Identifier: GPL-3.0-or-later");
@@ -2359,7 +2361,7 @@ function renderCpp(
           // qualifier through to the runtime so the write paths can honour it.
           indirectIndex.has(e)
             ? `    { (void*)&debug_indirect[${indirectIndex.get(e)}], TAG_${e.tagName}, ${entryFlags(e, indirectType.get(e))}, ${capLiteral(e, indirectType.get(e))} },  // ${e.path} (in-out)`
-            : `    { ${entryLocation.get(e)!}, TAG_${e.tagName}, ${entryFlags(e)}, ${capLiteral(e)} },  // ${e.path}`,
+            : `    { ${entryLocation.get(e)!}, TAG_${e.tagName}, ${entryFlags(e)}, ${capLiteral(e, plcDataBlock ? blockNode(e.cppExpr).type : undefined)} },  // ${e.path}`,
         );
       }
     }
