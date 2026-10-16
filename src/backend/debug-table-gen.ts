@@ -1961,11 +1961,17 @@ export function generateDebugTable(
  * calls bind it to — `"INST.PUMP.DATA" -> "INST.PUMPDATA"` — so the editor can
  * offer forcing at that variable (an in-out leaf is a read-only view of it).
  *
- * Only where it is one plain variable: every call of the instance in its POU
- * passes the same variable, named directly (fields and constant subscripts,
- * no computed index), and it is a local of that POU, a global, or the POU's
- * own in-out with a target of its own. Anything else has no target: the leaf
- * then shows whatever the last call passed.
+ * Only where it is one plain variable: every call of the instance passes the
+ * same variable, named directly (fields and constant subscripts — a literal or
+ * an integer constant — no computed index), and it is a local of the calling
+ * POU, a global, or that POU's own in-out with a target of its own. Anything
+ * else has no target: the leaf then shows whatever the last call passed.
+ *
+ * An instance may be a local of a program or block, or a global the program
+ * reaches through VAR_EXTERNAL (also an element of a global array of
+ * instances, `pumps[1](...)`). A global instance can be called from several
+ * programs, so its bindings are gathered across all of them before one is
+ * taken; a global instance of a user block is then walked for its own calls.
  */
 function computeInoutTargets(
   ast: CompilationUnit,
@@ -1978,13 +1984,51 @@ function computeInoutTargets(
   );
   const programs = new Map(ast.programs.map((p) => [p.name.toUpperCase(), p]));
   const globals = new Set<string>();
+  // UPPER name -> the block type of a global instance (the element type of an array of them).
+  const globalInstanceTypes = new Map<string, string>();
+  // UPPER name -> type of a global that is not an array (a scalar instance may be walked).
+  const globalScalarTypes = new Map<string, string>();
+  // UPPER name -> value of an integer constant, for constant subscripts.
+  const globalConstants = new Map<string, number>();
   for (const config of ast.configurations) {
     for (const block of config.varBlocks) {
       if (block.blockType !== "VAR_GLOBAL") continue;
       for (const d of block.declarations)
-        for (const n of d.names) globals.add(n.toUpperCase());
+        for (const n of d.names) {
+          const u = n.toUpperCase();
+          globals.add(u);
+          globalInstanceTypes.set(u, d.type.elementTypeName ?? d.type.name);
+          if (d.type.elementTypeName === undefined)
+            globalScalarTypes.set(u, d.type.name);
+          const value = block.isConstant
+            ? evalIntConst(d.initialValue)
+            : undefined;
+          if (value !== undefined) globalConstants.set(u, value);
+        }
     }
   }
+  // The constants a subscript may name where it is written: the POU's own, then the globals.
+  let localConstants = new Map<string, number>();
+  const constIndex = (ix: unknown): number | undefined => {
+    const literal = evalIntConst(ix);
+    if (literal !== undefined) return literal;
+    const e = ix as Partial<VariableExpression> | undefined;
+    if (
+      e?.kind !== "VariableExpression" ||
+      e.isDereference ||
+      (e.accessChain?.length ?? 0) > 0 ||
+      (e.fieldAccess?.length ?? 0) > 0 ||
+      typeof e.name !== "string"
+    )
+      return undefined;
+    const u = e.name.toUpperCase();
+    return localConstants.get(u) ?? globalConstants.get(u);
+  };
+  // Bindings of global instances, from every program: instance path -> in-out -> targets seen.
+  const globalBindings = new Map<
+    string,
+    Map<string, Set<string | undefined>>
+  >();
 
   /** Declared parameter order and in-out names of an FB type. */
   const paramsOf = (
@@ -2030,7 +2074,7 @@ function computeInoutTargets(
       else if (st.kind === "subscript") {
         const idx: number[] = [];
         for (const ix of st.indices) {
-          const v = evalIntConst(ix);
+          const v = constIndex(ix);
           if (v === undefined) return undefined;
           idx.push(v);
         }
@@ -2045,6 +2089,19 @@ function computeInoutTargets(
    * in-outs of the instances it calls. `ownInouts`: this POU's own in-outs, and
    * `externals`: its VAR_EXTERNAL names.
    */
+  /** Take each in-out's binding where every call agreed on one plain variable. */
+  const resolve = (
+    found: Map<string, Map<string, Set<string | undefined>>>,
+  ): void => {
+    for (const [instancePath, byInout] of found) {
+      for (const [slot, set] of byInout) {
+        if (set.size !== 1) continue;
+        const only = [...set][0];
+        if (only !== undefined) targets.set(`${instancePath}.${slot}`, only);
+      }
+    }
+  };
+
   const walkPou = (
     path: string,
     varBlocks: VarBlock[],
@@ -2053,27 +2110,55 @@ function computeInoutTargets(
   ): void => {
     if (depth > 32) return;
     const locals = new Map<string, string>(); // UPPER name -> type
+    const localInstanceTypes = new Map<string, string>(); // the element type of an array of instances
     const ownInouts = new Set<string>();
     const externals = new Set<string>();
+    const pouConstants = new Map<string, number>();
     for (const b of varBlocks) {
       for (const d of b.declarations) {
         for (const n of d.names) {
           const u = n.toUpperCase();
           if (b.blockType === "VAR_EXTERNAL") externals.add(u);
           else if (b.blockType === "VAR_IN_OUT") ownInouts.add(u);
-          else locals.set(u, d.type.name);
+          else {
+            locals.set(u, d.type.name);
+            localInstanceTypes.set(u, d.type.elementTypeName ?? d.type.name);
+            const value = b.isConstant
+              ? evalIntConst(d.initialValue)
+              : undefined;
+            if (value !== undefined) pouConstants.set(u, value);
+          }
         }
       }
     }
-    // child instance -> in-out -> set of target paths (undefined = not plain)
+    localConstants = pouConstants;
+    // instance path -> in-out -> set of target paths (undefined = not plain)
     const bindings = new Map<string, Map<string, Set<string | undefined>>>();
     for (const stmt of body) {
       walkAST(stmt, (node) => {
         if (node.kind !== "FunctionCallExpression") return;
         const call = node as FunctionCallExpression;
-        if (call.instance !== undefined) return;
-        const inst = call.functionName.toUpperCase();
-        const type = locals.get(inst);
+        const base = call.functionName.toUpperCase();
+        // An element of an array of instances, `pumps[1](...)`: its constant subscript.
+        let elementTail = "";
+        if (call.instance !== undefined) {
+          if (call.instance.kind !== "VariableExpression") return;
+          const tail = plainTail(call.instance);
+          if (tail === undefined) return;
+          elementTail = tail;
+        }
+        let type: string | undefined;
+        let instancePath: string;
+        let into = bindings;
+        if (localInstanceTypes.has(base)) {
+          type = localInstanceTypes.get(base);
+          instancePath = `${path}.${base}${elementTail}`;
+        } else if (externals.has(base) && globalInstanceTypes.has(base)) {
+          // A global instance: its debug path is its own name, and other programs may call it too.
+          type = globalInstanceTypes.get(base);
+          instancePath = `${base}${elementTail}`;
+          into = globalBindings;
+        } else return;
         if (type === undefined) return;
         const params = paramsOf(type);
         if (!params || params.inouts.size === 0) return;
@@ -2106,10 +2191,10 @@ function computeInoutTargets(
               } else if (locals.has(root)) target = `${path}.${root}${tail}`;
             }
           }
-          let byInout = bindings.get(inst);
+          let byInout = into.get(instancePath);
           if (!byInout)
-            bindings.set(
-              inst,
+            into.set(
+              instancePath,
               (byInout = new Map<string, Set<string | undefined>>()),
             );
           let set = byInout.get(slot);
@@ -2118,14 +2203,7 @@ function computeInoutTargets(
         }
       });
     }
-    for (const [inst, byInout] of bindings) {
-      for (const [slot, set] of byInout) {
-        if (set.size === 1) {
-          const only = [...set][0];
-          if (only !== undefined) targets.set(`${path}.${inst}.${slot}`, only);
-        }
-      }
-    }
+    resolve(bindings);
     // Descend into user FB instances declared here (scalar instances only).
     for (const [name, type] of locals) {
       const decl = fbDecls.get(type.toUpperCase());
@@ -2149,6 +2227,12 @@ function computeInoutTargets(
         }
       }
     }
+  }
+  // Global instances, once every program's calls are in: then their own calls (scalar user blocks).
+  resolve(globalBindings);
+  for (const [name, type] of globalScalarTypes) {
+    const decl = fbDecls.get(type.toUpperCase());
+    if (decl) walkPou(name, decl.varBlocks, decl.body, 1);
   }
   return targets;
 }
