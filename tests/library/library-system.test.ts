@@ -6,12 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import {
-  mkdirSync,
-  writeFileSync,
-  existsSync,
-  rmSync,
-} from "fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileLibrary } from "../../src/library/library-compiler.js";
@@ -104,6 +99,101 @@ describe("Library System", () => {
       ]);
     });
 
+    it("carries the declared case of blocks, functions, pins, methods and enumerators", () => {
+      // IEC 61131-3 6.1.2: case is not significant, so the compiler folds every
+      // name and the C++ keeps the folded one. A tool showing the library (an
+      // editor's block pins) needs the spelling the author wrote: `myPin`,
+      // not `MYPIN`.
+      const result = compileLibrary(
+        [
+          {
+            source: `
+              TYPE E_Mode : (modeOff, AUTO); END_TYPE
+              TYPE E_CAPS : (A, B); END_TYPE
+              INTERFACE I_Pump
+                METHOD IsReady : BOOL
+                END_METHOD
+              END_INTERFACE
+              FUNCTION_BLOCK FB_Pump IMPLEMENTS I_Pump
+                VAR_INPUT myPin : BOOL; RUN : BOOL; END_VAR
+                VAR_OUTPUT NotOff : BOOL; END_VAR
+                VAR stepCount : INT; END_VAR
+                METHOD PUBLIC IsReady : BOOL
+                  IsReady := NotOff;
+                END_METHOD
+                METHOD PUBLIC SetSpeed
+                  VAR_INPUT newSpeed : INT; END_VAR
+                END_METHOD
+                NotOff := myPin AND RUN;
+              END_FUNCTION_BLOCK
+              FUNCTION Scale_Value : REAL
+                VAR_INPUT rawValue : INT; END_VAR
+                Scale_Value := INT_TO_REAL(rawValue);
+              END_FUNCTION
+            `,
+            fileName: "pump.st",
+          },
+          {
+            source: "VAR_GLOBAL\n\tplantSpeed : INT;\nEND_VAR",
+            fileName: "vars.gvl.st",
+          },
+        ],
+        { name: "pump-lib", version: "1.0.0", namespace: "pump" },
+      );
+
+      expect(result.success).toBe(true);
+      const m = result.manifest;
+      const fb = m.functionBlocks.find((f) => f.name === "FB_PUMP");
+      expect(fb?.declaredName).toBe("FB_Pump");
+      expect(fb?.inputs.map((v) => [v.name, v.declaredName])).toEqual([
+        ["MYPIN", "myPin"],
+        ["RUN", undefined],
+      ]);
+      expect(fb?.outputs[0]).toMatchObject({
+        name: "NOTOFF",
+        declaredName: "NotOff",
+      });
+      expect(fb?.locals?.[0]).toMatchObject({
+        name: "STEPCOUNT",
+        declaredName: "stepCount",
+      });
+      const setSpeed = fb?.methods?.find((x) => x.name === "SETSPEED");
+      expect(setSpeed?.declaredName).toBe("SetSpeed");
+      expect(setSpeed?.inputs[0]).toMatchObject({
+        name: "NEWSPEED",
+        declaredName: "newSpeed",
+      });
+
+      const iface = m.interfaces?.find((i) => i.name === "I_PUMP");
+      expect(iface?.declaredName).toBe("I_Pump");
+      expect(iface?.methods[0]?.declaredName).toBe("IsReady");
+
+      const fn = m.functions.find((f) => f.name === "SCALE_VALUE");
+      expect(fn?.declaredName).toBe("Scale_Value");
+      expect(fn?.parameters[0]).toMatchObject({
+        name: "RAWVALUE",
+        declaredName: "rawValue",
+      });
+
+      expect(m.globals?.[0]).toMatchObject({
+        name: "PLANTSPEED",
+        declaredName: "plantSpeed",
+      });
+
+      const mode = m.types.find((t) => t.name === "E_MODE");
+      expect(mode?.members).toEqual(["MODEOFF", "AUTO"]);
+      expect(mode?.declaredMembers).toEqual(["modeOff", "AUTO"]);
+      // All caps: nothing to record.
+      expect(
+        m.types.find((t) => t.name === "E_CAPS")?.declaredMembers,
+      ).toBeUndefined();
+
+      // Display only: the C++ is the folded names, as before.
+      const cpp = result.headerCode + result.cppCode;
+      expect(cpp).toContain("MYPIN");
+      expect(cpp).not.toContain("myPin");
+    });
+
     it("should compile library with types", () => {
       const result = compileLibrary(
         [
@@ -177,7 +267,12 @@ describe("Library System", () => {
             fileName: "f.st",
           },
         ],
-        { name: "src-lib", version: "1.0.0", namespace: "src", noSource: false },
+        {
+          name: "src-lib",
+          version: "1.0.0",
+          namespace: "src",
+          noSource: false,
+        },
       );
 
       expect(result.success).toBe(true);
@@ -199,7 +294,12 @@ describe("Library System", () => {
             fileName: "f.st",
           },
         ],
-        { name: "nosrc-lib", version: "1.0.0", namespace: "nosrc", noSource: true },
+        {
+          name: "nosrc-lib",
+          version: "1.0.0",
+          namespace: "nosrc",
+          noSource: true,
+        },
       );
 
       expect(result.success).toBe(true);
@@ -241,7 +341,9 @@ describe("Library System", () => {
       // Chunks own each symbol's emit slice. Concat them and verify
       // the resulting text is pure namespace-body content — no
       // wrapper, no #include — but does contain the function.
-      const concatHeader = result.archive.chunks.map((c) => c.header).join("\n");
+      const concatHeader = result.archive.chunks
+        .map((c) => c.header)
+        .join("\n");
       expect(concatHeader).not.toContain("#pragma once");
       expect(concatHeader).not.toContain("#include");
       expect(concatHeader).not.toMatch(/^namespace\s/m);
@@ -1118,14 +1220,8 @@ describe("Library System", () => {
         headers: [],
         isBuiltin: false,
       };
-      writeFileSync(
-        join(dir, "lib-a.stlib.json"),
-        JSON.stringify(manifest1),
-      );
-      writeFileSync(
-        join(dir, "lib-b.stlib.json"),
-        JSON.stringify(manifest2),
-      );
+      writeFileSync(join(dir, "lib-a.stlib.json"), JSON.stringify(manifest1));
+      writeFileSync(join(dir, "lib-b.stlib.json"), JSON.stringify(manifest2));
       // Non-manifest file should be ignored
       writeFileSync(join(dir, "readme.txt"), "not a manifest");
 

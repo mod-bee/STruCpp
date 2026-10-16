@@ -542,6 +542,7 @@ export class ASTBuilder {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
+    const declaredName = nameToken ? declaredImageOf(nameToken) : "";
 
     // Scan for constants before building var blocks (for array dimension resolution)
     this.scanVarBlocksForConstants(getAllNodes(children.varBlock));
@@ -566,6 +567,7 @@ export class ASTBuilder {
       kind: "ProgramDeclaration",
       sourceSpan: nodeToSourceSpan(node),
       name,
+      declaredName,
       varBlocks,
       body,
     };
@@ -580,6 +582,9 @@ export class ASTBuilder {
     const idOrKwNodes = getAllNodes(children.identifierOrKeyword);
     const name = idOrKwNodes[0]
       ? getIdentifierOrKeywordImage(idOrKwNodes[0])
+      : "";
+    const declaredName = idOrKwNodes[0]
+      ? getIdentifierOrKeywordDeclared(idOrKwNodes[0])
       : "";
 
     // Get return type from the dataType subrule
@@ -621,6 +626,7 @@ export class ASTBuilder {
       kind: "FunctionDeclaration",
       sourceSpan: nodeToSourceSpan(node),
       name,
+      declaredName,
       returnType,
       varBlocks,
       body,
@@ -637,6 +643,9 @@ export class ASTBuilder {
     const idOrKwNodes = getAllNodes(children.identifierOrKeyword);
     const name = idOrKwNodes[0]
       ? getIdentifierOrKeywordImage(idOrKwNodes[0])
+      : "";
+    const declaredName = idOrKwNodes[0]
+      ? getIdentifierOrKeywordDeclared(idOrKwNodes[0])
       : "";
 
     // Check for ABSTRACT/FINAL modifiers
@@ -697,6 +706,7 @@ export class ASTBuilder {
       kind: "FunctionBlockDeclaration",
       sourceSpan: nodeToSourceSpan(node),
       name,
+      declaredName,
       isAbstract,
       isFinal,
       varBlocks,
@@ -715,6 +725,9 @@ export class ASTBuilder {
     const children = node.children as CstChildren;
     const allIdentifiers = getAllTokens(children.Identifier);
     const name = allIdentifiers[0]?.image ?? "";
+    const declaredName = allIdentifiers[0]
+      ? declaredImageOf(allIdentifiers[0])
+      : "";
 
     // Check for EXTENDS clause
     let extendsList: string[] | undefined;
@@ -735,6 +748,7 @@ export class ASTBuilder {
       kind: "InterfaceDeclaration",
       sourceSpan: nodeToSourceSpan(node),
       name,
+      declaredName,
       methods,
       ...(extendsList !== undefined ? { extends: extendsList } : {}),
     };
@@ -748,6 +762,7 @@ export class ASTBuilder {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
+    const declaredName = nameToken ? declaredImageOf(nameToken) : "";
 
     // Optional return type
     let returnType: TypeReference | undefined;
@@ -766,6 +781,7 @@ export class ASTBuilder {
       kind: "MethodDeclaration",
       sourceSpan: nodeToSourceSpan(node),
       name,
+      declaredName,
       visibility: "PUBLIC",
       isAbstract: true,
       isFinal: false,
@@ -783,6 +799,7 @@ export class ASTBuilder {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
+    const declaredName = nameToken ? declaredImageOf(nameToken) : "";
 
     // Access specifier: PROTECTED when none is written (IEC 61131-3
     // 6.6.5.4.3 rule 5, 6.6.5.9; for function blocks 6.6.7.2.5).
@@ -823,6 +840,7 @@ export class ASTBuilder {
       kind: "MethodDeclaration",
       sourceSpan: nodeToSourceSpan(node),
       name,
+      declaredName,
       visibility,
       isAbstract,
       isFinal,
@@ -1100,6 +1118,7 @@ export class ASTBuilder {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
+    const declaredName = nameToken ? declaredImageOf(nameToken) : "";
 
     // Check for explicit value: := expression
     let value: Expression | undefined;
@@ -1115,6 +1134,7 @@ export class ASTBuilder {
       kind: "EnumMember",
       sourceSpan: nodeToSourceSpan(node),
       name,
+      declaredName,
       ...(value !== undefined ? { value } : {}),
     };
   }

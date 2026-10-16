@@ -158,13 +158,30 @@ function serializeLocal(
   block: VarBlock,
   ctx: MemberManglingContext,
 ): LibraryVarType {
-  const entry = serializeVarType(name, decl.type);
+  const entry = {
+    ...serializeVarType(name, decl.type),
+    ...declaredNameOf(name, decl.declaredNames?.[decl.names.indexOf(name)]),
+  };
   const cppName = mangledMemberName(name, decl.type.name, ctx);
   if (cppName !== name) entry.cppName = cppName;
   if (block.isConstant) entry.readOnly = true;
   if (block.isRetain) entry.retain = true;
   if (block.isNonRetain) entry.nonRetain = true;
   return entry;
+}
+
+/**
+ * `{ declaredName }` when the declared spelling says something the folded name
+ * does not (see `LibraryVarType.declaredName`), so an all-caps library adds
+ * nothing to its manifest.
+ */
+function declaredNameOf(
+  name: string,
+  declared: string | undefined,
+): { declaredName?: string } {
+  return declared !== undefined && declared !== "" && declared !== name
+    ? { declaredName: declared }
+    : {};
 }
 
 /** Match a top-of-line POU header. */
@@ -339,6 +356,7 @@ function buildDerivedFBEntry(
   const methods = publicMethodsOf(lineage);
   return {
     name: fb.name,
+    ...declaredNameOf(fb.name, fb.declaredName),
     inputs: parts.flatMap((p) => p.inputs),
     outputs: parts.flatMap((p) => p.outputs),
     inouts,
@@ -382,8 +400,11 @@ function buildMethodEntry(method: MethodDeclaration): LibraryMethodEntry {
       .filter((b) => b.blockType === blockType)
       .flatMap((b) =>
         b.declarations.flatMap((d) =>
-          d.names.map((n) => {
-            const entry = serializeVarType(n, d.type);
+          d.names.map((n, i) => {
+            const entry: LibraryVarType = {
+              ...serializeVarType(n, d.type),
+              ...declaredNameOf(n, d.declaredNames?.[i]),
+            };
             if (blockType === "VAR_INPUT" && d.initialValue !== undefined) {
               const initial = serializeInitialValue(d.initialValue);
               if (initial !== undefined) entry.initialValue = initial;
@@ -394,6 +415,7 @@ function buildMethodEntry(method: MethodDeclaration): LibraryMethodEntry {
       );
   return {
     name: method.name,
+    ...declaredNameOf(method.name, method.declaredName),
     ...(method.returnType !== undefined
       ? { returnType: method.returnType.name }
       : {}),
@@ -413,6 +435,7 @@ function buildInterfaceEntry(
 ): LibraryInterfaceEntry {
   return {
     name: iface.name,
+    ...declaredNameOf(iface.name, iface.declaredName),
     ...(iface.extends !== undefined && iface.extends.length > 0
       ? { extends: [...iface.extends] }
       : {}),
@@ -430,12 +453,14 @@ function buildInterfaceEntry(
 function buildFBEntry(
   fb: {
     name: string;
+    declaredName?: string;
     varBlocks: Array<{
       blockType: string;
       isRetain?: boolean;
       isNonRetain?: boolean;
       declarations: Array<{
         names: string[];
+        declaredNames?: string[];
         type: TypeReference;
         initialValue?: Expression;
         edge?: "R_EDGE" | "F_EDGE";
@@ -449,8 +474,11 @@ function buildFBEntry(
       .filter((b) => b.blockType === blockType)
       .flatMap((b) =>
         b.declarations.flatMap((d) =>
-          d.names.map((n) => {
-            const entry = serializeVarType(n, d.type);
+          d.names.map((n, i) => {
+            const entry: LibraryVarType = {
+              ...serializeVarType(n, d.type),
+              ...declaredNameOf(n, d.declaredNames?.[i]),
+            };
             // The C++ member, when the library's codegen mangled it (a pin
             // named like a method of the block) — see serializeLocal().
             if (mangling !== undefined) {
@@ -478,6 +506,7 @@ function buildFBEntry(
   const inouts = varsOfBlock("VAR_IN_OUT");
   return {
     name: fb.name,
+    ...declaredNameOf(fb.name, fb.declaredName),
     inputs: varsOfBlock("VAR_INPUT"),
     outputs: varsOfBlock("VAR_OUTPUT"),
     inouts,
@@ -801,6 +830,7 @@ export function compileLibrary(
         tagCategory(
           {
             name: fn.name,
+            ...declaredNameOf(fn.name, fn.declaredName),
             returnType: fn.returnType.name,
             ...(typeof fn.returnType.maxLength === "number"
               ? { returnMaxLength: fn.returnType.maxLength }
@@ -815,8 +845,9 @@ export function compileLibrary(
                     decl.initialValue !== undefined
                       ? serializeInitialValue(decl.initialValue)
                       : undefined;
-                  return decl.names.map((name) => ({
+                  return decl.names.map((name, i) => ({
                     ...serializeVarType(name, decl.type),
+                    ...declaredNameOf(name, decl.declaredNames?.[i]),
                     direction:
                       block.blockType === "VAR_OUTPUT"
                         ? "output"
@@ -877,6 +908,7 @@ export function compileLibrary(
         declaredName?: string;
         fields?: LibraryStructField[];
         members?: string[];
+        declaredMembers?: string[];
         values?: Array<string | null>;
         defaultValue?: string;
         baseType?: string;
@@ -889,7 +921,18 @@ export function compileLibrary(
       // Export the enumerators, so a consumer can name one. The C++ chunk has
       // them, but the symbol table is built from the manifest.
       if (t.definition.kind === "EnumDefinition") {
-        entry.members = t.definition.members.map((m) => m.name);
+        const members = t.definition.members;
+        entry.members = members.map((m) => m.name);
+        if (
+          members.some(
+            (m) => declaredNameOf(m.name, m.declaredName).declaredName,
+          )
+        ) {
+          entry.declaredMembers = members.map(
+            (m) =>
+              declaredNameOf(m.name, m.declaredName).declaredName ?? m.name,
+          );
+        }
         // Explicit values (6.4.4.3) and the type's own initial value, so a
         // consumer evaluates and initialises the type as the library does.
         if (t.definition.members.some((m) => m.value !== undefined)) {
@@ -914,12 +957,9 @@ export function compileLibrary(
       if (t.definition.kind === "StructDefinition") {
         entry.fields = t.definition.fields.flatMap((decl) =>
           decl.names.map((name, i) => {
-            const declared = decl.declaredNames?.[i];
             return {
               ...serializeVarType(name, decl.type),
-              ...(declared !== undefined && declared !== name
-                ? { declaredName: declared }
-                : {}),
+              ...declaredNameOf(name, decl.declaredNames?.[i]),
             };
           }),
         );
@@ -943,10 +983,11 @@ export function compileLibrary(
     // importing program merges all libraries' globals into one global scope.
     globals: ast.globalVarBlocks.flatMap((block) =>
       block.declarations.flatMap((decl) =>
-        decl.names.map((name) =>
+        decl.names.map((name, i) =>
           tagCategory(
             {
               name,
+              ...declaredNameOf(name, decl.declaredNames?.[i]),
               type: decl.type.name,
               ...(block.isConstant ? { constant: true } : {}),
             },

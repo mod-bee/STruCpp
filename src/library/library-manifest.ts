@@ -25,6 +25,11 @@ import type { ReferenceKind } from "../frontend/ast.js";
 export interface LibraryFunctionEntry {
   /** Function name */
   name: string;
+  /** `name` as its declaration spelled it, when that differs from the folded
+   *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
+   *  a consumer matches, links and generates code with `name`. Optional: an
+   *  older archive, or an all-caps declaration, has only `name`. */
+  declaredName?: string;
   /** Return type name (concrete IEC type or generic — see above) */
   returnType: string;
   /** Declared length of a `STRING(n)` / `WSTRING(n)` return type. */
@@ -75,6 +80,11 @@ export interface LibraryFunctionEntry {
 export interface LibraryVarType {
   /** Type name */
   name: string;
+  /** `name` as its declaration spelled it, when that differs from the folded
+   *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
+   *  a consumer matches, links and generates code with `name`. Optional: an
+   *  older archive, or an all-caps declaration, has only `name`. */
+  declaredName?: string;
   /** Type kind for the variable itself */
   type: string;
   /** Array dimensions for inline array types (e.g., ARRAY[0..255] OF BYTE) */
@@ -140,6 +150,11 @@ export interface LibraryVarType {
 export interface LibraryMethodEntry {
   /** Method name. */
   name: string;
+  /** `name` as its declaration spelled it, when that differs from the folded
+   *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
+   *  a consumer matches, links and generates code with `name`. Optional: an
+   *  older archive, or an all-caps declaration, has only `name`. */
+  declaredName?: string;
   /** Result type; absent for a method that returns nothing. */
   returnType?: string;
   /** Declared length of a `STRING(n)` result. */
@@ -162,6 +177,11 @@ export interface LibraryMethodEntry {
 export interface LibraryInterfaceEntry {
   /** Interface name. */
   name: string;
+  /** `name` as its declaration spelled it, when that differs from the folded
+   *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
+   *  a consumer matches, links and generates code with `name`. Optional: an
+   *  older archive, or an all-caps declaration, has only `name`. */
+  declaredName?: string;
   /** Interfaces it EXTENDS, as declared. */
   extends?: string[];
   /** Its own method prototypes (not the inherited ones). */
@@ -178,6 +198,11 @@ export interface LibraryInterfaceEntry {
 export interface LibraryFBEntry {
   /** Function block name */
   name: string;
+  /** `name` as its declaration spelled it, when that differs from the folded
+   *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
+   *  a consumer matches, links and generates code with `name`. Optional: an
+   *  older archive, or an all-caps declaration, has only `name`. */
+  declaredName?: string;
   /**
    * Body language, when the block is NOT compiled by STruC++.
    *
@@ -268,7 +293,7 @@ export interface LibraryFBEntry {
  */
 /** A struct member in a manifest: its full type (array bounds, string length)
  *  so a consumer lays it out as the library declared it. */
-export type LibraryStructField = LibraryVarType & { declaredName?: string };
+export type LibraryStructField = LibraryVarType;
 
 export interface LibraryTypeEntry {
   /** Type name */
@@ -291,6 +316,9 @@ export interface LibraryTypeEntry {
    *  the consumer knows the type is an enum but not what may be written into
    *  one, so every enumerator reads as undeclared. Optional. */
   members?: string[];
+  /** `members` as the type declared them, parallel to `members`; present only
+   *  when one differs from its folded form. For display, as `declaredName`. */
+  declaredMembers?: string[];
   /** The explicit value of each enumerator, as ST text, parallel to
    *  `members` (`null` where none was written): `USINT (A := 5, B := 7)`
    *  keeps 5 and 7, so a consumer evaluates the members as the library does
@@ -323,6 +351,11 @@ export interface LibraryTypeEntry {
 export interface LibraryGlobalEntry {
   /** Global variable name (as declared). */
   name: string;
+  /** `name` as its declaration spelled it, when that differs from the folded
+   *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
+   *  a consumer matches, links and generates code with `name`. Optional: an
+   *  older archive, or an all-caps declaration, has only `name`. */
+  declaredName?: string;
   /** Declared type name (elementary or a library type, e.g. CONSTANTS_MATH). */
   type: string;
   /** True for `VAR_GLOBAL CONSTANT` entries. */

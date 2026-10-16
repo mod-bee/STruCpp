@@ -148,6 +148,8 @@ export interface CompilationUnit extends ASTNode {
 export interface ProgramDeclaration extends ASTNode {
   kind: "ProgramDeclaration";
   name: string;
+  /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
+  declaredName?: string;
   varBlocks: VarBlock[];
   body: Statement[];
 }
@@ -158,6 +160,8 @@ export interface ProgramDeclaration extends ASTNode {
 export interface FunctionDeclaration extends ASTNode {
   kind: "FunctionDeclaration";
   name: string;
+  /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
+  declaredName?: string;
   returnType: TypeReference;
   varBlocks: VarBlock[];
   body: Statement[];
@@ -169,6 +173,8 @@ export interface FunctionDeclaration extends ASTNode {
 export interface FunctionBlockDeclaration extends ASTNode {
   kind: "FunctionBlockDeclaration";
   name: string;
+  /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
+  declaredName?: string;
   isAbstract: boolean;
   isFinal: boolean;
   extends?: string;
@@ -196,6 +202,8 @@ export type Visibility = "PUBLIC" | "PRIVATE" | "PROTECTED";
 export interface MethodDeclaration extends ASTNode {
   kind: "MethodDeclaration";
   name: string;
+  /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
+  declaredName?: string;
   visibility: Visibility;
   isAbstract: boolean;
   isFinal: boolean;
@@ -211,6 +219,8 @@ export interface MethodDeclaration extends ASTNode {
 export interface InterfaceDeclaration extends ASTNode {
   kind: "InterfaceDeclaration";
   name: string;
+  /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
+  declaredName?: string;
   extends?: string[];
   methods: MethodDeclaration[];
 }
@@ -394,6 +404,8 @@ export interface StructDefinition extends ASTNode {
 export interface EnumMember extends ASTNode {
   kind: "EnumMember";
   name: string;
+  /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
+  declaredName?: string;
   value?: Expression;
 }
 
