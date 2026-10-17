@@ -1315,6 +1315,52 @@ template<typename A, typename B, typename C, enable_if_string_args<A, B, C> = 0>
 inline auto LIMIT(const A& mn, const B& in, const C& mx) noexcept {
     return MIN(MAX(in, mn), mx);
 }
+
+// SEL and MUX on STRINGs of different lengths. IEC 61131-3 6.6.2.5.10 overloads
+// the selection functions on all data types (Table 32: SEL on ANY, MUX on
+// ANY_ELEMENTARY), and STRING(32) and STRING(64) are both the type STRING. The
+// result is as long as the longest input, as for MAX and MIN above. Variables
+// and values of string types only (not literals, which convert to any length):
+// the general templates handle one type, and literals, as before.
+template<typename T> struct iec_sized_string : std::false_type {};
+template<size_t N> struct iec_sized_string<IECString<N>> : std::true_type {};
+template<size_t N> struct iec_sized_string<IECStringVar<N>> : std::true_type {};
+template<size_t N> struct iec_sized_string<IECVar<IECString<N>>> : std::true_type {};
+
+/** Two or more string variables or values, not all of one type. */
+template<typename... Ts> struct iec_mixed_sized_strings : std::false_type {};
+template<typename A, typename B, typename... Rest>
+struct iec_mixed_sized_strings<A, B, Rest...>
+    : std::integral_constant<bool,
+          iec_sized_string<std::decay_t<A>>::value && iec_sized_string<std::decay_t<B>>::value &&
+              (iec_sized_string<std::decay_t<Rest>>::value && ...) &&
+              !(std::is_same<std::decay_t<A>, std::decay_t<B>>::value &&
+                (std::is_same<std::decay_t<A>, std::decay_t<Rest>>::value && ...))> {};
+
+/** The longest of the strings' lengths. */
+template<typename... Ts>
+constexpr size_t iec_longest_string_length() noexcept {
+    size_t n = 0;
+    ((n = iec_string_arg_t<std::decay_t<Ts>>::length > n ? iec_string_arg_t<std::decay_t<Ts>>::length : n), ...);
+    return n;
+}
+
+template<typename A, typename B, std::enable_if_t<iec_mixed_sized_strings<A, B>::value, int> = 0>
+inline auto SEL(IEC_BOOL g, const A& in0, const B& in1) noexcept {
+    using R = IECString<iec_longest_string_length<A, B>()>;
+    return iec_unwrap(g) ? R(iec_as_string(in1)) : R(iec_as_string(in0));
+}
+
+/** MUX, as the general one: input K, the last when K is out of range. */
+template<typename A, typename B, typename... Rest,
+         std::enable_if_t<iec_mixed_sized_strings<A, B, Rest...>::value, int> = 0>
+inline auto MUX(IEC_INT k, const A& in0, const B& in1, const Rest&... rest) noexcept {
+    using R = IECString<iec_longest_string_length<A, B, Rest...>()>;
+    const R in[] = {R(iec_as_string(in0)), R(iec_as_string(in1)), R(iec_as_string(rest))...};
+    const auto n = static_cast<decltype(iec_unwrap(k))>(sizeof...(Rest) + 2);
+    const auto i = iec_unwrap(k);
+    return (i >= 0 && i < n) ? in[i] : in[n - 1];
+}
 #undef STRUCPP_STRING_COMPARE_EXTENSIBLE
 
 // =============================================================================

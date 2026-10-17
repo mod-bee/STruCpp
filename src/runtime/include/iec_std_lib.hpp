@@ -467,7 +467,7 @@ inline auto LIMIT(T1 mn, T2 in, T3 mx) noexcept
 
 template<typename T, typename U,
     std::enable_if_t<!std::is_same<std::decay_t<T>, std::decay_t<U>>::value &&
-                     !is_same_iec_enum_v<T, U>, int> = 0>
+                     !is_same_iec_enum_v<T, U> && !iec_mixed_sized_strings<T, U>::value, int> = 0>
 inline auto SEL(IEC_BOOL g, T in0, U in1) noexcept {
     using CT = std::common_type_t<decltype(iec_unwrap(in0)), decltype(iec_unwrap(in1))>;
     return iec_unwrap(g) ? static_cast<CT>(iec_unwrap(in1)) : static_cast<CT>(iec_unwrap(in0));
@@ -501,7 +501,8 @@ inline T MUX([[maybe_unused]] IEC_INT k, T in0) noexcept {
     return in0;
 }
 
-template<typename T, typename... Args>
+template<typename T, typename... Args,
+         std::enable_if_t<!iec_mixed_sized_strings<T, T, Args...>::value, int> = 0>
 inline T MUX(IEC_INT k, T in0, T in1, Args... rest) noexcept {
     if (iec_unwrap(k) == 0) return in0;
     return MUX(IEC_INT(iec_unwrap(k) - 1), in1, rest...);
