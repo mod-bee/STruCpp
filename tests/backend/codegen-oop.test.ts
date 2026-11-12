@@ -481,10 +481,12 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
         PROGRAM Main END_PROGRAM
       `);
 
-      // Header: getter and setter declarations
-      expect(result.headerCode).toContain("virtual IEC_INT get_SPEED() const;");
+      // Header: getter and setter declarations, plain member functions in a
+      // block nothing can override (isSealedFb)
+      expect(result.headerCode).not.toContain("virtual IEC_INT get_SPEED");
+      expect(result.headerCode).toContain("    IEC_INT get_SPEED() const;");
       expect(result.headerCode).toContain(
-        "virtual void set_SPEED(IEC_INT SPEED);",
+        "    void set_SPEED(IEC_INT SPEED);",
       );
 
       // Implementation: getter body
@@ -512,7 +514,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
         PROGRAM Main END_PROGRAM
       `);
 
-      expect(result.headerCode).toContain("virtual IEC_INT get_COUNT() const;");
+      expect(result.headerCode).toContain("    IEC_INT get_COUNT() const;");
       // No setter should be generated
       expect(result.headerCode).not.toContain("set_COUNT");
     });
@@ -531,7 +533,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       `);
 
       expect(result.headerCode).toContain(
-        "virtual void set_TARGET(IEC_REAL TARGET);",
+        "    void set_TARGET(IEC_REAL TARGET);",
       );
       // No getter should be generated
       expect(result.headerCode).not.toContain("get_TARGET");
@@ -1035,7 +1037,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
 
       // Property
       expect(result.headerCode).toContain(
-        "virtual IEC_REAL get_VALUE() const;",
+        "    IEC_REAL get_VALUE() const;",
       );
 
       // VAR_INST mangled
