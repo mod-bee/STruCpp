@@ -378,6 +378,10 @@ public:
      */
     void bind(IECVar<T>& var) noexcept { ptr_ = &var; }
 
+    /** Bound to a variable (CODESYS __ISVALIDREF). */
+    bool is_valid() const noexcept { return ptr_ != nullptr; }
+
+
     /**
      * Implicit value access (get) - reads from target
      */

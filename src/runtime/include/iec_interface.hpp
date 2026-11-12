@@ -128,4 +128,35 @@ private:
     I* ptr_;
 };
 
+/**
+ * The id __iec_query answers with the instance's own address (CODESYS
+ * __QUERYPOINTER).
+ */
+struct IEC_INSTANCE_ADDRESS {};
+
+/**
+ * CODESYS `__QUERYINTERFACE(source, dest)`: dest references the instance
+ * `source` refers to when it implements dest's interface, else NULL; TRUE
+ * when it does.
+ */
+template<typename R, typename S>
+bool iec_query_interface(R& dest, S* source) noexcept {
+    dest = R::attempt(source);
+    return !dest.is_null();
+}
+
+/**
+ * CODESYS `__QUERYPOINTER(source, dest)`: dest points at the instance
+ * `source` refers to (untyped: the program names the type), NULL for none.
+ */
+template<typename P, typename S>
+bool iec_query_pointer(P& dest, S* source) noexcept {
+    void* instance = source != nullptr
+        ? source->__iec_query(IEC_TYPE_ID<IEC_INSTANCE_ADDRESS>::get())
+        : nullptr;
+    dest = instance;
+    return instance != nullptr;
+}
+
 }  // namespace strucpp
+

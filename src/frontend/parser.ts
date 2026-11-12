@@ -202,9 +202,24 @@ export class STParser extends CstParser {
       this.CONSUME(tokens.EXTENDS);
       this.AT_LEAST_ONE_SEP({
         SEP: tokens.Comma,
-        DEF: () => this.CONSUME2(tokens.Identifier),
+        DEF: () => {
+          const base = this.CONSUME2(tokens.Identifier);
+          // CODESYS `EXTENDS __SYSTEM.IQueryInterface` (online help,
+          // "Operator: __QUERYINTERFACE"): every interface is queryable here.
+          this.OPTION2({
+            GATE: () =>
+              base.image.toUpperCase() === "__SYSTEM" &&
+              this.LA(1).tokenType === tokens.Dot &&
+              this.LA(2).image.toUpperCase() === "IQUERYINTERFACE",
+            DEF: () => {
+              this.CONSUME(tokens.Dot);
+              this.CONSUME3(tokens.Identifier, { LABEL: "systemInterface" });
+            },
+          });
+        },
       });
     });
+
     // Interface methods (abstract, no body)
     this.MANY(() => {
       this.SUBRULE(this.interfaceMethodDeclaration);

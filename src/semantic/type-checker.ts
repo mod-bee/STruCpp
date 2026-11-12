@@ -31,6 +31,7 @@ import type {
   VarBlock,
   MethodDeclaration,
   VarDeclaration,
+  TypeReference,
 } from "../frontend/ast.js";
 import type { SymbolTables, Scope, VariableSymbol } from "./symbol-table.js";
 import type { StdFunctionRegistry } from "./std-function-registry.js";
@@ -58,6 +59,7 @@ import {
 } from "./type-utils.js";
 import { stripEnEno } from "../ast-utils.js";
 import {
+  fbInterfaces,
   findFunctionBlock,
   findInterface,
   implementsInterface,
@@ -1344,7 +1346,19 @@ export class TypeChecker {
 
     const nameUpper = expr.functionName.toUpperCase();
 
+    if (
+      nameUpper === "__ISVALIDREF" ||
+      nameUpper === "__QUERYINTERFACE" ||
+      nameUpper === "__QUERYPOINTER"
+    ) {
+      this.checkCodesysReferenceOperator(nameUpper, expr, scope);
+      const bool = ELEMENTARY_TYPES["BOOL"];
+      if (bool) expr.resolvedType = bool;
+      return bool;
+    }
+
     // Check user-defined functions in symbol tables
+
     const funcSymbol = this.symbolTables.lookupFunction(expr.functionName);
     if (funcSymbol !== undefined) {
       let returnType = funcSymbol.returnType;
@@ -1689,7 +1703,95 @@ export class TypeChecker {
   }
 
   /**
+   * The declared type of a variable named directly or through structure /
+   * block members (`r`, `fb.r`), or undefined for anything else.
+   */
+  private declaredTypeRefOf(
+    expr: Expression,
+    scope: Scope,
+  ): TypeReference | undefined {
+    if (expr.kind !== "VariableExpression" || !this.ast) return undefined;
+    if (expr.isDereference || expr.subscripts.length > 0) return undefined;
+    const steps =
+      expr.accessChain ??
+      expr.fieldAccess.map((name) => ({ kind: "field" as const, name }));
+    const sym = scope.lookup(expr.name);
+    let type = sym?.kind === "variable" ? sym.declaration?.type : undefined;
+    for (const step of steps) {
+      if (type === undefined || step.kind !== "field") return undefined;
+      type = resolveFieldDeclaration(type.name, step.name, this.ast)?.type;
+    }
+    return type;
+  }
+
+  /**
+   * CODESYS operators on references (online help "Operator: __ISVALIDREF",
+   * "__QUERYINTERFACE", "__QUERYPOINTER"): `__ISVALIDREF(r)` takes a
+   * REFERENCE TO variable; the query operators take an interface variable or
+   * a block instance, then an interface variable (a pointer variable).
+   */
+  private checkCodesysReferenceOperator(
+    nameUpper: string,
+    expr: FunctionCallExpression,
+    scope: Scope,
+  ): void {
+    const fail = (message: string): void => {
+      this.addError(
+        message,
+        expr.sourceSpan.startLine,
+        expr.sourceSpan.startCol,
+        expr.sourceSpan.file,
+      );
+    };
+    const args = stripEnEno(expr.arguments);
+    const shown = expr.functionName;
+    const wanted = nameUpper === "__ISVALIDREF" ? 1 : 2;
+    if (args.length !== wanted || args.some((a) => a.isOutput)) {
+      fail(`${shown} takes ${wanted === 1 ? "one argument" : "two arguments"}`);
+      return;
+    }
+    const first = this.declaredTypeRefOf(args[0]!.value, scope);
+    if (nameUpper === "__ISVALIDREF") {
+      if (first?.referenceKind !== "reference_to") {
+        fail(
+          `${shown} takes a variable declared REFERENCE TO; compare a REF_TO or POINTER with NULL or 0 instead`,
+        );
+      }
+      return;
+    }
+    if (!this.ast) return;
+    const source =
+      first !== undefined &&
+      first.referenceKind === "none" &&
+      first.arrayDimensions === undefined
+        ? first.name
+        : undefined;
+    const sourceOk =
+      source !== undefined &&
+      (findInterface(this.ast, source) !== undefined ||
+        (findFunctionBlock(this.ast, source) !== undefined &&
+          fbInterfaces(this.ast, source).length > 0));
+    if (!sourceOk) {
+      fail(
+        `${shown}: the first argument is an interface variable or an instance of a block implementing an interface`,
+      );
+    }
+    const dest = this.declaredTypeRefOf(args[1]!.value, scope);
+    if (nameUpper === "__QUERYINTERFACE") {
+      const ok =
+        dest !== undefined &&
+        dest.referenceKind === "none" &&
+        dest.arrayDimensions === undefined &&
+        findInterface(this.ast, dest.name) !== undefined;
+      if (!ok) fail(`${shown}: the second argument is an interface variable`);
+    } else if (dest?.referenceKind !== "pointer_to") {
+      fail(`${shown}: the second argument is a POINTER variable`);
+    }
+  }
+
+  /**
    * The FB_Init arguments of an instance declaration (`fb : T(p := v)`)
+
    * against the FB_Init inputs, as the arguments of a method call. Names
    * and counts are checked in fb-lifecycle.ts.
    */

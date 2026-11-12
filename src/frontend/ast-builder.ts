@@ -732,7 +732,16 @@ export class ASTBuilder {
     // Check for EXTENDS clause
     let extendsList: string[] | undefined;
     if (children.EXTENDS) {
-      const extNames = allIdentifiers.slice(1).map((t) => t.image);
+      // `__SYSTEM.IQueryInterface` adds nothing: every interface is queryable.
+      const extNames = allIdentifiers
+        .slice(1)
+        .map((t) => t.image)
+        .filter(
+          (n) =>
+            children.systemInterface === undefined ||
+            n.toUpperCase() !== "__SYSTEM",
+        );
+
       if (extNames.length > 0) {
         extendsList = extNames;
       }

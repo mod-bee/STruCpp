@@ -3388,6 +3388,11 @@ export class CodeGenerator {
           `        if (id == IEC_TYPE_ID<${cls}>::get()) return static_cast<${cls}*>(this);`,
         );
       }
+      // The instance itself, for CODESYS __QUERYPOINTER.
+      this.emitHeader(
+        `        if (id == IEC_TYPE_ID<strucpp::IEC_INSTANCE_ADDRESS>::get()) return static_cast<void*>(this);`,
+      );
+
       this.emitHeader(
         fb.extends && this.fbImplementsInterfaces(fb.extends)
           ? `        return ${fb.extends}::__iec_query(id);`
@@ -7301,7 +7306,33 @@ export class CodeGenerator {
       return `&(${args[0] ?? ""})`;
     }
 
+    // 0. CODESYS reference operators (iec_pointer.hpp, iec_interface.hpp).
+    if (nameUpper === "__ISVALIDREF") {
+      const arg = expr.arguments[0]?.value;
+      return arg === undefined
+        ? "false"
+        : `(${this.generateExpression(arg)}).is_valid()`;
+    }
+    if (nameUpper === "__QUERYINTERFACE" || nameUpper === "__QUERYPOINTER") {
+      const source = expr.arguments[0]?.value;
+      const dest = expr.arguments[1]?.value;
+      if (source !== undefined && dest !== undefined) {
+        const sourceType = this.expressionTypeName(source);
+        const code = this.generateExpression(source);
+        const pointer =
+          sourceType !== undefined && this.isInterfaceType(sourceType)
+            ? `${code}.get()`
+            : `&(${code})`;
+        const helper =
+          nameUpper === "__QUERYINTERFACE"
+            ? "strucpp::iec_query_interface"
+            : "strucpp::iec_query_pointer";
+        return `${helper}(${this.generateExpression(dest)}, ${pointer})`;
+      }
+    }
+
     // 0a. __VARINFO(x) → a strucpp::VAR_INFO describing x.
+
     if (nameUpper === "__VARINFO") {
       const arg = expr.arguments[0]?.value;
       const info = arg === undefined ? undefined : this.generateVarInfo(arg);

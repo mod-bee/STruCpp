@@ -263,6 +263,8 @@ edges on `CU` and `CD` leave `CV` unchanged. CODESYS does not document that case
 | Dynamic memory | Supported | `__NEW(type)`, `__DELETE(ptr)` |
 | POINTER TO | Supported | Full pointer type with dereference |
 | Typed literals | Supported | `INT#5`, `DINT#42`, `REAL#3.14` |
+| `__ISVALIDREF` | Supported | CODESYS: TRUE when a `REFERENCE TO` variable is bound. Other operands are refused (compare a `REF_TO` or `POINTER` with `NULL` / 0) |
+| `__QUERYINTERFACE`, `__QUERYPOINTER` | Supported | CODESYS: from an interface variable or an instance of a block implementing an interface, set an interface variable (as `?=`) or a `POINTER` variable to the instance; TRUE on success. Every interface is queryable; `EXTENDS __SYSTEM.IQueryInterface` is accepted and adds nothing |
 | `__VARINFO` | Supported | CODESYS variable information; yields `__SYSTEM.VAR_INFO`. `Area` is always -1 and `BitAddress` 0 — OpenPLC has no device memory-area numbering |
 | Generic parameters | Supported | `ANY`, `ANY_INT`, … on `VAR_INPUT` of a FUNCTION, FUNCTION_BLOCK or METHOD. Takes an elementary type, an array, an enumeration or a structure: the class names the composite (`TYPE_ARRAY`, `TYPE_ENUM`, `TYPE_USERDEF`). A structure also arrives with `TYPEDESC`, its member layout. Descriptor type `__SYSTEM.AnyType`, usable as an array element to carry arguments of mixed type |
 
@@ -271,7 +273,6 @@ edges on `CU` and `CD` leave `CV` unchanged. CODESYS does not document that case
 | Feature | Notes |
 |---------|-------|
 | UNION | CODESYS union type |
-| __QUERYINTERFACE | CODESYS runtime interface query; the IEC assignment attempt `?=` is supported |
 | ACTION blocks | Named action blocks |
 | TRY/CATCH/FINALLY | Exception handling |
 | Generics | Parameterized types |
