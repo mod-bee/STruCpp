@@ -7,10 +7,20 @@
  */
 
 import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { execSync } from "child_process";
 import { compile } from "../../src/index.js";
 import { compileStlib } from "../../src/library/library-compiler.js";
 import type { StlibArchive } from "../../src/library/library-manifest.js";
-import { hasGpp, runE2ETestPipeline } from "./test-helpers.js";
+import {
+  CXX_STD,
+  cxxEnv,
+  hasGpp,
+  RUNTIME_INCLUDE_PATH,
+  runE2ETestPipeline,
+} from "./test-helpers.js";
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
@@ -333,5 +343,92 @@ END_PROGRAM
     expect(r.warnings.map((w) => w.message)).toContain(
       "Implicit narrowing conversion from INT to BOOL",
     );
+  });
+});
+
+// A block nothing can override binds its methods statically (d85b49b,
+// method-dead-strip-cpp.test.ts); its property accessors likewise. An
+// accessor an interface declares, or one a derived block may replace, stays
+// virtual. The names are unchanged: get_NAME() const / set_NAME(T NAME).
+describe("property accessors of a sealed block", () => {
+  const SRC = `
+INTERFACE I_P PROPERTY nVal : INT END_PROPERTY END_INTERFACE
+FUNCTION_BLOCK FB_Sealed
+  VAR n : INT := 4; END_VAR
+  PROPERTY PUBLIC bp1 : INT GET bp1 := n; END_GET SET n := bp1; END_SET END_PROPERTY
+  PROPERTY PUBLIC bp2 : INT GET bp2 := n * 2; END_GET END_PROPERTY
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK FB_Iface IMPLEMENTS I_P
+  VAR n : INT; END_VAR
+  PROPERTY PUBLIC nVal : INT GET nVal := n; END_GET SET n := nVal; END_SET END_PROPERTY
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK FB_Base
+  PROPERTY PUBLIC k : INT GET k := 1; END_GET END_PROPERTY
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK FB_Derived EXTENDS FB_Base
+END_FUNCTION_BLOCK
+PROGRAM Main
+  VAR s : FB_Sealed; f : FB_Iface; d : FB_Derived; r : INT; END_VAR
+  s.bp1 := 20;
+  r := s.bp1 + d.k;
+END_PROGRAM
+CONFIGURATION Config0
+  RESOURCE Res0 ON PLC
+    TASK task0(INTERVAL := T#20ms, PRIORITY := 0);
+    PROGRAM instance0 WITH task0 : Main;
+  END_RESOURCE
+END_CONFIGURATION`;
+
+  it("are plain member functions; an interface's or a base's stay virtual", () => {
+    const result = compile(SRC, { headerFileName: "generated.hpp" });
+    expect(result.errors.map((e) => e.message)).toEqual([]);
+    const accessors = result.headerCode
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => /\b(get|set)_[A-Z0-9]+\(/.test(l));
+    expect(accessors).toEqual([
+      "virtual IEC_INT get_NVAL() const = 0;",
+      "virtual void set_NVAL(IEC_INT NVAL) = 0;",
+      "IEC_INT get_BP1() const;",
+      "void set_BP1(IEC_INT BP1);",
+      "IEC_INT get_BP2() const;",
+      "virtual IEC_INT get_NVAL() const;",
+      "virtual void set_NVAL(IEC_INT NVAL);",
+      "virtual IEC_INT get_K() const;",
+    ]);
+  });
+
+  (hasGpp ? it : it.skip)("drops an unused accessor at link time", () => {
+    const result = compile(SRC, { headerFileName: "generated.hpp" });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-prop-seal-"));
+    try {
+      fs.writeFileSync(path.join(dir, "generated.hpp"), result.headerCode);
+      fs.writeFileSync(path.join(dir, "generated.cpp"), result.cppCode);
+      fs.writeFileSync(
+        path.join(dir, "main.cpp"),
+        `#include "generated.hpp"
+#include <cstdio>
+strucpp::Configuration_CONFIG0 g_config;
+int main() {
+  auto& p = g_config.INSTANCE0;
+  p.run();
+  std::printf(p.R == 21 ? "ALL_OK\\n" : "FAIL r=%d\\n", (int)p.R);
+  return p.R == 21 ? 0 : 1;
+}
+`,
+      );
+      const bin = path.join(dir, "seal");
+      execSync(
+        `g++ -std=${CXX_STD} -O1 -ffunction-sections -fdata-sections -Wl,--gc-sections ` +
+          `-I"${RUNTIME_INCLUDE_PATH}" -I"${dir}" -o "${bin}" ` +
+          `"${path.join(dir, "main.cpp")}" "${path.join(dir, "generated.cpp")}"`,
+        { encoding: "utf-8", env: cxxEnv },
+      );
+      expect(execSync(`"${bin}"`, { encoding: "utf-8" }).trim()).toBe("ALL_OK");
+      const symbols = execSync(`nm -C "${bin}"`, { encoding: "utf-8" });
+      expect(symbols).not.toContain("FB_SEALED::get_BP2");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

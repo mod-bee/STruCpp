@@ -3521,7 +3521,7 @@ export class CodeGenerator {
     // Generate property declarations
     if (fb.properties.length > 0) {
       this.emitHeader("");
-      this.generatePropertyDeclarations(fb.properties);
+      this.generatePropertyDeclarations(fb.properties, this.isSealedFb(fb));
     }
 
     // Virtual destructor (needed for classes with virtual methods)
@@ -3947,18 +3947,22 @@ export class CodeGenerator {
    */
   private generatePropertyDeclarations(
     properties: PropertyDeclaration[],
+    sealed = false,
   ): void {
     this.emitHeader("    // Properties");
+    // Sealed (see isSealedFb): plain member functions, which the linker drops
+    // when unused and the compiler may inline; the names stay the same.
+    const virt = sealed ? "" : "virtual ";
     for (const prop of properties) {
       const type = this.mapTypeRefToCpp(prop.type);
       this.emitHeaderLineDirective(prop.sourceSpan.startLine);
       const propLine = this.currentHeaderLine;
       if (prop.getter) {
-        this.emitHeader(`    virtual ${type} get_${prop.name}() const;`);
+        this.emitHeader(`    ${virt}${type} get_${prop.name}() const;`);
       }
       if (prop.setter) {
         this.emitHeader(
-          `    virtual void set_${prop.name}(${type} ${prop.name});`,
+          `    ${virt}void set_${prop.name}(${type} ${prop.name});`,
         );
       }
       this.recordHeaderLineMapping(prop.sourceSpan.startLine, propLine);
@@ -8390,8 +8394,19 @@ export class CodeGenerator {
     fieldName: string,
   ): string | undefined {
     if (!typeName) return undefined;
-    const key = `${typeName.toUpperCase()}.${fieldName.toUpperCase()}`;
-    return this.propertyNameMap.get(key);
+    // A property a block inherits through EXTENDS is its own too.
+    const seen = new Set<string>();
+    let current: string | undefined = typeName;
+    while (current !== undefined && !seen.has(current.toUpperCase())) {
+      seen.add(current.toUpperCase());
+      const key = `${current.toUpperCase()}.${fieldName.toUpperCase()}`;
+      const found = this.propertyNameMap.get(key);
+      if (found !== undefined) return found;
+      current = this.ast
+        ? findFunctionBlock(this.ast, current)?.extends
+        : undefined;
+    }
+    return undefined;
   }
 
   /**
