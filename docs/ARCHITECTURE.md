@@ -162,6 +162,7 @@ All program/function variables are wrapped in `IECVar<T>` which provides transpa
 
 - **Functions**: C++ free functions with INPUT params by value, OUTPUT/IN_OUT by reference
 - **Function Blocks**: C++ classes with member variables, `operator()()` method for the FB body, and generated methods/properties. Supports ABSTRACT (pure virtual), FINAL, EXTENDS (inheritance), and IMPLEMENTS (interfaces).
+- **Methods**: INPUT params by value, IN_OUT by reference, OUTPUT by pointer (`<NAME>__out`, `nullptr` for an output the call omits). The method opens by binding each output to its own name: the caller's variable, or a slot of the method (`strucpp::OutSlot`) built only for an omitted one, so a call site builds no temporary. The body, `{external}` C++ included, uses the name as before.
 - **Programs**: C++ classes with global instances, connected to CONFIGURATION/RESOURCE/TASK structure
 
 ### PLC Data Block (`plcDataBlock`, `--plc-data-block`)

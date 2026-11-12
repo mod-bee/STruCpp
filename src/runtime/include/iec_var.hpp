@@ -48,6 +48,7 @@
 
 #include <type_traits>
 #include <utility>
+#include <new>
 #if STRUCPP_HAS_EXCEPTIONS
 #include <stdexcept>
 #endif
@@ -768,6 +769,41 @@ template <typename T>
 inline T& as_lvalue(T&& value) {
     return value;
 }
+
+/**
+ * A method's VAR_OUTPUT bound by the caller: its address. A by_ref copy (a
+ * string of another length) lives until the end of the full expression, so
+ * the pointer stays valid for the call.
+ */
+template <typename P>
+inline P* out_ptr(P& actual) {
+    return &actual;
+}
+
+/**
+ * A method's own storage for a VAR_OUTPUT its call omits: built only when the
+ * caller passed no variable (NULL), destroyed with the method's frame. Its
+ * code is in the method once, not at every call site.
+ */
+template <typename T>
+class OutSlot {
+public:
+    OutSlot() noexcept {}
+    OutSlot(const OutSlot&) = delete;
+    OutSlot& operator=(const OutSlot&) = delete;
+    ~OutSlot() {
+        if (made_) reinterpret_cast<T*>(buf_)->~T();
+    }
+    T& bind(T* actual) {
+        if (actual != nullptr) return *actual;
+        made_ = true;
+        return *::new (static_cast<void*>(buf_)) T();
+    }
+
+private:
+    alignas(T) unsigned char buf_[sizeof(T)];
+    bool made_ = false;
+};
 
 /**
  * The argument of a STRING(n) or WSTRING(n) VAR_IN_OUT / VAR_OUTPUT bound to

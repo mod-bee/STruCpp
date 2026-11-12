@@ -140,6 +140,10 @@ function edgeMemoryName(member: string): string {
 /** `__VLA_<rank>D_<ElementType>`, the AST builder's name for an `ARRAY [*]`. */
 const VLA_TYPE_NAME = /^__VLA_(\d+)D_(.+)$/;
 
+/** A method's VAR_OUTPUT parameter (a pointer) is `<name>` + this; the
+ *  method binds `<name>` itself (methodOutputBindings). */
+const METHOD_OUTPUT_SUFFIX = "__out";
+
 /** The parts of a type reference that decide its C++ type. */
 interface TypeShape {
   name: string;
@@ -3959,16 +3963,40 @@ export class CodeGenerator {
           }
         }
       } else if (block.blockType === "VAR_OUTPUT") {
+        // By pointer, NULL for an output the call omits: the method binds
+        // its own slot then (methodOutputBindings), so a call site builds no
+        // temporary for it.
         for (const decl of block.declarations) {
           for (const name of decl.names) {
             params.push(
-              `${this.mapTypeRefToCpp(this.toParamTypeRef(decl.type))}& ${name}`,
+              `${this.mapTypeRefToCpp(this.toParamTypeRef(decl.type))}* ${name}${METHOD_OUTPUT_SUFFIX}`,
             );
           }
         }
       }
     }
     return params.join(", ");
+  }
+
+  /**
+   * The opening lines of a method body: each VAR_OUTPUT bound by its own name
+   * to the caller's variable, or to a slot of the method for an omitted one
+   * (built only then, once in the method's code for every call site).
+   */
+  private methodOutputBindings(method: MethodDeclaration): string[] {
+    const lines: string[] = [];
+    for (const block of method.varBlocks) {
+      if (block.blockType !== "VAR_OUTPUT") continue;
+      for (const decl of block.declarations) {
+        for (const name of decl.names) {
+          const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(decl.type));
+          lines.push(
+            `    strucpp::OutSlot<${cppType}> ${name}__slot; ${cppType}& ${name} = ${name}__slot.bind(${name}${METHOD_OUTPUT_SUFFIX}); (void)${name};`,
+          );
+        }
+      }
+    }
+    return lines;
   }
 
   /**
@@ -4014,6 +4042,9 @@ export class CodeGenerator {
     this.emitLineDirective(method.sourceSpan.startLine);
     const implLine = this.currentLine;
     this.emit(`${returnType} ${className}::${method.name}(${params}) {`);
+    for (const line of this.methodOutputBindings(method)) {
+      this.emit(line);
+    }
 
     // Declare return variable if method has return type. An interface result
     // is a reference, NULL until assigned (6.6.6.5.1).
@@ -6928,7 +6959,15 @@ export class CodeGenerator {
       // Type: REFERENCE TO").
       const bound = this.referenceInputArgument(param, arg.value);
       if (bound !== undefined) return bound;
-      return this.byRefStringArg(param, this.generateExpression(arg.value));
+      const code = this.byRefStringArg(
+        param,
+        this.generateExpression(arg.value),
+      );
+      if (param?.kind === "VAR_OUTPUT") {
+        const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(param.type));
+        return `strucpp::out_ptr<${cppType}>(${code})`;
+      }
+      return code;
     });
   }
 
@@ -7065,10 +7104,8 @@ export class CodeGenerator {
                 : `${cppType}{}`,
             });
           } else if (kind === "VAR_OUTPUT") {
-            // An omitted output: the method writes a temporary that lives
-            // for the call (the parameter is a reference).
-            const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(d.type));
-            plan.push({ code: `strucpp::as_lvalue(${cppType}{})` });
+            // An omitted output: NULL, the method writes a slot of its own.
+            plan.push({ code: "nullptr" });
           } else {
             return asWritten;
           }
