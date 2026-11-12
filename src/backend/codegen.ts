@@ -843,17 +843,6 @@ export class CodeGenerator {
    *  (before `generate`, which starts its own warning list). */
   private libraryArchiveWarnings: Array<{ message: string }> = [];
 
-  /** Map of `UPPER(fbType).UPPER(method)` → its VAR_INPUT parameter names in
-   *  declaration order, so a positional argument can be matched to one. */
-  private methodInputOrder: Map<string, string[]> = new Map();
-
-  /** Map of `UPPER(fbType).UPPER(method)` → UPPER(paramName) → the generic
-   *  type it was declared with.
-   *
-   *  METHOD is one of the three scopes CODESYS declares generics in, so a
-   *  method call has to build the same descriptor a function block call does. */
-  private methodGenericParams: Map<string, Map<string, string>> = new Map();
-
   /** Enums an imported library declares, with their members.
    *
    *  Merged into the bare-enumerator lookup that `generate()` builds, which is
@@ -1631,29 +1620,6 @@ export class CodeGenerator {
           }
         }
       }
-      // Methods carry their own parameter lists, and their own generics.
-      for (const method of fb.methods ?? []) {
-        const key = `${fb.name.toUpperCase()}.${method.name.toUpperCase()}`;
-        const order: string[] = [];
-        for (const block of method.varBlocks ?? []) {
-          if (block.blockType !== "VAR_INPUT") continue;
-          for (const decl of block.declarations) {
-            for (const name of decl.names) {
-              order.push(name.toUpperCase());
-              if (isDeclarableGenericType(decl.type.name)) {
-                let params = this.methodGenericParams.get(key);
-                if (!params) {
-                  params = new Map();
-                  this.methodGenericParams.set(key, params);
-                }
-                params.set(name.toUpperCase(), decl.type.name.toUpperCase());
-              }
-            }
-          }
-        }
-        if (order.length > 0) this.methodInputOrder.set(key, order);
-      }
-
       if (inputNames.length > 0) {
         this.fbInputParams.set(fb.name.toUpperCase(), inputNames);
       }
@@ -2890,6 +2856,28 @@ export class CodeGenerator {
     }
   }
 
+  /**
+   * A method's VAR_INPUT names in declared order (for positional arguments),
+   * and those declared generic (ANY, ANY_INT, …), which take an `IEC_ANY`
+   * built at the call site: METHOD is one of the scopes CODESYS declares
+   * generics in. Read from the declaration `findMethodDecl` resolves, so a
+   * block of this unit, of a library (its manifest prototype), a base it
+   * EXTENDS and an interface are read alike.
+   */
+  private methodInputs(
+    ownerType: string | undefined,
+    methodName: string,
+  ): { order: string[]; generics: Set<string> } {
+    const order: string[] = [];
+    const generics = new Set<string>();
+    for (const p of this.methodCallParams(ownerType, methodName) ?? []) {
+      if (p.kind !== "VAR_INPUT") continue;
+      order.push(p.name);
+      if (isDeclarableGenericType(p.type.name)) generics.add(p.name);
+    }
+    return { order, generics };
+  }
+
   /** A method of `typeName` (or of a function block it extends). */
   private findMethodDecl(
     typeName: string | undefined,
@@ -3336,25 +3324,24 @@ export class CodeGenerator {
     const savedOverrides = this.argOverrides;
     this.callLockHeld = new Set<string>();
     try {
-      const key = objectType
-        ? `${objectType.toUpperCase()}.${method.toUpperCase()}`
-        : undefined;
-      const generics = key ? this.methodGenericParams.get(key) : undefined;
+      const { order, generics } = this.methodInputs(objectType, method);
       const globals = new Set(
         this.methodGlobalByRefArgs(objectType, method, args),
       );
+      let positional = 0;
       plan.forEach((entry, i) => {
         const arg = entry.arg;
         if (arg === undefined) return;
         const value = arg.value;
+        const paramName = arg.name ?? order[positional];
+        if (arg.name === undefined) positional++;
         if (globals.has(arg) && value.kind === "VariableExpression") {
           const ref = this.globalRefOf(value.name.toUpperCase())!;
           overrides.set(value, this.heldStorage(value, ref, "", holds));
           return;
         }
         const generic =
-          arg.name !== undefined &&
-          generics?.has(arg.name.toUpperCase()) === true;
+          paramName !== undefined && generics.has(paramName.toUpperCase());
         if (byRef[i] !== true && !generic && this.mayTakeLock(value)) {
           const tmp = `__gma${this.tempVarCounter++}`;
           pre.push(`auto ${tmp} = ${this.generateExpression(value)};`);
@@ -6959,11 +6946,7 @@ export class CodeGenerator {
     methodName: string,
     args: ReadonlyArray<{ name?: string; value: Expression }>,
   ): string[] {
-    const key = ownerType
-      ? `${ownerType.toUpperCase()}.${methodName.toUpperCase()}`
-      : undefined;
-    const generics = key ? this.methodGenericParams.get(key) : undefined;
-    const order = key ? this.methodInputOrder.get(key) : undefined;
+    const { order, generics } = this.methodInputs(ownerType, methodName);
 
     const params = this.methodCallParams(ownerType, methodName);
     let positional = 0;
@@ -6973,9 +6956,9 @@ export class CodeGenerator {
       const param = arg.name
         ? params?.find((p) => p.name === arg.name!.toUpperCase())
         : params?.[positional];
-      const paramName = arg.name ?? order?.[positional];
+      const paramName = arg.name ?? order[positional];
       if (!arg.name) positional++;
-      if (paramName && generics?.has(paramName.toUpperCase())) {
+      if (paramName && generics.has(paramName.toUpperCase())) {
         const descriptor = this.generateAnyDescriptor(arg.value);
         if (descriptor) return descriptor;
       }

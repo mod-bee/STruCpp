@@ -172,17 +172,19 @@ export function generateTestMain(
   const testCodegen = new TestCodeGenerator(options.pous);
   const inlineTypes = collectTestInlineTypes(testFiles);
 
+  // Register library metadata (FB types, field mappings, enum/struct types)
+  // first, as compile() does: the unit's parameter scan must see a library
+  // block's type to bind an in-out of that type by pointer.
+  if (options.libraryArchives) {
+    testCodegen.registerLibraryArchives(options.libraryArchives);
+  }
+
   // Initialize type sets from AST if provided
   if (options.ast) {
     testCodegen.initFromAST({
       ...options.ast,
       types: [...options.ast.types, ...inlineTypes],
     });
-  }
-
-  // Register library metadata (FB types, field mappings, enum/struct types)
-  if (options.libraryArchives) {
-    testCodegen.registerLibraryArchives(options.libraryArchives);
   }
 
   // Includes
