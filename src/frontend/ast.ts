@@ -224,7 +224,12 @@ export interface FunctionBlockDeclaration extends ASTNode {
 /**
  * Visibility modifier for OOP members
  */
-export type Visibility = "PUBLIC" | "PRIVATE" | "PROTECTED";
+/**
+ * Access specifier (IEC 61131-3 6.6.5.9, 6.6.5.10). INTERNAL is access
+ * within the namespace: the compilation unit here, a library for its own
+ * blocks (a library exports PUBLIC methods only).
+ */
+export type Visibility = "PUBLIC" | "PRIVATE" | "PROTECTED" | "INTERNAL";
 
 /**
  * METHOD declaration within a Function Block
@@ -253,6 +258,13 @@ export interface InterfaceDeclaration extends ASTNode {
   declaredName?: string;
   extends?: string[];
   methods: MethodDeclaration[];
+  /**
+   * Property prototypes (CODESYS "Object: Property", on an interface): the
+   * accessors a block implementing the interface provides. `getter` /
+   * `setter` are empty arrays for an accessor the interface declares, absent
+   * otherwise. Absent when the interface declares no property.
+   */
+  properties?: PropertyDeclaration[];
 }
 
 /**

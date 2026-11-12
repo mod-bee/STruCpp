@@ -46,8 +46,10 @@ import type {
 } from "./symbol-table.js";
 import { TypeChecker } from "./type-checker.js";
 import {
+  interfaceClosure,
   interfaceExtendsItself,
   interfacePrototypes,
+  findInterface,
 } from "./interface-utils.js";
 import {
   arrayDimSize,
@@ -1102,6 +1104,70 @@ export class SemanticAnalyzer {
     // - Check CASE statement coverage
     // - Validate reference operations
     // - Check for unreachable code
+  }
+
+  /**
+   * Each property an interface declares (CODESYS "Object: Property"), own or
+   * inherited, is implemented by the block or a block it EXTENDS: same type,
+   * with every accessor the interface declares, PUBLIC. An ABSTRACT block may
+   * leave one to a derived block.
+   */
+  private checkInterfaceProperties(
+    ast: CompilationUnit,
+    fb: FunctionBlockDeclaration,
+    ifaceName: string,
+    fbMap: Map<string, FunctionBlockDeclaration>,
+  ): void {
+    const lineage: FunctionBlockDeclaration[] = [];
+    const seen = new Set<string>();
+    let cursor: FunctionBlockDeclaration | undefined = fb;
+    while (cursor !== undefined && !seen.has(cursor.name.toUpperCase())) {
+      seen.add(cursor.name.toUpperCase());
+      lineage.push(cursor);
+      cursor =
+        cursor.extends !== undefined
+          ? fbMap.get(cursor.extends.toUpperCase())
+          : undefined;
+    }
+    const at = fb.sourceSpan;
+    const fail = (message: string): void =>
+      this.addError(message, at.startLine, at.startCol, at.file);
+    for (const owner of interfaceClosure(ast, [ifaceName])) {
+      for (const proto of findInterface(ast, owner)?.properties ?? []) {
+        const key = proto.name.toUpperCase();
+        const impl = lineage
+          .map((f) => f.properties.find((p) => p.name.toUpperCase() === key))
+          .find((p) => p !== undefined);
+        if (impl === undefined) {
+          if (!fb.isAbstract) {
+            fail(
+              `FUNCTION_BLOCK '${fb.name}' does not implement property '${proto.name}' of INTERFACE '${owner}'`,
+            );
+          }
+          continue;
+        }
+        if (impl.type.name.toUpperCase() !== proto.type.name.toUpperCase()) {
+          fail(
+            `Property '${impl.name}' of '${fb.name}' is ${impl.type.name}, but INTERFACE '${owner}' declares it ${proto.type.name}`,
+          );
+        }
+        if (proto.getter !== undefined && impl.getter === undefined) {
+          fail(
+            `Property '${impl.name}' of '${fb.name}' needs GET: INTERFACE '${owner}' declares it`,
+          );
+        }
+        if (proto.setter !== undefined && impl.setter === undefined) {
+          fail(
+            `Property '${impl.name}' of '${fb.name}' needs SET: INTERFACE '${owner}' declares it`,
+          );
+        }
+        if (impl.visibility !== "PUBLIC" && impl.visibility !== "INTERNAL") {
+          fail(
+            `Property '${impl.name}' of '${fb.name}' implements INTERFACE '${owner}' and must be PUBLIC or INTERNAL`,
+          );
+        }
+      }
+    }
   }
 
   /**
@@ -3493,6 +3559,7 @@ export class SemanticAnalyzer {
             );
           }
         }
+        this.checkInterfaceProperties(ast, fb, name, fbMap);
       }
     }
 
@@ -3732,6 +3799,16 @@ export class SemanticAnalyzer {
       for (const prop of fb.properties) {
         const key = `${fb.name.toUpperCase()}.${prop.name.toUpperCase()}`;
         propertyInfo.set(key, { hasSetter: prop.setter !== undefined });
+      }
+    }
+    // A property of an interface, own or inherited, through an interface
+    // variable: written only when the interface declares SET.
+    for (const iface of ast.interfaces) {
+      for (const name of interfaceClosure(ast, [iface.name])) {
+        for (const prop of findInterface(ast, name)?.properties ?? []) {
+          const key = `${iface.name.toUpperCase()}.${prop.name.toUpperCase()}`;
+          propertyInfo.set(key, { hasSetter: prop.setter !== undefined });
+        }
       }
     }
     if (propertyInfo.size === 0) return;

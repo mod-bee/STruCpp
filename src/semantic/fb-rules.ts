@@ -556,6 +556,8 @@ function checkMemberAccess(
     access: Visibility | undefined,
   ): boolean => {
     if (access === undefined || access === "PUBLIC") return true;
+    // One namespace: the compilation unit (IEC 61131-3 6.6.5.9).
+    if (access === "INTERNAL") return true;
     if (!caller) return false;
     if (access === "PRIVATE") return caller === owner;
     return family.isOrDerives(caller, owner);

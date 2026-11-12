@@ -94,6 +94,10 @@ constexpr std::nullptr_t IEC_NULL = nullptr;
 template<typename T> class IEC_REF_TO;
 template<typename T> class IEC_REFERENCE_TO;
 template<typename T> class IEC_Ptr;
+template<size_t MaxLen> class IECString;
+template<size_t MaxLen> class IECStringVar;
+template<size_t MaxLen> class IECWString;
+template<size_t MaxLen> class IECWStringVar;
 
 namespace detail {
 /**
@@ -101,10 +105,28 @@ namespace detail {
  * or pointer variable is the IEC_REF_TO / IEC_REFERENCE_TO / IEC_Ptr object
  * itself, so REF_TO REF_TO INT points at an IEC_REF_TO<INT_t>.
  */
-template<typename T> struct ref_target { using type = IECVar<T>; };
+template<typename T> struct ref_target {
+    // A structure, array or block instance is its own variable; a value of
+    // an elementary type lives in an IECVar<T>.
+    using type = typename std::conditional<std::is_class<T>::value, T, IECVar<T>>::type;
+};
+template<size_t N> struct ref_target<IECString<N>> { using type = IECStringVar<N>; };
+template<size_t N> struct ref_target<IECWString<N>> { using type = IECWStringVar<N>; };
 template<typename U> struct ref_target<IEC_REF_TO<U>> { using type = IEC_REF_TO<U>; };
 template<typename U> struct ref_target<IEC_REFERENCE_TO<U>> { using type = IEC_REFERENCE_TO<U>; };
 template<typename U> struct ref_target<IEC_Ptr<U>> { using type = IEC_Ptr<U>; };
+
+/** Read the value of a referenced variable: an IECVar's value, else a copy. */
+template<typename V>
+auto ref_load(const V& v, int) -> decltype(v.get()) { return v.get(); }
+template<typename V>
+V ref_load(const V& v, long) { return v; }
+
+/** Write through a reference: an IECVar's set() (forcing), else assignment. */
+template<typename V, typename X>
+auto ref_store(V& v, const X& x, int) -> decltype(v.set(x), void()) { v.set(x); }
+template<typename V, typename X>
+void ref_store(V& v, const X& x, long) { v = x; }
 }  // namespace detail
 
 /**
@@ -280,7 +302,7 @@ public:
     }
 
     /** Const propagates to the pointee, as `deref()` and `operator*` do. */
-    const IECVar<T>* operator->() const {
+    const target_type* operator->() const {
         if (ptr_ == nullptr) {
 #if STRUCPP_HAS_EXCEPTIONS
             throw NullReferenceException();
@@ -341,7 +363,9 @@ template<typename T>
 class IEC_REFERENCE_TO {
 public:
     using value_type = T;
-    using pointer_type = IECVar<T>*;
+    /** The referenced variable: IECVar<T>, or T itself for a structure, array or block. */
+    using target_type = typename detail::ref_target<T>::type;
+    using pointer_type = target_type*;
 
 private:
     pointer_type ptr_;
@@ -365,7 +389,7 @@ public:
     /**
      * Constructor - initialize bound to a variable (REFERENCE TO X := target)
      */
-    explicit IEC_REFERENCE_TO(IECVar<T>& var) noexcept : ptr_(&var) {}
+    explicit IEC_REFERENCE_TO(target_type& var) noexcept : ptr_(&var) {}
 
     // Copy/move - default is fine
     IEC_REFERENCE_TO(const IEC_REFERENCE_TO&) = default;
@@ -376,7 +400,7 @@ public:
     /**
      * Bind to a new variable (REF= operator)
      */
-    void bind(IECVar<T>& var) noexcept { ptr_ = &var; }
+    void bind(target_type& var) noexcept { ptr_ = &var; }
 
     /** Bound to a variable (CODESYS __ISVALIDREF). */
     bool is_valid() const noexcept { return ptr_ != nullptr; }
@@ -385,19 +409,19 @@ public:
     /**
      * Implicit value access (get) - reads from target
      */
-    T get() const noexcept { return ptr_->get(); }
+    T get() const noexcept { return detail::ref_load(*ptr_, 0); }
 
     /**
      * Implicit value assignment (set) - writes to target
      * Respects target's forcing state
      */
-    void set(const T& value) noexcept { ptr_->set(value); }
+    void set(const T& value) noexcept { detail::ref_store(*ptr_, value, 0); }
 
     /**
      * Get underlying IECVar reference
      */
-    IECVar<T>& target() noexcept { return *ptr_; }
-    const IECVar<T>& target() const noexcept { return *ptr_; }
+    target_type& target() noexcept { return *ptr_; }
+    const target_type& target() const noexcept { return *ptr_; }
 
     // =========================================================================
     // Operators
@@ -474,6 +498,24 @@ inline IEC_REF_TO<IEC_REF_TO<T>> REF(IEC_REF_TO<T>& ref) noexcept {
 template<typename T>
 inline IEC_REF_TO<IEC_Ptr<T>> REF(IEC_Ptr<T>& ptr) noexcept {
     return IEC_REF_TO<IEC_Ptr<T>>(&ptr);
+}
+
+/** REF() of a STRING / WSTRING variable: a REF_TO STRING(n). */
+template<size_t N>
+inline IEC_REF_TO<IECString<N>> REF(IECStringVar<N>& var) noexcept {
+    return IEC_REF_TO<IECString<N>>(&var);
+}
+template<size_t N>
+inline IEC_REF_TO<IECWString<N>> REF(IECWStringVar<N>& var) noexcept {
+    return IEC_REF_TO<IECWString<N>>(&var);
+}
+
+/** REF() of a structure, array or block instance (its own variable). */
+template<typename T,
+         typename = typename std::enable_if<
+             std::is_same<typename detail::ref_target<T>::type, T>::value>::type>
+inline IEC_REF_TO<T> REF(T& var) noexcept {
+    return IEC_REF_TO<T>(&var);
 }
 
 // Note: REF() for array elements and struct fields works automatically

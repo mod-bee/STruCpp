@@ -38,7 +38,7 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | ARRAY[*] (VLA) | Supported | Variable-length array parameters |
 | Subranges | Supported | Runtime validation |
 | REF_TO | Supported | IEC reference type (explicit dereference) |
-| REFERENCE_TO | Supported | CODESYS reference type (implicit dereference) |
+| REFERENCE_TO | Supported | CODESYS reference type (implicit dereference), to an elementary type, a STRING / WSTRING, a structure, an array or a block instance (`r.n`, `r()`); `REF_TO` likewise (`p^.n`). A `REFERENCE TO` input of a block or method is bound by the call (`fb(refData := d)`, CODESYS "Data Type: REFERENCE TO"): the argument is a variable of the referenced type or a REFERENCE TO one. `r REF= other` with `other` a REFERENCE TO binds to what it refers to |
 | POINTER TO | Supported | CODESYS pointer type with dereference via ^ |
 
 ### Not Implemented
@@ -151,15 +151,15 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Methods | Supported | On FUNCTION_BLOCK, with return types. A method without an access specifier is `PUBLIC` (CODESYS), not IEC's default `PROTECTED`. A variable may share a method's name (own, inherited or of an implemented interface); its C++ member is renamed |
-| Properties (GET/SET) | Supported | Virtual getter/setter methods in C++ |
+| Properties (GET/SET) | Supported | Virtual getter/setter methods in C++ (`get_NAME()` / `set_NAME(v)`). Also declared on an INTERFACE (CODESYS): `PROPERTY nCount : INT END_PROPERTY` (GET and SET) or with `GET END_GET` / `SET END_SET` naming the accessors; a block implementing it provides each, same type, PUBLIC or INTERNAL; read and written through an interface variable or array element. Written on an array element (`fa[2].p := v`) calls the setter |
 | Inheritance (EXTENDS) | Supported | Single inheritance — see [Function block inheritance](#function-block-inheritance-66727-11) |
 | Interfaces (IMPLEMENTS) | Supported | Multiple interfaces, generates C++ abstract classes — see [Interfaces](#interfaces-666) |
 | ABSTRACT | Supported | Abstract FB (no instantiation) and abstract methods (pure virtual). An abstract FB need not hold an abstract method (§6.6.7.5 leaves FBs to the implementer). An abstract type is accepted as an in-out (§6.6.5.8.2); as a `VAR_INPUT` it is refused (an input holds a copy) |
 | FINAL | Supported | Sealed FB and methods |
 | OVERRIDE | Supported | Method override with C++ override specifier |
-| PUBLIC/PRIVATE/PROTECTED | Supported | On methods and on `VAR` sections |
+| PUBLIC/PRIVATE/PROTECTED/INTERNAL | Supported | On methods, properties and `VAR` sections. INTERNAL (6.6.5.9) is access within the namespace: the whole compilation unit here; a library exports PUBLIC methods only. `INTERNAL` stays usable as a name elsewhere |
 | FB_Init / FB_Reinit / FB_Exit (CODESYS) | Supported | `FB_Init` runs for every instance after its implicit initialization and before its initial assignments; inputs after `bInitRetains` / `bInCopyCode` are set at the declaration, `fb : T(p := 1) := (x := 2)`, named, an omitted one at its initial value. With EXTENDS each block's FB_Init runs, base first; a derived FB_Init repeats the base's inputs first; `SUPER^.FB_Init` is refused. `bInitRetains` is TRUE and `bInCopyCode` FALSE (no online change; retained values are restored after FB_Init). `FB_Exit` runs when the instance is destroyed (`__DELETE`, end of a function call, program end), derived first; never for a copy. `FB_Reinit` is only called by the application. An initial value for an array of such instances is refused. Works for library blocks (manifest `fbInit`, `fbExit`) |
-| THIS | Supported | `THIS.m()`, `THIS.v`, and a bare `THIS` (the own instance, e.g. passed to an interface input, §6.6.5.7.2); CODESYS `THIS^` too |
+| THIS | Supported | `THIS.m()`, `THIS.v`, and a bare `THIS` (the own instance, e.g. passed to an interface input, §6.6.5.7.2); CODESYS `THIS^`, `THIS^.v` and `THIS^.m()` too |
 
 ### Function block inheritance (6.6.7.2.7-11)
 

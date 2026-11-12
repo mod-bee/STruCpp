@@ -1790,6 +1790,7 @@ export class CodeGenerator {
         this.fbInterfaceMethodNames.set(fb.name.toUpperCase(), ifaceMethods);
       }
     }
+    this.registerInterfaceProperties(ast);
     // A library block's methods, so a call names them in their declared case,
     // and the names its pins were renamed for in C++ (a pin named like one of
     // its methods: the library decided, the manifest says).
@@ -3183,7 +3184,7 @@ export class CodeGenerator {
   }
 
   /**
-   * What follows a local's name in its C++ definition: `(args)` for an
+   * What follows a local's name in its C++ definition: `{args}` for an
    * instance built in place (FB_Init), ` = init` for an initial value, else
    * nothing.
    */
@@ -3193,10 +3194,34 @@ export class CodeGenerator {
       decl.initialValue,
       decl.initArguments,
     );
-    if (inPlace !== undefined) return `(${inPlace})`;
+    // Braces: `T X(T2(*&d));` would declare a function.
+    if (inPlace !== undefined) return `{${inPlace}}`;
     return decl.initialValue
       ? ` = ${this.generateInitializer(decl.initialValue, cppType, decl.type.name)}`
       : "";
+  }
+
+  /** A member of a block (or structure) declared REFERENCE TO. */
+  private isReferenceToMember(
+    typeName: string | undefined,
+    member: string,
+  ): boolean {
+    if (typeName === undefined) return false;
+    const kind = this.accessLookup.field(typeName, member)?.type.referenceKind;
+    return kind === "reference_to";
+  }
+
+  /** A plain REFERENCE TO variable (not a member or element of it). */
+  private isReferenceToVariable(expr: Expression): boolean {
+    return (
+      expr.kind === "VariableExpression" &&
+      expr.fieldAccess.length === 0 &&
+      expr.subscripts.length === 0 &&
+      !expr.isDereference &&
+      (expr.accessChain === undefined || expr.accessChain.length === 0) &&
+      this.currentScopeVarRefKinds.get(expr.name.toUpperCase()) ===
+        "reference_to"
+    );
   }
 
   /** Whether each positional parameter of a method is passed by reference. */
@@ -3654,6 +3679,20 @@ export class CodeGenerator {
       }
     }
 
+    // Property prototypes: the accessors an implementing block provides,
+    // named as a block's property accessors are (generatePropertyDeclarations).
+    for (const prop of iface.properties ?? []) {
+      const type = this.mapTypeRefToCpp(prop.type);
+      if (prop.getter) {
+        this.emitHeader(`    virtual ${type} get_${prop.name}() const = 0;`);
+      }
+      if (prop.setter) {
+        this.emitHeader(
+          `    virtual void set_${prop.name}(${type} ${prop.name}) = 0;`,
+        );
+      }
+    }
+
     this.emitHeader("};");
     this.emitHeader("");
   }
@@ -3720,6 +3759,7 @@ export class CodeGenerator {
       PUBLIC: [],
       PRIVATE: [],
       PROTECTED: [],
+      INTERNAL: [],
     };
     for (const method of methods) {
       groups[method.visibility].push(method);
@@ -3734,7 +3774,9 @@ export class CodeGenerator {
     ][]) {
       if (visMethods.length === 0) continue;
 
-      const cppVisibility = visibility.toLowerCase();
+      // INTERNAL: within the namespace, which is the whole unit here.
+      const cppVisibility =
+        visibility === "INTERNAL" ? "public" : visibility.toLowerCase();
       if (cppVisibility !== currentVisibility) {
         this.emitHeader(`${cppVisibility}:`);
         currentVisibility = cppVisibility;
@@ -5657,7 +5699,11 @@ export class CodeGenerator {
     indent: string,
   ): void {
     const target = this.generateExpression(stmt.target);
-    const source = this.generateExpression(stmt.source);
+    // `r REF= other` where `other` is itself a REFERENCE TO: bind to what it
+    // refers to.
+    const source = this.isReferenceToVariable(stmt.source)
+      ? `${this.generateExpression(stmt.source)}.target()`
+      : this.generateExpression(stmt.source);
     const targetKind =
       stmt.target.kind === "VariableExpression"
         ? this.refAssignTargetKind(stmt.target)
@@ -6308,6 +6354,18 @@ export class CodeGenerator {
       }
     }
 
+    // A member or element of what a REFERENCE TO variable refers to: the
+    // reference is implicit (CODESYS "Data Type: REFERENCE TO"), so the
+    // access is on its target.
+    if (
+      this.currentScopeVarRefKinds.get(nameUpper) === "reference_to" &&
+      (expr.fieldAccess.length > 0 ||
+        expr.subscripts.length > 0 ||
+        (expr.accessChain !== undefined && expr.accessChain.length > 0))
+    ) {
+      result = `${result}.target()`;
+    }
+
     return this.renderAccessTail(result, expr, nameUpper);
   }
 
@@ -6375,7 +6433,7 @@ export class CodeGenerator {
         if (isLast) {
           const propName = this.resolvePropertyName(currentType, field);
           if (propName) {
-            result += `.get_${propName}()`;
+            result += `${this.memberSeparator(currentType)}get_${propName}()`;
             continue;
           }
         }
@@ -6440,7 +6498,7 @@ export class CodeGenerator {
           if (isLast) {
             const propName = this.resolvePropertyName(currentType, step.name);
             if (propName) {
-              result += `.get_${propName}()`;
+              result += `${this.memberSeparator(currentType)}get_${propName}()`;
               return result;
             }
           }
@@ -6684,6 +6742,15 @@ export class CodeGenerator {
       if (paramName && generics?.has(paramName.toUpperCase())) {
         const descriptor = this.generateAnyDescriptor(arg.value);
         if (descriptor) return descriptor;
+      }
+      // A REFERENCE TO parameter is bound to the argument (CODESYS "Data
+      // Type: REFERENCE TO"); a REFERENCE TO argument is passed on as it is.
+      if (
+        param?.kind === "VAR_INPUT" &&
+        param.type.referenceKind === "reference_to" &&
+        !this.isReferenceToVariable(arg.value)
+      ) {
+        return `${this.mapTypeRefToCpp(param.type)}(*${this.generateAddressOf(arg.value)})`;
       }
       return this.byRefStringArg(param, this.generateExpression(arg.value));
     });
@@ -8114,6 +8181,30 @@ export class CodeGenerator {
   }
 
   /**
+   * Interface properties, own and inherited, for access through an interface
+   * variable (`i.nCount` → `I->get_NCOUNT()`).
+   */
+  protected registerInterfaceProperties(ast: CompilationUnit): void {
+    for (const iface of ast.interfaces) {
+      for (const name of this.interfaceClosure([iface.name])) {
+        for (const prop of findInterface(ast, name)?.properties ?? []) {
+          this.propertyNameMap.set(
+            `${iface.name.toUpperCase()}.${prop.name.toUpperCase()}`,
+            prop.name,
+          );
+        }
+      }
+    }
+  }
+
+  /** `->` after an interface variable (a reference), `.` after anything else. */
+  private memberSeparator(typeName: string | undefined): string {
+    return typeName !== undefined && this.isInterfaceType(typeName)
+      ? "->"
+      : ".";
+  }
+
+  /**
    * Resolve a property name from the property name map.
    * Returns the declared property name if the field is a property, undefined otherwise.
    */
@@ -8166,9 +8257,33 @@ export class CodeGenerator {
     else if (nameUpper === "SUPER") currentType = this.currentFBExtends;
     else currentType = this.currentScopeVarTypes.get(nameUpper);
 
-    for (let i = 0; i < expr.fieldAccess.length - 1; i++) {
+    // Every step before the last field, in order: an element of an array
+    // (`fa[2].prop`) is of the element type.
+    const steps: AccessStep[] =
+      expr.accessChain && expr.accessChain.length > 0
+        ? expr.accessChain
+        : [
+            ...(expr.subscripts.length > 0
+              ? [{ kind: "subscript" as const, indices: expr.subscripts }]
+              : []),
+            ...expr.fieldAccess.map((name) => ({
+              kind: "field" as const,
+              name,
+            })),
+          ];
+    const last = steps[steps.length - 1];
+    if (last?.kind !== "field") return undefined;
+    for (const step of steps.slice(0, -1)) {
       if (!currentType) break;
-      currentType = this.resolveMemberType(currentType, expr.fieldAccess[i]!);
+      if (step.kind === "field") {
+        currentType = this.resolveMemberType(currentType, step.name);
+      } else if (step.kind === "subscript") {
+        currentType = this.ast
+          ? resolveArrayElementTypeUtil(currentType, this.ast)
+          : undefined;
+      } else {
+        currentType = undefined;
+      }
     }
 
     if (!currentType) return undefined;
@@ -8210,7 +8325,9 @@ export class CodeGenerator {
           delete baseExpr.accessChain;
         }
       }
-      objectCode = this.generateVariableExpression(baseExpr) + ".";
+      objectCode =
+        this.generateVariableExpression(baseExpr) +
+        this.memberSeparator(currentType);
     }
 
     return { objectCode, propertyName: propName };
@@ -8732,7 +8849,15 @@ export class CodeGenerator {
     call: FunctionCallExpression,
     indent: string,
   ): void {
-    const rawName = this.resolveVariableBaseName(call.functionName);
+    // A block instance reached through a REFERENCE TO variable is called on
+    // the instance it refers to.
+    const throughReference =
+      call.instance === undefined &&
+      this.currentScopeVarRefKinds.get(call.functionName.toUpperCase()) ===
+        "reference_to";
+    const rawName = throughReference
+      ? `${this.resolveVariableBaseName(call.functionName)}.target()`
+      : this.resolveVariableBaseName(call.functionName);
 
     // An instance held in a shared global (the global or an element of it) is
     // called in place under that global's lock.
@@ -8960,6 +9085,17 @@ export class CodeGenerator {
           `${indent}// WARNING: positional argument ${positionalIndex} could not be resolved`,
         );
         positionalIndex++;
+      } else if (
+        paramName &&
+        this.isReferenceToMember(fbTypeName, paramName) &&
+        !this.isReferenceToVariable(arg.value)
+      ) {
+        // A REFERENCE TO input is bound to the argument (CODESYS "Data Type:
+        // REFERENCE TO"); a REFERENCE TO argument is copied, rebinding it.
+        this.emit(
+          `${indent}${instanceName}.${this.fbParamMemberName(paramName, fbTypeName)}.bind(*${this.generateAddressOf(arg.value)});`,
+        );
+        if (!arg.name) positionalIndex++;
       } else if (paramName) {
         this.emit(
           `${indent}${instanceName}.${this.fbParamMemberName(paramName, fbTypeName)} = ${this.generateArgumentValue(paramName, arg.value, fbTypeName)};`,

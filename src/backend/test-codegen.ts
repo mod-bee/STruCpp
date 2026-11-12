@@ -74,6 +74,7 @@ export class TestCodeGenerator extends CodeGenerator {
         ifaceMethods,
       );
     }
+    this.registerInterfaceProperties(ast);
     for (const fb of ast.functionBlocks) {
       this.knownFBTypes.add(fb.name.toUpperCase());
       for (const method of fb.methods) {

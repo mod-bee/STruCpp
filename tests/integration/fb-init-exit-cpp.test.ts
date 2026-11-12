@@ -306,7 +306,7 @@ END_CONFIGURATION
     expect(result.cppCode).toContain(
       "GlobalVar<FB_BASE> CG{strucpp::FbCtorArgs{}, strucpp::FbInitThen{}, [](auto& v0) { v0.X = 5; }, 3};",
     );
-    expect(result.cppCode).toContain("    FB_BASE T(1);");
+    expect(result.cppCode).toContain("    FB_BASE T{1};");
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-fb-init-cfg-"));
     try {
       const built = compileWithGpp({

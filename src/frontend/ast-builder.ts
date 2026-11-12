@@ -220,6 +220,7 @@ function varBlockAccess(children: CstChildren): Visibility | undefined {
   if (children.PUBLIC) return "PUBLIC";
   if (children.PRIVATE) return "PRIVATE";
   if (children.PROTECTED) return "PROTECTED";
+  if (children.INTERNAL) return "INTERNAL";
   return undefined;
 }
 
@@ -793,6 +794,16 @@ export class ASTBuilder {
       methods.push(this.buildInterfaceMethodDeclaration(methodNode));
     }
 
+    // Property prototypes: with neither GET nor SET written, both (CODESYS
+    // creates an interface property with both accessors).
+    const properties = getAllNodes(children.propertyDeclaration).map((p) => {
+      const prop = this.buildPropertyDeclaration(p);
+      if (prop.getter === undefined && prop.setter === undefined) {
+        return { ...prop, getter: [], setter: [] };
+      }
+      return prop;
+    });
+
     return {
       kind: "InterfaceDeclaration",
       sourceSpan: nodeToSourceSpan(node),
@@ -800,6 +811,7 @@ export class ASTBuilder {
       declaredName,
       methods,
       ...(extendsList !== undefined ? { extends: extendsList } : {}),
+      ...(properties.length > 0 ? { properties } : {}),
     };
   }
 
@@ -868,6 +880,7 @@ export class ASTBuilder {
     let visibility: Visibility = "PROTECTED";
     if (children.PUBLIC) visibility = "PUBLIC";
     else if (children.PRIVATE) visibility = "PRIVATE";
+    else if (children.INTERNAL) visibility = "INTERNAL";
 
     // Modifiers
     const isAbstract = !!children.ABSTRACT;
@@ -970,6 +983,7 @@ export class ASTBuilder {
     let visibility: Visibility = "PUBLIC";
     if (children.PRIVATE) visibility = "PRIVATE";
     else if (children.PROTECTED) visibility = "PROTECTED";
+    else if (children.INTERNAL) visibility = "INTERNAL";
 
     // Property type
     const dataTypeNode = getFirstNode(children.dataType);
@@ -3545,8 +3559,8 @@ export class ASTBuilder {
     const children = node.children as CstChildren;
 
     // THIS^ (dereference - return self). A bare THIS (IEC 61131-3 §6.6.5.7.2)
-    // names the same instance.
-    if (children.Caret || !children.Dot) {
+    // names the same instance. `THIS^.x` is `THIS.x`.
+    if (!children.Dot) {
       return {
         kind: "VariableExpression",
         sourceSpan: nodeToSourceSpan(node),

@@ -220,9 +220,21 @@ export class STParser extends CstParser {
       });
     });
 
-    // Interface methods (abstract, no body)
+    // Interface methods (abstract, no body) and property prototypes
     this.MANY(() => {
-      this.SUBRULE(this.interfaceMethodDeclaration);
+      this.OR({
+        DEF: [
+          {
+            ALT: () => this.SUBRULE(this.interfaceMethodDeclaration),
+            GATE: () => this.LA(1).tokenType === tokens.METHOD,
+          },
+          {
+            ALT: () => this.SUBRULE(this.propertyDeclaration),
+            GATE: () => this.LA(1).tokenType === tokens.PROPERTY,
+          },
+        ],
+        IGNORE_AMBIGUITIES: true,
+      });
     });
     this.CONSUME(tokens.END_INTERFACE);
   });
@@ -254,15 +266,26 @@ export class STParser extends CstParser {
   public methodDeclaration = this.RULE("methodDeclaration", () => {
     this.CONSUME(tokens.METHOD);
     // Optional visibility modifier
-    this.OPTION(() => {
-      this.OR({
-        DEF: [
-          { ALT: () => this.CONSUME(tokens.PUBLIC) },
-          { ALT: () => this.CONSUME(tokens.PRIVATE) },
-          { ALT: () => this.CONSUME(tokens.PROTECTED) },
-        ],
-        IGNORE_AMBIGUITIES: true,
-      });
+    this.OPTION({
+      GATE: () =>
+        this.LA(1).tokenType !== tokens.Identifier || this.isInternalAhead(),
+      DEF: () => {
+        this.OR({
+          DEF: [
+            { ALT: () => this.CONSUME(tokens.PUBLIC) },
+            { ALT: () => this.CONSUME(tokens.PRIVATE) },
+            { ALT: () => this.CONSUME(tokens.PROTECTED) },
+            // INTERNAL (IEC 61131-3 6.6.5.9), read as a word so it stays
+            // usable as a name.
+            {
+              ALT: () =>
+                this.CONSUME2(tokens.Identifier, { LABEL: "INTERNAL" }),
+              GATE: () => this.isInternalAhead(),
+            },
+          ],
+          IGNORE_AMBIGUITIES: true,
+        });
+      },
     });
     // Optional ABSTRACT/FINAL/OVERRIDE (can appear in any combination and order)
     this.MANY2(() => {
@@ -322,17 +345,25 @@ export class STParser extends CstParser {
     // carries. Contradictory or repeated qualifiers are a semantic error, not a
     // grammar one — `validateVarModifiers` reports them with a source span,
     // which reads far better than a parser "expecting END_VAR".
-    this.MANY2(() => {
-      this.OR2([
-        { ALT: () => this.CONSUME(tokens.CONSTANT) },
-        { ALT: () => this.CONSUME(tokens.RETAIN) },
-        { ALT: () => this.CONSUME(tokens.NON_RETAIN) },
-        { ALT: () => this.CONSUME(tokens.PERSISTENT) },
-        // Access specifier on a VAR section (IEC 61131-3 §6.6.5.10, Var_Decls).
-        { ALT: () => this.CONSUME(tokens.PUBLIC) },
-        { ALT: () => this.CONSUME(tokens.PRIVATE) },
-        { ALT: () => this.CONSUME(tokens.PROTECTED) },
-      ]);
+    this.MANY2({
+      GATE: () =>
+        this.LA(1).tokenType !== tokens.Identifier || this.isInternalAhead(),
+      DEF: () => {
+        this.OR2([
+          { ALT: () => this.CONSUME(tokens.CONSTANT) },
+          { ALT: () => this.CONSUME(tokens.RETAIN) },
+          { ALT: () => this.CONSUME(tokens.NON_RETAIN) },
+          { ALT: () => this.CONSUME(tokens.PERSISTENT) },
+          // Access specifier on a VAR section (IEC 61131-3 §6.6.5.10, Var_Decls).
+          { ALT: () => this.CONSUME(tokens.PUBLIC) },
+          { ALT: () => this.CONSUME(tokens.PRIVATE) },
+          { ALT: () => this.CONSUME(tokens.PROTECTED) },
+          {
+            ALT: () => this.CONSUME3(tokens.Identifier, { LABEL: "INTERNAL" }),
+            GATE: () => this.isInternalAhead(),
+          },
+        ]);
+      },
     });
     this.MANY(() => {
       this.SUBRULE(this.varDeclaration);
@@ -346,15 +377,26 @@ export class STParser extends CstParser {
   public propertyDeclaration = this.RULE("propertyDeclaration", () => {
     this.CONSUME(tokens.PROPERTY);
     // Optional visibility modifier
-    this.OPTION(() => {
-      this.OR({
-        DEF: [
-          { ALT: () => this.CONSUME(tokens.PUBLIC) },
-          { ALT: () => this.CONSUME(tokens.PRIVATE) },
-          { ALT: () => this.CONSUME(tokens.PROTECTED) },
-        ],
-        IGNORE_AMBIGUITIES: true,
-      });
+    this.OPTION({
+      GATE: () =>
+        this.LA(1).tokenType !== tokens.Identifier || this.isInternalAhead(),
+      DEF: () => {
+        this.OR({
+          DEF: [
+            { ALT: () => this.CONSUME(tokens.PUBLIC) },
+            { ALT: () => this.CONSUME(tokens.PRIVATE) },
+            { ALT: () => this.CONSUME(tokens.PROTECTED) },
+            // INTERNAL (IEC 61131-3 6.6.5.9), read as a word so it stays
+            // usable as a name.
+            {
+              ALT: () =>
+                this.CONSUME2(tokens.Identifier, { LABEL: "INTERNAL" }),
+              GATE: () => this.isInternalAhead(),
+            },
+          ],
+          IGNORE_AMBIGUITIES: true,
+        });
+      },
     });
     this.CONSUME(tokens.Identifier);
     this.CONSUME(tokens.Colon);
@@ -448,17 +490,25 @@ export class STParser extends CstParser {
     // carries. Contradictory or repeated qualifiers are a semantic error, not a
     // grammar one — `validateVarModifiers` reports them with a source span,
     // which reads far better than a parser "expecting END_VAR".
-    this.MANY2(() => {
-      this.OR2([
-        { ALT: () => this.CONSUME(tokens.CONSTANT) },
-        { ALT: () => this.CONSUME(tokens.RETAIN) },
-        { ALT: () => this.CONSUME(tokens.NON_RETAIN) },
-        { ALT: () => this.CONSUME(tokens.PERSISTENT) },
-        // Access specifier on a VAR section (IEC 61131-3 §6.6.5.10, Var_Decls).
-        { ALT: () => this.CONSUME(tokens.PUBLIC) },
-        { ALT: () => this.CONSUME(tokens.PRIVATE) },
-        { ALT: () => this.CONSUME(tokens.PROTECTED) },
-      ]);
+    this.MANY2({
+      GATE: () =>
+        this.LA(1).tokenType !== tokens.Identifier || this.isInternalAhead(),
+      DEF: () => {
+        this.OR2([
+          { ALT: () => this.CONSUME(tokens.CONSTANT) },
+          { ALT: () => this.CONSUME(tokens.RETAIN) },
+          { ALT: () => this.CONSUME(tokens.NON_RETAIN) },
+          { ALT: () => this.CONSUME(tokens.PERSISTENT) },
+          // Access specifier on a VAR section (IEC 61131-3 §6.6.5.10, Var_Decls).
+          { ALT: () => this.CONSUME(tokens.PUBLIC) },
+          { ALT: () => this.CONSUME(tokens.PRIVATE) },
+          { ALT: () => this.CONSUME(tokens.PROTECTED) },
+          {
+            ALT: () => this.CONSUME3(tokens.Identifier, { LABEL: "INTERNAL" }),
+            GATE: () => this.isInternalAhead(),
+          },
+        ]);
+      },
     });
     this.MANY(() => {
       this.SUBRULE(this.varDeclaration);
@@ -1120,6 +1170,8 @@ export class STParser extends CstParser {
    */
   public thisStatement = this.RULE("thisStatement", () => {
     this.CONSUME(tokens.THIS);
+    // CODESYS `THIS^.member` (THIS is a pointer there), IEC `THIS.member`.
+    this.OPTION2(() => this.CONSUME(tokens.Caret));
     this.CONSUME(tokens.Dot);
     this.SUBRULE(this.identifierOrKeyword);
     // Determine if this is an assignment or method call
@@ -1155,6 +1207,31 @@ export class STParser extends CstParser {
   /**
    * Lookahead helper to detect if next token starts a VAR block.
    */
+  /**
+   * `INTERNAL` used as an access specifier: the word, followed by a name or
+   * a modifier rather than by what follows a name (`:`, `,`, `AT`, `(`).
+   */
+  private isInternalAhead(): boolean {
+    const t = this.LA(1);
+    if (
+      t.tokenType !== tokens.Identifier ||
+      t.image.toUpperCase() !== "INTERNAL"
+    ) {
+      return false;
+    }
+    const next = this.LA(2).tokenType;
+    return (
+      next === tokens.Identifier ||
+      next === tokens.ABSTRACT ||
+      next === tokens.FINAL ||
+      next === tokens.OVERRIDE ||
+      next === tokens.CONSTANT ||
+      next === tokens.RETAIN ||
+      next === tokens.NON_RETAIN ||
+      next === tokens.PERSISTENT
+    );
+  }
+
   private isVarBlockAhead(): boolean {
     const t = this.LA(1).tokenType;
     return (
@@ -1895,14 +1972,17 @@ export class STParser extends CstParser {
     this.OR([
       {
         // THIS^ (dereference - return self)
-        GATE: () => this.LA(1).tokenType === tokens.Caret,
+        GATE: () =>
+          this.LA(1).tokenType === tokens.Caret &&
+          this.LA(2).tokenType !== tokens.Dot,
         ALT: () => {
           this.CONSUME(tokens.Caret);
         },
       },
       {
-        // THIS.member or THIS.method(args)
+        // THIS.member or THIS.method(args); CODESYS `THIS^.member`
         ALT: () => {
+          this.OPTION3(() => this.CONSUME2(tokens.Caret));
           this.CONSUME(tokens.Dot);
           this.SUBRULE(this.identifierOrKeyword);
           // Optional function call: THIS.Method(args)

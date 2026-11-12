@@ -2560,7 +2560,47 @@ export class TypeChecker {
       if (!input) return;
       const shape = referenceShapeOf(input.type);
       if (shape) this.validateReferenceValue(shape, arg.value, scope);
+      if (shape?.chain.length === 1 && shape.chain[0] === "reference_to") {
+        this.validateReferenceBinding(input.name, shape.base, arg.value, scope);
+      }
     });
+  }
+
+  /**
+   * A REFERENCE TO input is bound to the argument by the call (CODESYS "Data
+   * Type: REFERENCE TO"): the argument is a variable of the referenced type,
+   * or a REFERENCE TO one.
+   */
+  private validateReferenceBinding(
+    inputName: string,
+    base: string,
+    value: Expression,
+    scope: Scope,
+  ): void {
+    const declared = this.declaredTypeRefOf(value, scope);
+    const isVariable =
+      value.kind === "VariableExpression" &&
+      (declared !== undefined || this.hasMemberAccess(value));
+    const sameType =
+      declared === undefined ||
+      !this.isExactlyKnownType(base) ||
+      !this.isExactlyKnownType(declared.name) ||
+      canonicalElementaryName(declared.name.toUpperCase()) ===
+        canonicalElementaryName(base.toUpperCase());
+    if (
+      isVariable &&
+      sameType &&
+      declared?.referenceKind !== "ref_to" &&
+      declared?.referenceKind !== "pointer_to"
+    ) {
+      return;
+    }
+    this.addError(
+      `Input '${inputName}' is REFERENCE TO ${base}: the call binds it, so pass a variable of type ${base}`,
+      value.sourceSpan.startLine,
+      value.sourceSpan.startCol,
+      value.sourceSpan.file,
+    );
   }
 
   /**
