@@ -142,6 +142,14 @@ interface TypeShape {
   elementReferenceChain?: ReferenceKind[];
 }
 
+/** A parameter of a called function or method, in declared order. */
+interface CallParam {
+  /** Upper-case name. */
+  name: string;
+  kind: "VAR_INPUT" | "VAR_IN_OUT" | "VAR_OUTPUT";
+  type: TypeShape;
+}
+
 /** What codegen keeps about a library FB member's type. */
 interface LibraryFieldShape {
   arrayDimensions?: Array<{ start: number; end: number }>;
@@ -976,17 +984,15 @@ export class CodeGenerator {
    * Build a TypeReference shape suitable for emitting a parameter type.
    *
    * Preserves array/pointer metadata (so inline ARRAY parameters become
-   * `Array1D<T, L, U>&` and pointer params become `IEC_Ptr<T>&`) but
-   * strips STRING/WSTRING maxLength so any size string binds to the
-   * &-reference — matching the previous behavior of the call sites that
-   * went through `mapVarTypeToCpp(decl.type.name)` without maxLength.
+   * `Array1D<T, L, U>&` and pointer params become `IEC_Ptr<T>&`) and a
+   * STRING/WSTRING's declared length, so the callee writes within it. An
+   * actual of another length is bound through `strucpp::by_ref`
+   * ({@link byRefStringArg}).
    */
   protected toParamTypeRef<T extends TypeShape>(typeRef: T): TypeShape {
-    const upper = typeRef.name.toUpperCase();
-    const isString = upper === "STRING" || upper === "WSTRING";
     return {
       name: typeRef.name,
-      ...(!isString && typeRef.maxLength !== undefined
+      ...(typeRef.maxLength !== undefined
         ? { maxLength: typeRef.maxLength }
         : {}),
       ...(typeRef.arrayDimensions !== undefined
@@ -6245,18 +6251,107 @@ export class CodeGenerator {
     const generics = key ? this.methodGenericParams.get(key) : undefined;
     const order = key ? this.methodInputOrder.get(key) : undefined;
 
+    const params = this.methodCallParams(ownerType, methodName);
     let positional = 0;
     return this.methodCallPlan(ownerType, methodName, args).map((entry) => {
       if (entry.arg === undefined) return entry.code!;
       const arg = entry.arg;
+      const param = arg.name
+        ? params?.find((p) => p.name === arg.name!.toUpperCase())
+        : params?.[positional];
       const paramName = arg.name ?? order?.[positional];
       if (!arg.name) positional++;
       if (paramName && generics?.has(paramName.toUpperCase())) {
         const descriptor = this.generateAnyDescriptor(arg.value);
         if (descriptor) return descriptor;
       }
-      return this.generateExpression(arg.value);
+      return this.byRefStringArg(param, this.generateExpression(arg.value));
     });
+  }
+
+  /**
+   * The argument for a by-reference STRING/WSTRING parameter, wrapped so an
+   * actual of any length binds: `strucpp::by_ref` is the actual itself when
+   * its type is the parameter's, else a copy assigned back after the call.
+   */
+  private byRefStringArg(param: CallParam | undefined, code: string): string {
+    if (
+      param === undefined ||
+      (param.kind !== "VAR_IN_OUT" && param.kind !== "VAR_OUTPUT") ||
+      param.type.arrayDimensions !== undefined ||
+      (param.type.referenceKind !== undefined &&
+        param.type.referenceKind !== "none")
+    ) {
+      return code;
+    }
+    const upper = param.type.name.toUpperCase();
+    if (upper !== "STRING" && upper !== "WSTRING") return code;
+    const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(param.type));
+    return `strucpp::by_ref<${cppType}>(${code})`;
+  }
+
+  /** A function's parameters in declared order (a project function's, else a
+   *  library function's from its manifest), or undefined if unknown. */
+  private functionCallParams(nameUpper: string): CallParam[] | undefined {
+    const decl = this.ast?.functions.find(
+      (f) => f.name.toUpperCase() === nameUpper,
+    );
+    if (decl) {
+      const params: CallParam[] = [];
+      for (const block of decl.varBlocks) {
+        const kind = block.blockType;
+        if (
+          kind !== "VAR_INPUT" &&
+          kind !== "VAR_IN_OUT" &&
+          kind !== "VAR_OUTPUT"
+        ) {
+          continue;
+        }
+        for (const d of block.declarations) {
+          for (const name of d.names) {
+            params.push({ name: name.toUpperCase(), kind, type: d.type });
+          }
+        }
+      }
+      return params;
+    }
+    const library = this.libraryFunctionParams.get(nameUpper);
+    return library?.map((p) => ({
+      name: p.name.toUpperCase(),
+      kind:
+        p.direction === "output"
+          ? "VAR_OUTPUT"
+          : p.direction === "inout"
+            ? "VAR_IN_OUT"
+            : "VAR_INPUT",
+      type: libraryParamTypeRef(p),
+    }));
+  }
+
+  /** A method's parameters in declared order, or undefined if unknown. */
+  private methodCallParams(
+    ownerType: string | undefined,
+    methodName: string,
+  ): CallParam[] | undefined {
+    const decl = this.findMethodDecl(ownerType, methodName);
+    if (!decl) return undefined;
+    const params: CallParam[] = [];
+    for (const block of decl.varBlocks ?? []) {
+      const kind = block.blockType;
+      if (
+        kind !== "VAR_INPUT" &&
+        kind !== "VAR_IN_OUT" &&
+        kind !== "VAR_OUTPUT"
+      ) {
+        continue;
+      }
+      for (const d of block.declarations) {
+        for (const name of d.names) {
+          params.push({ name: name.toUpperCase(), kind, type: d.type });
+        }
+      }
+    }
+    return params;
   }
 
   /**
@@ -7026,13 +7121,17 @@ export class CodeGenerator {
     // 4. Default: emit as-is (with output argument validation)
     const generics = this.functionGenericParams.get(nameUpper);
     const paramOrder = this.functionParamOrder.get(nameUpper);
+    const callParams = this.functionCallParams(nameUpper);
     let positionalSlot = 0;
     const args = expr.arguments.map((arg) => {
       const paramName = arg.name ?? paramOrder?.[positionalSlot];
+      const param = arg.name
+        ? callParams?.find((p) => p.name === arg.name!.toUpperCase())
+        : callParams?.[positionalSlot];
       if (!arg.name) positionalSlot++;
       const generated =
         this.generateGenericArgument(generics, paramName, arg.value) ??
-        this.generateExpression(arg.value);
+        this.byRefStringArg(param, this.generateExpression(arg.value));
       if (arg.isOutput && arg.value.kind !== "VariableExpression") {
         this.codegenWarnings.push({
           message: `Output argument '${arg.name ?? ""}' should be a variable, not an expression`,
@@ -7050,7 +7149,7 @@ export class CodeGenerator {
         (f) => f.name.toUpperCase() === nameUpper,
       );
       if (funcDecl) {
-        const paramInfo: Array<{ blockType: string; typeName: string }> = [];
+        const paramInfo: Array<{ blockType: string; type: TypeReference }> = [];
         for (const block of funcDecl.varBlocks) {
           if (
             block.blockType === "VAR_INPUT" ||
@@ -7059,10 +7158,7 @@ export class CodeGenerator {
           ) {
             for (const decl of block.declarations) {
               for (let ni = 0; ni < decl.names.length; ni++) {
-                paramInfo.push({
-                  blockType: block.blockType,
-                  typeName: decl.type.name,
-                });
+                paramInfo.push({ blockType: block.blockType, type: decl.type });
               }
             }
           }
@@ -7073,9 +7169,9 @@ export class CodeGenerator {
             param.blockType === "VAR_OUTPUT" ||
             param.blockType === "VAR_IN_OUT"
           ) {
-            args.push(this.emitOutputTempVar(param.typeName));
+            args.push(this.emitOutputTempVarOfType(param.type));
           } else {
-            args.push(this.getTypeDefaultValue(param.typeName));
+            args.push(this.getTypeDefaultValue(param.type.name));
           }
         }
       } else {
@@ -7314,15 +7410,11 @@ export class CodeGenerator {
       ) {
         for (const decl of block.declarations) {
           for (const name of decl.names) {
-            const entry: {
-              name: string;
-              typeName: string;
-              blockType: string;
-              defaultExpr?: string;
-            } = {
+            const entry: (typeof params)[number] = {
               name: name.toUpperCase(),
               typeName: decl.type.name,
               blockType: block.blockType,
+              typeRef: decl.type,
             };
             if (decl.initialValue) {
               entry.defaultExpr = this.generateInitializer(
@@ -7402,9 +7494,18 @@ export class CodeGenerator {
     const generics = this.functionGenericParams.get(
       expr.functionName.toUpperCase(),
     );
-    const renderArg = (value: Expression, paramName: string): string =>
-      this.generateGenericArgument(generics, paramName, value) ??
-      this.generateExpression(value);
+    const renderArg = (
+      value: Expression,
+      param: (typeof params)[number],
+    ): string =>
+      this.generateGenericArgument(generics, param.name, value) ??
+      this.byRefStringArg(
+        param.typeRef &&
+          (param.blockType === "VAR_IN_OUT" || param.blockType === "VAR_OUTPUT")
+          ? { name: param.name, kind: param.blockType, type: param.typeRef }
+          : undefined,
+        this.generateExpression(value),
+      );
 
     // Assign positional args to unclaimed parameter slots (in declaration order)
     const result: (string | undefined)[] = new Array<string | undefined>(
@@ -7418,7 +7519,7 @@ export class CodeGenerator {
         continue;
       }
       if (positionalIdx < positionalArgs.length) {
-        result[i] = renderArg(positionalArgs[positionalIdx]!, param.name);
+        result[i] = renderArg(positionalArgs[positionalIdx]!, param);
         positionalIdx++;
       }
     }
@@ -7428,7 +7529,7 @@ export class CodeGenerator {
       const param = params[i]!;
       const named = namedArgs.get(param.name);
       if (named !== undefined) {
-        result[i] = renderArg(named.value, param.name);
+        result[i] = renderArg(named.value, param);
       }
     }
 
@@ -7457,7 +7558,9 @@ export class CodeGenerator {
         param.blockType === "VAR_OUTPUT" ||
         param.blockType === "VAR_IN_OUT"
       ) {
-        return this.emitOutputTempVar(param.typeName);
+        return param.typeRef
+          ? this.emitOutputTempVarOfType(param.typeRef)
+          : this.emitOutputTempVar(param.typeName);
       }
       return param.defaultExpr ?? this.getTypeDefaultValue(param.typeName);
     });

@@ -767,4 +767,44 @@ inline T& as_lvalue(T&& value) {
     return value;
 }
 
+/**
+ * The argument of a STRING(n) or WSTRING(n) VAR_IN_OUT / VAR_OUTPUT bound to
+ * an actual of another length: a P holding the actual's value, assigned back
+ * to the actual (truncated as an assignment is) at the end of the full
+ * expression holding the call.
+ */
+template <typename P, typename A>
+class ByRefCopy {
+public:
+    explicit ByRefCopy(A& actual) : actual_(&actual) { value_ = actual; }
+    ByRefCopy(ByRefCopy&& other) noexcept
+        : actual_(other.actual_), value_(other.value_) {
+        other.actual_ = nullptr;
+    }
+    ByRefCopy(const ByRefCopy&) = delete;
+    ByRefCopy& operator=(const ByRefCopy&) = delete;
+    ByRefCopy& operator=(ByRefCopy&&) = delete;
+    ~ByRefCopy() {
+        if (actual_ != nullptr) *actual_ = value_;
+    }
+    operator P&() { return value_; }
+
+private:
+    A* actual_;
+    P value_;
+};
+
+/** A by-reference argument of the parameter's own type: bound as it is. */
+template <typename P>
+inline P& by_ref(P& actual) {
+    return actual;
+}
+
+/** A by-reference argument of another length: see ByRefCopy. */
+template <typename P, typename A,
+          typename = typename std::enable_if<!std::is_same<P, A>::value>::type>
+inline ByRefCopy<P, A> by_ref(A& actual) {
+    return ByRefCopy<P, A>(actual);
+}
+
 } // namespace strucpp
