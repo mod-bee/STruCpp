@@ -19,7 +19,8 @@ import { resolve, join } from "path";
 import { tmpdir } from "os";
 
 const CLI_PATH = resolve(__dirname, "../../dist/node/cli.js");
-const TMP_BASE = join(tmpdir(), "strucpp-cli-tests");
+// One folder per run: two runs at once (two checkouts) must not share it.
+const TMP_BASE = join(tmpdir(), `strucpp-cli-tests-${process.pid}`);
 
 /** Run the CLI and return stdout. Throws on non-zero exit. */
 function runCLI(args: string[]): string {
