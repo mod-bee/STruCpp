@@ -459,7 +459,7 @@ export class TypeCodeGenerator {
       }
       const rawType = field.type.arrayDimensions
         ? cppType
-        : this.mapTypeToCpp(field.type.name);
+        : this.mapTypeToCpp(field.type.name, field.type.maxLength);
       cppType = isReferenceField(field.type)
         ? // REF_TO / REFERENCE TO: the same wrapper a variable gets.
           wrapReferenceChain(
@@ -653,14 +653,16 @@ export class TypeCodeGenerator {
       const elemCpp = def.elementReferenceChain
         ? wrapReferenceChain(
             def.elementReferenceChain,
-            this.mapTypeToCpp(def.elementTypeName),
+            this.mapTypeToCpp(def.elementTypeName, def.elementMaxLength),
           )
         : this.mapTypeToCpp(def.elementTypeName);
       cppType = formatArrayType(elemCpp, def.arrayDimensions);
     } else {
       cppType = this.mapTypeToCpp(def.name);
     }
-    const rawType = def.arrayDimensions ? cppType : this.mapTypeToCpp(def.name);
+    const rawType = def.arrayDimensions
+      ? cppType
+      : this.mapTypeToCpp(def.name, def.maxLength);
     cppType = isReferenceField(def)
       ? wrapReferenceChain(def.referenceChain ?? [def.referenceKind], rawType)
       : pointerFieldType(def, cppType, rawType);
@@ -681,16 +683,25 @@ export class TypeCodeGenerator {
     maxLength?: number | string,
   ): string {
     return referenceChain
-      ? wrapReferenceChain(referenceChain, this.mapTypeToCpp(typeName))
+      ? wrapReferenceChain(referenceChain, this.mapTypeToCpp(typeName, maxLength))
       : this.mapStructFieldTypeToCpp(typeName, maxLength);
   }
 
   /**
-   * Map an IEC type name to its C++ equivalent (raw/unwrapped)
+   * Map an IEC type name to its C++ equivalent (raw/unwrapped). `maxLength`
+   * is a STRING / WSTRING's declared length: a reference to `STRING(20)` must
+   * refer to `IECString<20>` (whose variable is `IECStringVar<20>`), not to
+   * the 254-character default.
    */
-  mapTypeToCpp(typeName: string): string {
+  mapTypeToCpp(typeName: string, maxLength?: number | string): string {
     const upperName = typeName.toUpperCase();
 
+    if (maxLength !== undefined && upperName === "STRING") {
+      return `IECString<${maxLength}>`;
+    }
+    if (maxLength !== undefined && upperName === "WSTRING") {
+      return `IECWString<${maxLength}>`;
+    }
     if (isElementaryType(upperName)) {
       return IEC_TO_CPP_TYPE[upperName] ?? `${upperName}_t`;
     }

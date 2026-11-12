@@ -1096,13 +1096,13 @@ export class CodeGenerator {
    * for a user type, the raw value type (`INT_t`) for an elementary one. The
    * wrappers hold an IECVar<T> themselves.
    */
-  private rawReferencedType(name: string): string {
+  private rawReferencedType(name: string, maxLength?: number | string): string {
     if (this.isUserDefinedType(name)) {
       return this.knownProgramTypes.has(name.toUpperCase())
         ? `Program_${name}`
         : name;
     }
-    return this.typeCodeGen.mapTypeToCpp(name);
+    return this.typeCodeGen.mapTypeToCpp(name, maxLength);
   }
 
   protected mapTypeRefToCpp(typeRef: TypeShape): string {
@@ -1116,7 +1116,10 @@ export class CodeGenerator {
         ? // ARRAY OF POINTER TO / REF_TO: each element is the wrapper a variable gets.
           wrapReferenceChain(
             typeRef.elementReferenceChain,
-            this.rawReferencedType(typeRef.elementTypeName),
+            this.rawReferencedType(
+              typeRef.elementTypeName,
+              typeRef.elementMaxLength,
+            ),
           )
         : this.isUserDefinedType(typeRef.elementTypeName)
           ? typeRef.elementTypeName
@@ -1157,7 +1160,7 @@ export class CodeGenerator {
       const elemType =
         typeRef.arrayDimensions && typeRef.elementTypeName
           ? baseType
-          : this.rawReferencedType(typeRef.name);
+          : this.rawReferencedType(typeRef.name, typeRef.maxLength);
       // Nested levels (`POINTER TO REF_TO INT`) wrap innermost first.
       return wrapReferenceChain(
         typeRef.referenceChain ?? [typeRef.referenceKind],
@@ -3221,6 +3224,27 @@ export class CodeGenerator {
       return undefined;
     }
     return `${this.mapTypeRefToCpp(param.type)}(${this.referenceBindTarget(value)})`;
+  }
+
+  /**
+   * A REFERENCE TO variable passed to a parameter that is not itself a
+   * reference: IEC 61131-3 / CODESYS dereference a reference wherever it is
+   * used as a value, so an input receives the referenced value and an
+   * in-out / output the referenced variable. Any other argument: `code`.
+   */
+  private dereferenceArgument(
+    kind: string | undefined,
+    type: { referenceKind?: string } | undefined,
+    value: Expression,
+    code: string,
+  ): string {
+    if (!this.isReferenceToVariable(value)) return code;
+    if (type?.referenceKind !== undefined && type.referenceKind !== "none") {
+      return code;
+    }
+    return kind === "VAR_IN_OUT" || kind === "VAR_OUTPUT"
+      ? `${code}.target()`
+      : `${code}.get()`;
   }
 
   /** A plain REFERENCE TO variable (not a member or element of it). */
@@ -6961,7 +6985,12 @@ export class CodeGenerator {
       if (bound !== undefined) return bound;
       const code = this.byRefStringArg(
         param,
-        this.generateExpression(arg.value),
+        this.dereferenceArgument(
+          param?.kind,
+          param?.type,
+          arg.value,
+          this.generateExpression(arg.value),
+        ),
       );
       if (param?.kind === "VAR_OUTPUT") {
         const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(param.type));
@@ -7913,7 +7942,15 @@ export class CodeGenerator {
       const generated =
         this.generateGenericArgument(generics, paramName, arg.value) ??
         this.referenceInputArgument(param, arg.value) ??
-        this.byRefStringArg(param, this.generateExpression(arg.value));
+        this.byRefStringArg(
+          param,
+          this.dereferenceArgument(
+            param?.kind,
+            param?.type,
+            arg.value,
+            this.generateExpression(arg.value),
+          ),
+        );
       if (arg.isOutput && arg.value.kind !== "VariableExpression") {
         this.codegenWarnings.push({
           message: `Output argument '${arg.name ?? ""}' should be a variable, not an expression`,
@@ -8292,7 +8329,12 @@ export class CodeGenerator {
           (param.blockType === "VAR_IN_OUT" || param.blockType === "VAR_OUTPUT")
           ? { name: param.name, kind: param.blockType, type: param.typeRef }
           : undefined,
-        this.generateExpression(value),
+        this.dereferenceArgument(
+          param.blockType,
+          param.typeRef,
+          value,
+          this.generateExpression(value),
+        ),
       );
 
     // Assign positional args to unclaimed parameter slots (in declaration order)
