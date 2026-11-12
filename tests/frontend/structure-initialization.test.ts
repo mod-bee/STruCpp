@@ -320,7 +320,9 @@ describe("type-level default values (IEC 61131-3 B.1.3.3)", () => {
     `);
     const init = firstProgramVar(ast).initialValue;
     expect(init?.kind).toBe("VariableExpression");
-    expect(init && "name" in init ? init.name : undefined).toBe("GREEN");
+    // As the typed value Light#GREEN: another enumeration may also have a GREEN.
+    expect(init && "name" in init ? init.name : undefined).toBe("LIGHT");
+    expect(init && "fieldAccess" in init ? init.fieldAccess : undefined).toEqual(["GREEN"]);
   });
 
   it("leaves VAR_EXTERNAL alone — it names storage owned elsewhere", () => {

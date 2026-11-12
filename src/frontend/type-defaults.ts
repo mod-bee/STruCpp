@@ -133,6 +133,39 @@ function filled(element: Expression, count: number): ArrayLiteralExpression {
 }
 
 /**
+ * An enumeration's own default as a typed value (`E_State#Idle`), so it means
+ * that type's member wherever it is copied: another enumeration may have a
+ * member of the same name (`E_Bridge.Idle`), and a bare `Idle` is then
+ * ambiguous. Any other default is returned as written.
+ */
+function qualifiedEnumDefault(td: TypeDeclaration): Expression | undefined {
+  const value = td.defaultValue;
+  if (
+    td.definition.kind !== "EnumDefinition" ||
+    value?.kind !== "VariableExpression" ||
+    value.typedLiteral === true ||
+    (value.accessChain?.length ?? 0) > 0 ||
+    value.fieldAccess.length > 0
+  ) {
+    return value;
+  }
+  const member = td.definition.members.find(
+    (m) => m.name.toUpperCase() === value.name.toUpperCase(),
+  );
+  if (member === undefined) return value;
+  return {
+    kind: "VariableExpression",
+    sourceSpan: value.sourceSpan,
+    name: td.name,
+    subscripts: [],
+    fieldAccess: [member.name],
+    isDereference: false,
+    accessChain: [{ kind: "field", name: member.name }],
+    typedLiteral: true,
+  };
+}
+
+/**
  * Copy TYPE-level default values onto every declaration of those types that
  * lacks its own initialiser. Mutates `unit` in place.
  *
@@ -153,7 +186,7 @@ export function applyTypeDefaults(
 
   for (const td of unit.types) {
     const key = td.name.toUpperCase();
-    const own = td.defaultValue ?? firstElementDefault(td);
+    const own = qualifiedEnumDefault(td) ?? firstElementDefault(td);
     if (own) defaults.set(key, own);
     if (td.definition.kind === "TypeReference") {
       aliasTargets.set(key, td.definition.name.toUpperCase());
