@@ -23,6 +23,7 @@ const describeIfGpp = hasGpp ? describe : describe.skip;
 
 const SOURCE = `
 TYPE Pair : STRUCT a : INT; b : REAL; END_STRUCT; END_TYPE
+TYPE Colour : (Red, Green); END_TYPE
 
 FUNCTION_BLOCK Counter
 VAR_EXTERNAL total : DINT; END_VAR
@@ -49,7 +50,7 @@ VAR_EXTERNAL
   total : DINT; flag : BOOL; pr : Pair; arr : ARRAY[1..3] OF INT;
   lamp : BOOL; shared : Counter;
 END_VAR
-VAR c : Counter; d : Doubler; v : DINT := 3; r : DINT; label : STRING := 'x'; END_VAR
+VAR c : Counter; d : Doubler; v : DINT := 3; r : DINT; label : STRING := 'x'; colours : ARRAY[1..2] OF Colour; END_VAR
 VAR RETAIN kept : DINT := 7; END_VAR
   c(step := 2);
   d(x := v);

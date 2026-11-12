@@ -2476,7 +2476,7 @@ function renderCpp(
           // qualifier through to the runtime so the write paths can honour it.
           indirectIndex.has(e)
             ? `    { (void*)&debug_indirect[${indirectIndex.get(e)}], TAG_${e.tagName}, ${entryFlags(e, indirectType.get(e))}, ${capLiteral(e, indirectType.get(e))} },  // ${e.path} (in-out)`
-            : `    { ${entryLocation.get(e)!}, TAG_${e.tagName}, ${entryFlags(e)}, ${capLiteral(e, plcDataBlock ? blockNode(e.cppExpr).type : undefined)} },  // ${e.path}`,
+            : `    { ${entryLocation.get(e)!}, TAG_${e.tagName}, ${entryFlags(e, plcDataBlock ? blockNode(e.cppExpr).type : undefined)}, ${capLiteral(e, plcDataBlock ? blockNode(e.cppExpr).type : undefined)} },  // ${e.path}`,
         );
       }
     }
