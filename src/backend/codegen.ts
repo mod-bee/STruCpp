@@ -339,6 +339,9 @@ export interface CodeGenOptions {
    *  compiles produce identical output regardless. */
   emitChunkMarkers?: boolean;
 
+  /** See `CompileOptions.libraryCompile`: methods stay virtual. */
+  libraryCompile?: boolean;
+
   /** See `CompileOptions.plcDataBlock`: the configuration's globals and the
    *  configuration live in one runtime-allocated `PlcData` block. */
   plcDataBlock?: boolean;
@@ -521,6 +524,10 @@ export function guardedIdentifiers(lines: readonly string[]): string[] {
 }
 
 export class CodeGenerator {
+  /** UPPER names of the function blocks some block EXTENDS: the project's
+   *  and the libraries'. */
+  private extendedFbNames: Set<string> = new Set();
+
   private options: CodeGenOptions;
 
   /**
@@ -1250,6 +1257,9 @@ export class CodeGenerator {
    */
   registerLibraryArchives(archives: StlibArchive[]): void {
     for (const archive of archives) {
+      for (const fb of archive.manifest.functionBlocks) {
+        if (fb.extends) this.extendedFbNames.add(fb.extends.toUpperCase());
+      }
       this.registerLibraryFBTypes(
         archive.manifest.functionBlocks.map((fb) => {
           const mapVar = (v: LibraryField): LibraryField => {
@@ -3108,7 +3118,7 @@ export class CodeGenerator {
     // Generate method declarations (grouped by visibility)
     if (fb.methods.length > 0) {
       this.emitHeader("");
-      this.generateMethodDeclarations(fb.methods);
+      this.generateMethodDeclarations(fb.methods, this.isSealedFb(fb));
     }
 
     // Generate property declarations
@@ -3369,9 +3379,37 @@ export class CodeGenerator {
   }
 
   /**
-   * Generate method declarations in the class header, grouped by visibility.
+   * Whether no call of `fb`'s methods can bind to another block's: a program
+   * compile (which sees every block), no base, no interface, not ABSTRACT, and
+   * nothing EXTENDS it. Its methods are then ordinary member functions, which a
+   * linker drops when nothing calls them; virtual, every method of an
+   * instantiated block was kept through its vtable.
    */
-  private generateMethodDeclarations(methods: MethodDeclaration[]): void {
+  private isSealedFb(fb: CompilationUnit["functionBlocks"][0]): boolean {
+    if (this.options.libraryCompile || this.options.isTestBuild) return false;
+    if (fb.extends || (fb.implements?.length ?? 0) > 0 || fb.isAbstract) {
+      return false;
+    }
+    const name = fb.name.toUpperCase();
+    if (this.extendedFbNames.has(name)) return false;
+    if (
+      this.ast?.functionBlocks.some(
+        (other) => other.extends?.toUpperCase() === name,
+      )
+    ) {
+      return false;
+    }
+    return !fb.methods.some((m) => m.isAbstract || m.isOverride);
+  }
+
+  /**
+   * Generate method declarations in the class header, grouped by visibility.
+   * `sealed`: see {@link isSealedFb}.
+   */
+  private generateMethodDeclarations(
+    methods: MethodDeclaration[],
+    sealed = false,
+  ): void {
     // Group by visibility
     const groups: Record<Visibility, MethodDeclaration[]> = {
       PUBLIC: [],
@@ -3414,6 +3452,9 @@ export class CodeGenerator {
           prefix = "";
           suffix = " override";
           if (method.isFinal) suffix += " final";
+        } else if (sealed) {
+          prefix = "";
+          suffix = "";
         } else {
           prefix = "virtual ";
           suffix = method.isFinal ? " final" : "";

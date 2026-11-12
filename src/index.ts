@@ -811,6 +811,7 @@ export function compile(
     ...(pipeline.mergedOptions.emitChunkMarkers
       ? { emitChunkMarkers: true }
       : {}),
+    ...(pipeline.mergedOptions.libraryCompile ? { libraryCompile: true } : {}),
     ...(pipeline.mergedOptions.plcDataBlock ? { plcDataBlock: true } : {}),
   });
   codegen.setProjectModel(pipeline.projectModel!);

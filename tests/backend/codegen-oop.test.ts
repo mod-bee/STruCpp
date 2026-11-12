@@ -23,7 +23,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
   // 1. Virtual Methods
   // ─────────────────────────────────────────────────────────────────────
   describe("Virtual Methods", () => {
-    it("should generate virtual method declarations and implementations", () => {
+    it("binds the methods of a block nothing can extend statically", () => {
       const result = compileAndCheck(`
         FUNCTION_BLOCK Motor
           VAR _speed : INT; END_VAR
@@ -37,10 +37,12 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
         PROGRAM Main END_PROGRAM
       `);
 
-      // Header: class with virtual methods and virtual destructor
+      // Header: nothing extends MOTOR, so a call has nothing to bind to but
+      // its own method, and an unused one can be dropped by the linker.
       expect(result.headerCode).toContain("class MOTOR {");
-      expect(result.headerCode).toContain("virtual void START();");
-      expect(result.headerCode).toContain("virtual IEC_INT GETSPEED();");
+      expect(result.headerCode).toContain("    void START();");
+      expect(result.headerCode).toContain("    IEC_INT GETSPEED();");
+      expect(result.headerCode).not.toContain("virtual void START();");
       expect(result.headerCode).toContain("virtual ~MOTOR() = default;");
 
       // Implementation: method bodies
@@ -63,8 +65,53 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
         PROGRAM Main END_PROGRAM
       `);
 
-      expect(result.headerCode).toContain("virtual void TURNON();");
+      expect(result.headerCode).toContain("    void TURNON();");
       expect(result.cppCode).toContain("void LIGHT::TURNON() {");
+    });
+
+    it("keeps the methods of a block another block extends virtual", () => {
+      const result = compileAndCheck(`
+        FUNCTION_BLOCK Motor
+          METHOD PUBLIC Start END_METHOD
+        END_FUNCTION_BLOCK
+        FUNCTION_BLOCK FastMotor EXTENDS Motor
+          METHOD PUBLIC OVERRIDE Start END_METHOD
+        END_FUNCTION_BLOCK
+        PROGRAM Main END_PROGRAM
+      `);
+
+      expect(result.headerCode).toContain("virtual void START();");
+      expect(result.headerCode).toContain("void START() override;");
+    });
+
+    it("keeps the methods of a block with an interface virtual", () => {
+      const result = compileAndCheck(`
+        INTERFACE IRun
+          METHOD Run END_METHOD
+        END_INTERFACE
+        FUNCTION_BLOCK Runner IMPLEMENTS IRun
+          METHOD PUBLIC Run END_METHOD
+          METHOD PUBLIC Other END_METHOD
+        END_FUNCTION_BLOCK
+        PROGRAM Main END_PROGRAM
+      `);
+
+      expect(result.headerCode).toContain("virtual void RUN();");
+      expect(result.headerCode).toContain("virtual void OTHER();");
+    });
+
+    it("keeps methods virtual in a library, which a consumer may extend", () => {
+      const result = compile(
+        `
+        FUNCTION_BLOCK Motor
+          METHOD PUBLIC Start END_METHOD
+        END_FUNCTION_BLOCK
+      `,
+        { libraryCompile: true },
+      );
+
+      expect(result.errors).toEqual([]);
+      expect(result.headerCode).toContain("virtual void START();");
     });
   });
 
@@ -85,8 +132,12 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       `);
 
       // Header: abstract class
-      expect(result.headerCode).toContain("class IMOVABLE__IFACE : public virtual IEC_IFACE_ROOT {");
-      expect(result.headerCode).toContain("virtual ~IMOVABLE__IFACE() = default;");
+      expect(result.headerCode).toContain(
+        "class IMOVABLE__IFACE : public virtual IEC_IFACE_ROOT {",
+      );
+      expect(result.headerCode).toContain(
+        "virtual ~IMOVABLE__IFACE() = default;",
+      );
       expect(result.headerCode).toContain(
         "virtual void MOVE(IEC_REAL DISTANCE) = 0;",
       );
@@ -102,7 +153,9 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
         PROGRAM Main END_PROGRAM
       `);
 
-      expect(result.headerCode).toContain("class IREADABLE__IFACE : public virtual IEC_IFACE_ROOT {");
+      expect(result.headerCode).toContain(
+        "class IREADABLE__IFACE : public virtual IEC_IFACE_ROOT {",
+      );
       expect(result.headerCode).toContain("virtual IEC_INT READ() = 0;");
     });
 
@@ -367,7 +420,10 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       const childSection = result.cppCode.slice(
         result.cppCode.indexOf("void CHILD::operator()()"),
       );
-      const childBody = childSection.slice(0, childSection.indexOf("\n}\n") + 3);
+      const childBody = childSection.slice(
+        0,
+        childSection.indexOf("\n}\n") + 3,
+      );
       expect(childBody).not.toContain("BASE::operator()()");
     });
   });
@@ -578,8 +634,8 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
 
       const header = result.headerCode;
       // Public method should follow a public: section
-      const publicIdx = header.indexOf("virtual void PUBMETHOD()");
-      const privateIdx = header.indexOf("virtual void PRIVMETHOD()");
+      const publicIdx = header.indexOf("void PUBMETHOD()");
+      const privateIdx = header.indexOf("void PRIVMETHOD()");
       expect(publicIdx).toBeGreaterThan(-1);
       expect(privateIdx).toBeGreaterThan(-1);
 
@@ -643,6 +699,8 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
           METHOD PUBLIC FINAL Seal
           END_METHOD
         END_FUNCTION_BLOCK
+        FUNCTION_BLOCK Sub EXTENDS Motor
+        END_FUNCTION_BLOCK
         PROGRAM Main END_PROGRAM
       `);
 
@@ -689,7 +747,9 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
         PROGRAM Main END_PROGRAM
       `);
 
-      expect(result.headerCode).toContain("virtual ~IDISPOSABLE__IFACE() = default;");
+      expect(result.headerCode).toContain(
+        "virtual ~IDISPOSABLE__IFACE() = default;",
+      );
     });
   });
 
@@ -808,7 +868,9 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
         PROGRAM Main END_PROGRAM
       `);
 
-      expect(result.headerCode).toContain("class IDERIVED__IFACE : public virtual IBASE__IFACE {");
+      expect(result.headerCode).toContain(
+        "class IDERIVED__IFACE : public virtual IBASE__IFACE {",
+      );
     });
 
     it("should generate correct pure virtual methods for derived interface", () => {
@@ -930,7 +992,9 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       `);
 
       // Interface
-      expect(result.headerCode).toContain("class ICONTROLLABLE__IFACE : public virtual IEC_IFACE_ROOT {");
+      expect(result.headerCode).toContain(
+        "class ICONTROLLABLE__IFACE : public virtual IEC_IFACE_ROOT {",
+      );
       expect(result.headerCode).toContain("virtual void START() = 0;");
       expect(result.headerCode).toContain("virtual void STOP() = 0;");
 
@@ -998,7 +1062,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       `);
 
       expect(result.headerCode).toContain(
-        "virtual IEC_STRING FORMAT(IEC_STRING NAME, IEC_REAL VALUE, IEC_INT PRECISION);",
+        "    IEC_STRING FORMAT(IEC_STRING NAME, IEC_REAL VALUE, IEC_INT PRECISION);",
       );
     });
 
@@ -1012,7 +1076,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       `);
 
       expect(result.headerCode).toContain("class MINIMAL {");
-      expect(result.headerCode).toContain("virtual void DONOTHING();");
+      expect(result.headerCode).toContain("    void DONOTHING();");
       expect(result.cppCode).toContain("void MINIMAL::DONOTHING()");
     });
 
@@ -1318,7 +1382,9 @@ describe("Codegen - a variable named like a method of its block", () => {
     `);
     const messages = result.errors.map((e) => e.message).join("\n");
     for (const name of ["Good", "Total", "Own"]) {
-      expect(messages).toContain(`Variable '${name}' of 'F' has the name of a method`);
+      expect(messages).toContain(
+        `Variable '${name}' of 'F' has the name of a method`,
+      );
     }
   });
 });
@@ -1346,7 +1412,9 @@ describe("Codegen - a base block's VAR_IN_OUT in a derived block", () => {
         inst(Data := s, Extra := s2);
       END_PROGRAM
     `);
-    const body = result.cppCode.slice(result.cppCode.indexOf("void D::operator()()"));
+    const body = result.cppCode.slice(
+      result.cppCode.indexOf("void D::operator()()"),
+    );
     expect(body).toContain("DATA.var().X = EXTRA.var().Z;");
     expect(body).toContain("DATA.var().Y");
     expect(result.cppCode).toMatch(/iec_inout_bind\(INST\.DATA,/);

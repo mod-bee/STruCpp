@@ -760,6 +760,8 @@ export function compileLibrary(
     // they're persisted, so downstream consumers (legacy and
     // chunk-aware alike) see clean output.
     emitChunkMarkers: true,
+    // A consumer may extend the library's blocks: their methods stay virtual.
+    libraryCompile: true,
   };
   if (options.dependencies) {
     compileOpts.libraries = options.dependencies;

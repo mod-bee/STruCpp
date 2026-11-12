@@ -91,6 +91,13 @@ export interface CompileOptions {
   emitChunkMarkers?: boolean;
 
   /**
+   * The code is a library archive's: a consumer may extend its function
+   * blocks, so their methods stay virtual. A program compile sees every block
+   * that could, and binds a method statically where nothing does.
+   */
+  libraryCompile?: boolean;
+
+  /**
    * Keep the configuration's VAR_GLOBALs and the configuration instance in one
    * block, `strucpp::PlcData`, that the runtime builds at start-up
    * (`strucpp_plc_data_create()`) in storage from
