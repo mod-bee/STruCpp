@@ -242,6 +242,11 @@ export class Scope {
     this.symbols.set(symbol.name.toUpperCase(), symbol);
   }
 
+  /** Remove a symbol from this scope (a variable replacing an enum value's entry). */
+  remove(name: string): void {
+    this.symbols.delete(name.toUpperCase());
+  }
+
   /**
    * Look up a symbol in this scope only (not parent scopes).
    */

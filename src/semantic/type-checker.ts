@@ -33,7 +33,12 @@ import type {
   VarDeclaration,
   TypeReference,
 } from "../frontend/ast.js";
-import type { SymbolTables, Scope, VariableSymbol } from "./symbol-table.js";
+import type {
+  AnySymbol,
+  SymbolTables,
+  Scope,
+  VariableSymbol,
+} from "./symbol-table.js";
 import type { StdFunctionRegistry } from "./std-function-registry.js";
 import type { CompileError } from "../types.js";
 import {
@@ -950,7 +955,14 @@ export class TypeChecker {
     expr: VariableExpression,
     scope: Scope,
   ): IECType | undefined {
-    const symbol = scope.lookup(expr.name);
+    const found = scope.lookup(expr.name);
+    // A variable the block inherits (IEC 61131-3 6.6.5.5.2 rule 2) is in
+    // scope too, and wins over an enumeration value of its name (6.4.4.2:
+    // an enumerated literal is qualified, `E#v`, to be unique).
+    const symbol =
+      found === undefined || found.kind === "enumValue"
+        ? (this.inheritedVariable(expr.name) ?? found)
+        : found;
     if (symbol === undefined) {
       // Don't report error here — Pass 3 undeclared-variable check handles this
       return undefined;
@@ -1703,6 +1715,19 @@ export class TypeChecker {
         );
       }
     }
+  }
+
+  /** A variable of a block the current block EXTENDS, nearest first. */
+  private inheritedVariable(name: string): AnySymbol | undefined {
+    const seen = new Set<string>();
+    let base = this.currentFb?.extends;
+    while (base !== undefined && !seen.has(base.toUpperCase())) {
+      seen.add(base.toUpperCase());
+      const hit = this.symbolTables.getFBScope(base)?.lookupLocal(name);
+      if (hit?.kind === "variable" || hit?.kind === "constant") return hit;
+      base = this.symbolTables.lookupFunctionBlock(base)?.declaration.extends;
+    }
+    return undefined;
   }
 
   /**

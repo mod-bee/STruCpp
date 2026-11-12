@@ -886,6 +886,14 @@ export class SemanticAnalyzer {
         for (const name of decl.names) {
           try {
             const varType = this.resolveVarType(decl.type.name);
+            // A global variable wins over an enumeration value of its name
+            // (see buildVarBlockSymbols).
+            if (
+              this.symbolTables.globalScope.lookupLocal(name)?.kind ===
+              "enumValue"
+            ) {
+              this.symbolTables.globalScope.remove(name);
+            }
             if (block.isConstant) {
               this.symbolTables.globalScope.define({
                 name,
@@ -949,6 +957,12 @@ export class SemanticAnalyzer {
         for (const name of decl.names) {
           try {
             const varType = this.resolveVarType(decl.type.name);
+            // A variable wins over an enumeration value of its name (IEC
+            // 61131-3 6.4.4.2: the value is qualified, `E#v`, where a name is
+            // not unique); the global enumValue entry exists for completion.
+            if (scope.lookupLocal(name)?.kind === "enumValue") {
+              scope.remove(name);
+            }
             if (block.isConstant) {
               scope.define({
                 name,

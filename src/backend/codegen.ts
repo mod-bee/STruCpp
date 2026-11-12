@@ -684,6 +684,8 @@ export class CodeGenerator {
 
   /** Map of UPPER(typeName).UPPER(propName) → declared property name for property access codegen */
   protected propertyNameMap: Map<string, string> = new Map();
+  /** Names of the top-level VAR_GLOBAL variables (see isVariableInScope). */
+  private topLevelGlobalNames: Set<string> | undefined;
 
   /** Current FB name (set during generateFBImplementation for property resolution) */
   private currentFBName: string | undefined;
@@ -6433,7 +6435,7 @@ export class CodeGenerator {
     const enumEntry = this.enumMemberToType.get(nameUpper);
     if (
       enumEntry?.typeName &&
-      !this.currentScopeVarTypes.has(nameUpper) &&
+      !this.isVariableInScope(nameUpper) &&
       expr.fieldAccess.length === 0 &&
       (!expr.accessChain || expr.accessChain.length === 0)
     ) {
@@ -10474,15 +10476,30 @@ export class CodeGenerator {
     if (chain.length === 0 && expr.fieldAccess.length === 0) {
       return (
         this.enumMemberToType.get(nameUpper)?.typeName !== undefined &&
-        !this.currentScopeVarTypes.has(nameUpper)
+        !this.isVariableInScope(nameUpper)
       );
     }
     return (
       this.enumTypeMembers.has(nameUpper) &&
       chain.length === 1 &&
       chain[0]!.kind === "field" &&
-      !this.currentScopeVarTypes.has(nameUpper)
+      !this.isVariableInScope(nameUpper)
     );
+  }
+
+  /**
+   * A variable of the current POU, or a top-level global: it wins over an
+   * enumeration value of its name (IEC 61131-3 6.4.4.2, 6.5.2.2).
+   */
+  private isVariableInScope(nameUpper: string): boolean {
+    if (this.currentScopeVarTypes.has(nameUpper)) return true;
+    if (this.ast === undefined) return false;
+    this.topLevelGlobalNames ??= new Set(
+      (this.ast?.globalVarBlocks ?? []).flatMap((b) =>
+        b.declarations.flatMap((d) => d.names.map((n) => n.toUpperCase())),
+      ),
+    );
+    return this.topLevelGlobalNames.has(nameUpper);
   }
 
   /**
