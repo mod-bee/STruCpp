@@ -19,6 +19,7 @@ import type {
   TypeReference,
   VarDeclaration,
 } from "../frontend/ast.js";
+import { hasAttribute } from "../frontend/ast.js";
 import type { POUInfo } from "./test-main-gen.js";
 
 import { CodeGenerator } from "./codegen.js";
@@ -100,7 +101,10 @@ export class TestCodeGenerator extends CodeGenerator {
         const memberNames = td.definition.members.map((m) => m.name);
         const members = new Set(memberNames.map((m) => m.toUpperCase()));
         this.enumTypeMembers.set(td.name.toUpperCase(), members);
-        if (td.inline?.owner === undefined) {
+        if (
+          td.inline?.owner === undefined &&
+          !hasAttribute(td, "qualified_only")
+        ) {
           enumDescriptors.push({ name: td.name, members: memberNames });
         }
       }

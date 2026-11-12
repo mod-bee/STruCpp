@@ -38,7 +38,7 @@ import type {
   FunctionBlockDeclaration,
 } from "../frontend/ast.js";
 
-import { createDefaultSourceSpan } from "../frontend/ast.js";
+import { createDefaultSourceSpan, hasAttribute } from "../frontend/ast.js";
 import { parseInitialValueText } from "../frontend/expression-text.js";
 import type { SymbolTables } from "../semantic/symbol-table.js";
 import type { LineMapEntry, SourceSpan } from "../types.js";
@@ -1827,7 +1827,10 @@ export class CodeGenerator {
         const memberNames = td.definition.members.map((m) => m.name);
         const members = new Set(memberNames.map((m) => m.toUpperCase()));
         this.enumTypeMembers.set(td.name.toUpperCase(), members);
-        if (td.inline?.owner === undefined) {
+        if (
+          td.inline?.owner === undefined &&
+          !hasAttribute(td, "qualified_only")
+        ) {
           enumDescriptors.push({ name: td.name, members: memberNames });
         }
       }

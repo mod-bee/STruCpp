@@ -34,6 +34,7 @@ import type {
   TestFile,
   TestStatement,
 } from "../frontend/ast.js";
+import { hasAttribute } from "../frontend/ast.js";
 import type { CompileError, SourceSpan } from "../types.js";
 import { describeInlineType } from "../frontend/lower-inline-types.js";
 import { StdFunctionRegistry } from "./std-function-registry.js";
@@ -406,6 +407,8 @@ export class SemanticAnalyzer {
   private typeChecker: TypeChecker;
   private stdRegistry = new StdFunctionRegistry();
   private enumMemberMap: Map<string, EnumMemberEntry> = new Map();
+  /** Values of enumerations declared {attribute 'qualified_only'} → type. */
+  private qualifiedOnlyMembers = new Map<string, string>();
   /** Uppercase names of the TYPEs hoisted from the test file being analyzed. */
   private testTypeNames = new Set<string>();
   private errors: CompileError[] = [];
@@ -563,7 +566,11 @@ export class SemanticAnalyzer {
         // Use enum typeKind for EnumDefinition so CASE and type checks work correctly
         const resolvedType: EnumType | ElementaryType =
           typeDecl.definition.kind === "EnumDefinition"
-            ? enumTypeOf(typeDecl.name, typeDecl.definition)
+            ? enumTypeOf(
+                typeDecl.name,
+                typeDecl.definition,
+                hasAttribute(typeDecl, "strict"),
+              )
             : {
                 typeKind: "elementary" as const,
                 name: typeDecl.name,
@@ -634,7 +641,8 @@ export class SemanticAnalyzer {
         .filter(
           (t) =>
             t.definition.kind === "EnumDefinition" &&
-            t.inline?.owner === undefined,
+            t.inline?.owner === undefined &&
+            !hasAttribute(t, "qualified_only"),
         )
         .map((t) => ({
           name: t.name,
@@ -655,6 +663,14 @@ export class SemanticAnalyzer {
         continue;
       const enumType = sym.resolvedType as EnumType;
       if (enumType.values.length === 0) continue;
+      // `{attribute 'qualified_only'}` (CODESYS): its values are written
+      // `E.value` only, so they are no bare names.
+      if (hasAttribute(sym.declaration, "qualified_only")) {
+        for (const v of enumType.values) {
+          this.qualifiedOnlyMembers.set(v.toUpperCase(), enumType.name);
+        }
+        continue;
+      }
       enumDescriptors.push({ name: enumType.name, members: enumType.values });
     }
     this.enumMemberMap = buildEnumMemberMap(enumDescriptors);
@@ -1054,6 +1070,9 @@ export class SemanticAnalyzer {
       else this.addError(e.message, startLine, startCol, file);
     }
 
+    // A value of a qualified_only enumeration named bare in an initial value
+    this.validateQualifiedOnlyInitializers(ast);
+
     // FB_Init / FB_Exit / FB_Reinit (CODESYS "Method: FB_Init, FB_Reinit,
     // FB_Exit") and the FB_Init arguments of instance declarations
     for (const e of checkFbLifecycleRules(ast)) {
@@ -1080,6 +1099,40 @@ export class SemanticAnalyzer {
     // - Check CASE statement coverage
     // - Validate reference operations
     // - Check for unreachable code
+  }
+
+  /**
+   * `{attribute 'qualified_only'}` (CODESYS "Attribute: qualified_only"): a
+   * value of such an enumeration is written `E.value`, in an initial value as
+   * in a body (where checkNameDeclared reports it).
+   */
+  private validateQualifiedOnlyInitializers(ast: CompilationUnit): void {
+    if (this.qualifiedOnlyMembers.size === 0) return;
+    walkAST(ast, (node) => {
+      if (node.kind !== "VarDeclaration") return;
+      const init = (node as VarDeclaration).initialValue;
+      if (init === undefined) return;
+      walkAST(init, (inner) => {
+        if (inner.kind !== "VariableExpression") return;
+        const v = inner as VariableExpression;
+        const upper = v.name.toUpperCase();
+        const owner = this.qualifiedOnlyMembers.get(upper);
+        if (
+          owner === undefined ||
+          v.fieldAccess.length > 0 ||
+          this.enumMemberMap.has(upper) ||
+          this.symbolTables.globalScope.lookup(upper)?.kind === "variable"
+        ) {
+          return;
+        }
+        this.addError(
+          `'${v.name}' is a value of '${owner}', declared {attribute 'qualified_only'}: write '${owner}.${v.name}'`,
+          v.sourceSpan.startLine,
+          v.sourceSpan.startCol,
+          v.sourceSpan.file,
+        );
+      });
+    });
   }
 
   /**
@@ -5255,6 +5308,16 @@ export class SemanticAnalyzer {
 
     // 6. Enum member names (bare enum values like Stopped, Running, Manual)
     const enumEntry = this.enumMemberMap.get(upper);
+    const qualifiedOnly = this.qualifiedOnlyMembers.get(upper);
+    if (enumEntry === undefined && qualifiedOnly !== undefined) {
+      this.addError(
+        `'${name}' is a value of '${qualifiedOnly}', declared {attribute 'qualified_only'}: write '${qualifiedOnly}.${name}'`,
+        sourceSpan.startLine,
+        sourceSpan.startCol,
+        sourceSpan.file,
+      );
+      return;
+    }
     if (enumEntry) {
       if (enumEntry.typeName === null) {
         // Ambiguous — member exists in multiple enum types
@@ -5320,7 +5383,8 @@ export class SemanticAnalyzer {
         sym.kind === "type" &&
         sym.resolvedType?.typeKind === "enum" &&
         (sym.declaration as TypeDeclaration | undefined)?.inline?.owner ===
-          undefined
+          undefined &&
+        !hasAttribute(sym.declaration, "qualified_only")
       ) {
         const enumType = sym.resolvedType as EnumType;
         enumDescriptors.push({ name: enumType.name, members: enumType.values });
@@ -5384,7 +5448,11 @@ export class SemanticAnalyzer {
       }
       const resolvedType: EnumType | ElementaryType =
         typeDecl.definition.kind === "EnumDefinition"
-          ? enumTypeOf(typeDecl.name, typeDecl.definition)
+          ? enumTypeOf(
+              typeDecl.name,
+              typeDecl.definition,
+              hasAttribute(typeDecl, "strict"),
+            )
           : {
               typeKind: "elementary" as const,
               name: typeDecl.name,

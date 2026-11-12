@@ -257,6 +257,7 @@ edges on `CU` and `CD` leave `CV` unchanged. CODESYS does not document that case
 |---------|--------|-------|
 | Nested comments `(* (* *) *)` | Supported | Arbitrary nesting depth |
 | Pragmas `{...}` | Supported | Including `{external}` for inline C++ |
+| Attribute pragmas (CODESYS) | Supported | `{attribute 'name'}` / `{attribute 'name' := 'value'}` before a POU, method, property, TYPE, variable section or declaration. `qualified_only` on an enumeration: its values are written `E.value` only (a bare one is refused, in bodies and initial values) and are no bare names, so two such enumerations may share value names. `strict` on an enumeration: no arithmetic (no FOR counter), no constant or variable of another type assigned; for a data type with named values, whose values otherwise compute as the base type (an IEC enumeration is already strict). `hide`, `conditionalshow`: the variable (or every member of a block so decorated) is left out of the debug table and map, unless it is retained (retention wins). Every other attribute is accepted and ignored, as CODESYS does. Not yet: `qualified_only` on a VAR_GLOBAL list (a top-level list has no name to qualify with) and on a library's enumerations (the manifest does not carry attributes) |
 | Inline C++ | Supported | Via `{external ...}` pragma blocks |
 | Inline function calls | Supported | Via `{call ...}` pragma |
 | Global constants (`-D`) | Supported | CLI `-D NAME=VALUE`, emits `constexpr` |

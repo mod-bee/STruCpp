@@ -25,6 +25,30 @@ export interface ASTNode {
 
   /** Parent node (set during tree construction) */
   parent?: ASTNode;
+
+  /**
+   * Attribute pragmas written right before the declaration
+   * (`{attribute 'qualified_only'}`, CODESYS "Attribute Pragmas"). Set on
+   * POUs, methods, properties, types, variable sections and declarations;
+   * absent when there are none.
+   */
+  attributes?: PragmaAttribute[];
+}
+
+/** One `{attribute 'name'}` / `{attribute 'name' := 'value'}` pragma. */
+export interface PragmaAttribute {
+  /** Attribute name, lower case (`qualified_only`, `strict`, `hide`). */
+  name: string;
+  /** The value after `:=`, as written; absent for a bare attribute. */
+  value?: string;
+  line: number;
+  column: number;
+}
+
+/** True when the node carries the attribute (case-insensitive name). */
+export function hasAttribute(node: ASTNode | undefined, name: string): boolean {
+  const wanted = name.toLowerCase();
+  return node?.attributes?.some((a) => a.name === wanted) ?? false;
 }
 
 /**
@@ -86,6 +110,12 @@ export interface EnumType extends IECType {
    * Absent for an enumeration (6.4.4.2).
    */
   baseType?: string;
+  /**
+   * Declared `{attribute 'strict'}` (CODESYS "Enumeration", strict
+   * programming rules): no arithmetic, and only its own values assigned, so
+   * a data type with named values is checked as an enumeration.
+   */
+  strict?: true;
 }
 
 /**

@@ -33,6 +33,7 @@ import type {
   VarBlock,
   VarDeclaration,
 } from "../frontend/ast.js";
+import { hasAttribute } from "../frontend/ast.js";
 import { lockedGlobals, type ProjectModel } from "../project-model.js";
 import type { SymbolTables } from "../semantic/symbol-table.js";
 import { isElementaryType } from "../semantic/type-registry.js";
@@ -136,6 +137,17 @@ function applyBlockFlags(
  * a library block's VAR member walked solely for the RETAIN state inside it.
  */
 const WALK_RETAINED_ONLY = 1 << 7;
+
+/**
+ * A declaration decorated `{attribute 'hide'}` or `{attribute
+ * 'conditionalshow'}` (CODESYS: not monitored, not shown in the debugger) is
+ * walked for its retained state only, so it keeps being retained.
+ */
+function hiddenFlags(node: ASTNode | undefined, flags: number): number {
+  return hasAttribute(node, "hide") || hasAttribute(node, "conditionalshow")
+    ? flags | WALK_RETAINED_ONLY
+    : flags;
+}
 
 /**
  * Walk-only flag, never emitted: the leaf is an array element of a declared
@@ -1365,7 +1377,11 @@ export function generateDebugTable(
         // the instance. `owner` is the type that DECLARES each one —
         // `memberCppName` mangles against the owner's interface methods, so
         // the derived name would spell a base member wrong.
-        const chain: Array<{ owner: string; blocks: VarBlock[] }> = [];
+        const chain: Array<{
+          owner: string;
+          blocks: VarBlock[];
+          hidden: boolean;
+        }> = [];
         const visited = new Set<string>();
         let cursor: typeof fbSym | undefined = fbSym;
         let cursorName = name;
@@ -1376,6 +1392,7 @@ export function generateDebugTable(
           chain.push({
             owner: cursorName,
             blocks: cursor.declaration.varBlocks,
+            hidden: hiddenFlags(cursor.declaration, 0) !== 0,
           });
           const base = cursor.declaration.extends;
           if (!base) break;
@@ -1390,6 +1407,7 @@ export function generateDebugTable(
           owner: string;
           blocks: VarBlock[];
           take: Set<string>;
+          hidden: boolean;
         }> = [];
         for (const entry of chain) {
           const take = new Set<string>();
@@ -1411,7 +1429,12 @@ export function generateDebugTable(
               }
             }
           }
-          emit.push({ owner: entry.owner, blocks: entry.blocks, take });
+          emit.push({
+            owner: entry.owner,
+            blocks: entry.blocks,
+            take,
+            hidden: entry.hidden,
+          });
         }
 
         for (const entry of emit.reverse()) {
@@ -1464,13 +1487,16 @@ export function generateDebugTable(
                 const valueInout =
                   block.blockType === "VAR_IN_OUT" &&
                   isValueInoutType(fieldDecl.type);
+                const fieldFlags = entry.hidden
+                  ? memberFlags | WALK_RETAINED_ONLY
+                  : hiddenFlags(fieldDecl, memberFlags);
                 for (const fieldName of fieldDecl.names) {
                   if (!entry.take.has(fieldName.toUpperCase())) continue;
                   (valueInout ? visitValueInout : visitTypeRef)(
                     `${path}.${fieldName.toUpperCase()}`,
                     `${cppExpr}.${memberCppName(fieldName, fieldDecl.type, entry.owner)}`,
                     fieldDecl.type,
-                    memberFlags,
+                    fieldFlags,
                   );
                 }
               }
@@ -1747,7 +1773,7 @@ export function generateDebugTable(
             key,
             `${varName}.value`,
             decl.type,
-            applyBlockFlags(0, block),
+            hiddenFlags(decl, applyBlockFlags(0, block)),
           );
         }
       }
@@ -1782,7 +1808,12 @@ export function generateDebugTable(
             }
             const declFlags = applyBlockFlags(0, block);
             for (const decl of block.declarations) {
-              visitVarDecl(basePath, baseCpp, decl, declFlags);
+              visitVarDecl(
+                basePath,
+                baseCpp,
+                decl,
+                hiddenFlags(decl, declFlags),
+              );
             }
           }
         }

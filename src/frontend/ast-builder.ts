@@ -9,6 +9,7 @@
 
 import type { CstNode, IToken } from "chevrotain";
 import type {
+  ASTNode,
   CompilationUnit,
   ProgramDeclaration,
   FunctionDeclaration,
@@ -68,7 +69,8 @@ import type {
   BinaryOperator,
   UnaryOperator,
 } from "./ast.js";
-import { declaredImageOf } from "./lexer.js";
+import { declaredImageOf, pragmaAttributesOf } from "./lexer.js";
+
 import { applyTypeDefaults } from "./type-defaults.js";
 import type { SourceSpan } from "../types.js";
 
@@ -100,6 +102,23 @@ function tokenToSourceSpan(token: IToken): SourceSpan {
 /**
  * Create a source span from a CST node.
  */
+/** The token a CST node starts with (the lowest offset beneath it). */
+function firstTokenOf(node: CstNode): IToken | undefined {
+  let best: IToken | undefined;
+  for (const childArray of Object.values(node.children)) {
+    for (const child of childArray ?? []) {
+      const token = "image" in child ? child : firstTokenOf(child);
+      if (
+        token &&
+        (best === undefined || token.startOffset < best.startOffset)
+      ) {
+        best = token;
+      }
+    }
+  }
+  return best;
+}
+
 function nodeToSourceSpan(node: CstNode): SourceSpan {
   const children = node.children as CstChildren;
   let startLine = Number.MAX_SAFE_INTEGER;
@@ -539,6 +558,10 @@ export class ASTBuilder {
    * Build a ProgramDeclaration from a CST node.
    */
   buildProgramDeclaration(node: CstNode): ProgramDeclaration {
+    return this.withAttributes(node, this.buildProgramDeclarationBody(node));
+  }
+
+  private buildProgramDeclarationBody(node: CstNode): ProgramDeclaration {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
@@ -577,6 +600,10 @@ export class ASTBuilder {
    * Build a FunctionDeclaration from a CST node.
    */
   buildFunctionDeclaration(node: CstNode): FunctionDeclaration {
+    return this.withAttributes(node, this.buildFunctionDeclarationBody(node));
+  }
+
+  private buildFunctionDeclarationBody(node: CstNode): FunctionDeclaration {
     const children = node.children as CstChildren;
     // Function name comes from identifierOrKeyword (allows OVERRIDE etc. as names)
     const idOrKwNodes = getAllNodes(children.identifierOrKeyword);
@@ -637,6 +664,15 @@ export class ASTBuilder {
    * Build a FunctionBlockDeclaration from a CST node.
    */
   buildFunctionBlockDeclaration(node: CstNode): FunctionBlockDeclaration {
+    return this.withAttributes(
+      node,
+      this.buildFunctionBlockDeclarationBody(node),
+    );
+  }
+
+  private buildFunctionBlockDeclarationBody(
+    node: CstNode,
+  ): FunctionBlockDeclaration {
     const children = node.children as CstChildren;
 
     // FB name comes from identifierOrKeyword subrule (allows contextual keywords as names)
@@ -722,6 +758,10 @@ export class ASTBuilder {
    * Build an InterfaceDeclaration from a CST node.
    */
   buildInterfaceDeclaration(node: CstNode): InterfaceDeclaration {
+    return this.withAttributes(node, this.buildInterfaceDeclarationBody(node));
+  }
+
+  private buildInterfaceDeclarationBody(node: CstNode): InterfaceDeclaration {
     const children = node.children as CstChildren;
     const allIdentifiers = getAllTokens(children.Identifier);
     const name = allIdentifiers[0]?.image ?? "";
@@ -768,6 +808,15 @@ export class ASTBuilder {
    * Interface methods are implicitly public and abstract.
    */
   buildInterfaceMethodDeclaration(node: CstNode): MethodDeclaration {
+    return this.withAttributes(
+      node,
+      this.buildInterfaceMethodDeclarationBody(node),
+    );
+  }
+
+  private buildInterfaceMethodDeclarationBody(
+    node: CstNode,
+  ): MethodDeclaration {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
@@ -805,6 +854,10 @@ export class ASTBuilder {
    * Build a MethodDeclaration from a methodDeclaration CST node.
    */
   buildMethodDeclaration(node: CstNode): MethodDeclaration {
+    return this.withAttributes(node, this.buildMethodDeclarationBody(node));
+  }
+
+  private buildMethodDeclarationBody(node: CstNode): MethodDeclaration {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
@@ -864,6 +917,10 @@ export class ASTBuilder {
    * Build a VarBlock from a methodVarBlock CST node (supports VAR_INST).
    */
   buildMethodVarBlock(node: CstNode): VarBlock {
+    return this.withAttributes(node, this.buildMethodVarBlockBody(node));
+  }
+
+  private buildMethodVarBlockBody(node: CstNode): VarBlock {
     const children = node.children as CstChildren;
 
     let blockType: VarBlockType = "VAR";
@@ -900,6 +957,10 @@ export class ASTBuilder {
    * Build a PropertyDeclaration from a propertyDeclaration CST node.
    */
   buildPropertyDeclaration(node: CstNode): PropertyDeclaration {
+    return this.withAttributes(node, this.buildPropertyDeclarationBody(node));
+  }
+
+  private buildPropertyDeclarationBody(node: CstNode): PropertyDeclaration {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
@@ -959,16 +1020,39 @@ export class ASTBuilder {
     const types: TypeDeclaration[] = [];
 
     for (const singleTypeNode of getAllNodes(children.singleTypeDeclaration)) {
-      types.push(this.buildSingleTypeDeclaration(singleTypeNode));
+      // An attribute above TYPE decorates the types the block declares.
+      types.push(
+        this.withAttributes(
+          node,
+          this.buildSingleTypeDeclaration(singleTypeNode),
+        ),
+      );
     }
 
     return types;
   }
 
   /**
+   * Attach the attribute pragmas written right before `cst` (CODESYS
+   * "Attribute Pragmas"; see `AttributePragma` in lexer.ts) to `result`.
+   */
+  private withAttributes<T extends ASTNode>(cst: CstNode, result: T): T {
+    const first = firstTokenOf(cst);
+    const attrs = first ? pragmaAttributesOf(first) : [];
+    if (attrs.length > 0) {
+      result.attributes = [...(result.attributes ?? []), ...attrs];
+    }
+    return result;
+  }
+
+  /**
    * Build a single TypeDeclaration from a singleTypeDeclaration CST node.
    */
   buildSingleTypeDeclaration(node: CstNode): TypeDeclaration {
+    return this.withAttributes(node, this.buildSingleTypeDeclarationBody(node));
+  }
+
+  private buildSingleTypeDeclarationBody(node: CstNode): TypeDeclaration {
     const children = node.children as CstChildren;
     const nameToken = getAllTokens(children.Identifier)[0];
     const name = nameToken?.image ?? "";
@@ -1494,6 +1578,10 @@ export class ASTBuilder {
    * Build a VarBlock from a CST node.
    */
   buildVarBlock(node: CstNode): VarBlock {
+    return this.withAttributes(node, this.buildVarBlockBody(node));
+  }
+
+  private buildVarBlockBody(node: CstNode): VarBlock {
     const children = node.children as CstChildren;
 
     // Determine block type from keywords
@@ -1611,6 +1699,10 @@ export class ASTBuilder {
    * Build a VarDeclaration from a CST node.
    */
   buildVarDeclaration(node: CstNode): VarDeclaration {
+    return this.withAttributes(node, this.buildVarDeclarationBody(node));
+  }
+
+  private buildVarDeclarationBody(node: CstNode): VarDeclaration {
     const children = node.children as CstChildren;
     // Variable names come from identifierOrKeyword subrule nodes (allows SET, ON, etc. as names)
     const names = getAllIdentifierOrKeywordImages(children.identifierOrKeyword);

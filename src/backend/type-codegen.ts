@@ -20,6 +20,7 @@ import type {
   BinaryExpression,
   UnaryExpression,
 } from "../frontend/ast.js";
+import { hasAttribute } from "../frontend/ast.js";
 import { TypeRegistry, isElementaryType } from "../semantic/type-registry.js";
 import {
   formatArrayType,
@@ -291,7 +292,8 @@ export class TypeCodeGenerator {
           .filter(
             (t) =>
               t.definition.kind === "EnumDefinition" &&
-              t.inline?.owner === undefined,
+              t.inline?.owner === undefined &&
+              !hasAttribute(t, "qualified_only"),
           )
           .map((t) => ({
             name: t.name,

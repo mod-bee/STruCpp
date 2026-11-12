@@ -607,14 +607,34 @@ export const NAMED_VALUES_BASE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /** The semantic type of an enumerated or named-values TYPE declaration. */
-export function enumTypeOf(name: string, def: EnumDefinition): EnumType {
+export function enumTypeOf(
+  name: string,
+  def: EnumDefinition,
+  strict = false,
+): EnumType {
   const base = def.baseType?.name.toUpperCase();
   return {
     typeKind: "enum",
     name,
     values: def.members.map((m) => m.name),
     ...(base !== undefined ? { baseType: base } : {}),
+    ...(strict ? { strict: true as const } : {}),
   };
+}
+
+/**
+ * The base type a data type with named values is checked as (6.4.4.3);
+ * undefined for an enumeration and for one declared `{attribute 'strict'}`
+ * (CODESYS), which is checked as an enumeration. Semantic checks only: the
+ * generated code still stores it as its base type.
+ */
+export function checkedNamedValuesBase(
+  type: IECType | undefined,
+): ElementaryType | undefined {
+  if (type?.typeKind === "enum" && (type as EnumType).strict === true) {
+    return undefined;
+  }
+  return namedValuesBase(type);
 }
 
 /**
@@ -649,7 +669,8 @@ function isEnumAssignable(target: IECType, source: IECType): boolean {
   if (target.typeKind === "enum" && source.typeKind === "enum") {
     return isSameEnum(target, source);
   }
-  const t = target.typeKind === "enum" ? namedValuesBase(target) : target;
+  const t =
+    target.typeKind === "enum" ? checkedNamedValuesBase(target) : target;
   const s = source.typeKind === "enum" ? namedValuesBase(source) : source;
   if (t?.typeKind !== "elementary" || s?.typeKind !== "elementary") {
     return false;

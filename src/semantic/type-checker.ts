@@ -53,6 +53,7 @@ import {
   resolveArrayElementAccessType,
   resolveFieldDeclaration,
   isSameEnum,
+  checkedNamedValuesBase,
   namedValuesBase,
   type AccessLookup,
   type AccessType,
@@ -1233,15 +1234,17 @@ export class TypeChecker {
       expr.operator,
     );
     if (comparison && isSameEnum(left, right)) return false;
+    // `{attribute 'strict'}` (CODESYS) forbids arithmetic, not comparison.
+    const baseOf = comparison ? namedValuesBase : checkedNamedValuesBase;
     const asNumber = (t: IECType): boolean =>
       t.typeKind === "enum"
-        ? namedValuesBase(t) !== undefined
+        ? baseOf(t) !== undefined
         : t.typeKind === "elementary" &&
           (_isTypeInCategory(t, "ANY_NUM") || _isTypeInCategory(t, "ANY_BIT"));
     if (asNumber(left) && asNumber(right)) return false;
 
     const plain = [left, right].find(
-      (t) => t.typeKind === "enum" && namedValuesBase(t) === undefined,
+      (t) => t.typeKind === "enum" && baseOf(t) === undefined,
     );
     const shown = `${typeNameUtil(left)} ${expr.operator} ${typeNameUtil(right)}`;
     this.addError(
@@ -2052,7 +2055,9 @@ export class TypeChecker {
 
     // A data type with named values is checked as its base type (IEC 61131-3
     // Ed.3 6.4.4.3), the messages naming the declared types.
-    const targetBase = namedValuesBase(targetType);
+    // `{attribute 'strict'}` (CODESYS): only the enumeration's own values
+    // are assigned to it; its value still reads as its base type.
+    const targetBase = checkedNamedValuesBase(targetType);
     const valueBase = namedValuesBase(valueType);
     if (
       (targetBase || valueBase) &&
@@ -2495,7 +2500,7 @@ export class TypeChecker {
           ? [argType, paramType]
           : [paramType, argType];
       if (_isAssignable(target, source)) return;
-      const targetBase = namedValuesBase(target) ?? target;
+      const targetBase = checkedNamedValuesBase(target) ?? target;
       const sourceBase = namedValuesBase(source) ?? source;
       if (
         (targetBase !== target || sourceBase !== source) &&
@@ -2516,7 +2521,7 @@ export class TypeChecker {
       }
       if (
         this.isUntypedNumericLiteral(arg.value) &&
-        namedValuesBase(target) !== undefined
+        checkedNamedValuesBase(target) !== undefined
       ) {
         return;
       }
@@ -2698,7 +2703,7 @@ export class TypeChecker {
         argType?.typeKind === "enum" &&
         ELEMENTARY_ONLY.has(param.constraint)
       ) {
-        const base = namedValuesBase(argType);
+        const base = checkedNamedValuesBase(argType);
         if (base === undefined) {
           if (!ENUM_TYPE_FUNCTIONS.has(nameUpper)) {
             this.addError(

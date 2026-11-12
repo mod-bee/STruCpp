@@ -8,6 +8,7 @@
  */
 
 import { createToken, Lexer, type IToken } from "chevrotain";
+import type { PragmaAttribute } from "./ast.js";
 
 // =============================================================================
 // Token Categories
@@ -153,6 +154,64 @@ export const TaskPragma = createToken({
   pattern: /\{\s*(?:CORE|STOP_ON_STUCK|STACK|RESTART_ON_FAULT)\b[^{}]*\}/i,
   line_breaks: true,
 });
+
+/**
+ * A CODESYS attribute pragma, `{attribute 'name'}` or
+ * `{attribute 'name' := 'value'}` (CODESYS online help, "Attribute
+ * Pragmas"; IEC 61131-3 §6.2 leaves pragmas to the Implementer). Kept out
+ * of the parser's token stream: `tokenize` hands each one to the token that
+ * follows it, which is where the declaration it decorates starts.
+ */
+export const AttributePragma = createToken({
+  name: "AttributePragma",
+  pattern: /\{\s*attribute\s+'[^']*'(?:\s*:=\s*'[^']*')?\s*\}/i,
+  line_breaks: true,
+  group: "attributes",
+});
+
+/** A token preceded by attribute pragmas. */
+interface TokenWithAttributes extends IToken {
+  pragmaAttributes?: PragmaAttribute[];
+}
+
+/** The attribute pragmas written right before this token. */
+export function pragmaAttributesOf(token: IToken): PragmaAttribute[] {
+  return (token as TokenWithAttributes).pragmaAttributes ?? [];
+}
+
+/** Give each attribute pragma to the first token after it. */
+function attachPragmaAttributes(
+  tokens: IToken[],
+  pragmas: readonly IToken[] | undefined,
+  source: string,
+): void {
+  if (pragmas === undefined || pragmas.length === 0) return;
+  let next = 0;
+  for (const pragma of pragmas) {
+    while (
+      next < tokens.length &&
+      tokens[next]!.startOffset <= pragma.startOffset
+    ) {
+      next++;
+    }
+    const target = tokens[next] as TokenWithAttributes | undefined;
+    if (target === undefined) return;
+    const text = source.slice(
+      pragma.startOffset,
+      (pragma.endOffset ?? pragma.startOffset) + 1,
+    );
+    const match =
+      /^\{\s*attribute\s+'([^']*)'(?:\s*:=\s*'([^']*)')?\s*\}$/i.exec(text);
+    if (match === null) continue;
+    const attribute: PragmaAttribute = {
+      name: (match[1] ?? "").trim().toLowerCase(),
+      ...(match[2] !== undefined ? { value: match[2] } : {}),
+      line: pragma.startLine ?? 0,
+      column: pragma.startColumn ?? 0,
+    };
+    (target.pragmaAttributes ??= []).push(attribute);
+  }
+}
 
 // =============================================================================
 // Nested Comment Support
@@ -832,8 +891,10 @@ export const allTokens = [
   // External code pragma
   ExternalPragma,
   TaskPragma,
+  AttributePragma,
 
   // Multi-character operators (before single-character)
+
   DoubleDot,
   Power,
   RefAssign,
@@ -1396,6 +1457,7 @@ export function tokenize(source: string): ReturnType<typeof STLexer.tokenize> {
 
   const result = STLexer.tokenize(upperSource);
   attachDeclaredImages(result.tokens, source, upperSource);
+  attachPragmaAttributes(result.tokens, result.groups.attributes, source);
 
   if (unclosedComment) {
     result.errors.push({
@@ -1427,6 +1489,7 @@ export function tokenizeTest(
 
   const result = TestLexer.tokenize(upperSource);
   attachDeclaredImages(result.tokens, source, upperSource);
+  attachPragmaAttributes(result.tokens, result.groups.attributes, source);
 
   if (unclosedComment) {
     result.errors.push({
