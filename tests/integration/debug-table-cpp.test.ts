@@ -157,6 +157,25 @@ END_PROGRAM${CFG}`,
     ).toBe("");
   });
 
+  it("compiles for a PROGRAM variable named like a method of another block", () => {
+    // The program's member kept the block's method names and was renamed
+    // `LABEL_`, while the table named `LABEL`.
+    expect(
+      buildDebugTable(
+        `FUNCTION_BLOCK Engine
+  METHOD PUBLIC Label : INT
+    Label := 1;
+  END_METHOD
+END_FUNCTION_BLOCK
+PROGRAM Main
+VAR e : Engine; label : INT; END_VAR
+  label := e.Label();
+END_PROGRAM${CFG}`,
+        "program_var_method_name",
+      ),
+    ).toBe("");
+  });
+
   it("compiles for a variable named like a <cmath> macro (nan)", () => {
     // ST `nan` is emitted upper case, and <cmath> defines NAN. The header
     // removes the macro for its declarations and restores it at its end; the

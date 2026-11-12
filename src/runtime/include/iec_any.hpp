@@ -120,4 +120,15 @@ struct IEC_ANY {
  * `TYPE_USINT` for a `BYTE`. Codegen knows the IEC name and emits it directly.
  */
 
+/**
+ * The descriptor of a call argument that has no storage of its own: a literal
+ * or a computed result. `value` is a temporary created in the call's full
+ * expression, so C++ keeps it alive until the call returns; `describe` builds
+ * the descriptor that points into it.
+ */
+template <typename V, typename Describe>
+inline IEC_ANY any_of_temporary(V&& value, Describe describe) {
+    return describe(value);
+}
+
 } // namespace strucpp

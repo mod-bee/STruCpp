@@ -3150,6 +3150,9 @@ export class CodeGenerator {
   private generateProgramHeaderDeclaration(
     prog: CompilationUnit["programs"][0],
   ): void {
+    // A program has no methods: its members are not renamed for the method
+    // names of the block generated before it.
+    this.currentFBInterfaceMethods = new Set();
     this.emitHeaderLineDirective(prog.sourceSpan.startLine);
     const classLine = this.currentHeaderLine;
     this.emitHeader(`class Program_${prog.name} : public ProgramBase {`);
@@ -3613,6 +3616,9 @@ export class CodeGenerator {
   private generateProgramImplementation(
     prog: CompilationUnit["programs"][0],
   ): void {
+    // A program has no methods: its members are not renamed for the method
+    // names of the block generated before it.
+    this.currentFBInterfaceMethods = new Set();
     // Constructor
     this.emit(`Program_${prog.name}::Program_${prog.name}() {`);
     this.emit("    // Initialize variables");
@@ -3961,6 +3967,9 @@ export class CodeGenerator {
    * Handles VAR_EXTERNAL as reference members.
    */
   private generateProgramHeaderFromModel(prog: ProgramDecl): void {
+    // A program has no methods: its members are not renamed for the method
+    // names of the block generated before it.
+    this.currentFBInterfaceMethods = new Set();
     const className = `Program_${prog.name}`;
 
     // Look up AST program for source spans
@@ -4133,6 +4142,9 @@ export class CodeGenerator {
    * Generate implementation for a program from the project model.
    */
   private generateProgramImplementationFromModel(prog: ProgramDecl): void {
+    // A program has no methods: its members are not renamed for the method
+    // names of the block generated before it.
+    this.currentFBInterfaceMethods = new Set();
     // Look up AST program for source span
     const astProg = this.ast?.programs.find(
       (p) => p.name.toUpperCase() === prog.name.toUpperCase(),
@@ -9555,10 +9567,87 @@ export class CodeGenerator {
     const declaredType = this.inferExprType(expr);
     if (!declaredType) return undefined;
 
+    if (!this.isAnyAddressable(expr)) {
+      return this.anyDescriptorForTemporary(expr, declaredType);
+    }
+
     // An IEC_ANY aliases its operand: it hands the callee a pointer the
     // callee keeps. So the operand has to name the storage, not a read of it
     // — see generateAliasLvalue.
     const value = this.generateAliasLvalue(expr);
+    return this.anyDescriptorForStorage(expr, declaredType, value);
+  }
+
+  /** Whether an argument names storage an IEC_ANY can point at. */
+  private isAnyAddressable(expr: Expression): boolean {
+    if (expr.kind === "ParenthesizedExpression") {
+      return this.isAnyAddressable(expr.expression);
+    }
+    if (expr.kind === "DrefExpression") return true;
+    if (expr.kind !== "VariableExpression") return false;
+    // An enumeration value parses as a name but is a constant.
+    return !this.isEnumValueReference(expr);
+  }
+
+  /** `RUN` or `MODE.RUN`: an enumeration value, not a variable. */
+  private isEnumValueReference(expr: VariableExpression): boolean {
+    const nameUpper = expr.name.toUpperCase();
+    const chain = expr.accessChain ?? [];
+    if (chain.length === 0 && expr.fieldAccess.length === 0) {
+      return (
+        this.enumMemberToType.get(nameUpper)?.typeName !== undefined &&
+        !this.currentScopeVarTypes.has(nameUpper)
+      );
+    }
+    return (
+      this.enumTypeMembers.has(nameUpper) &&
+      chain.length === 1 &&
+      chain[0]!.kind === "field" &&
+      !this.currentScopeVarTypes.has(nameUpper)
+    );
+  }
+
+  /**
+   * The descriptor for a call argument with no storage of its own: a literal
+   * or a computed result, held in a temporary of its declared type.
+   *
+   * The temporary is created inside the call's full expression, which C++
+   * keeps alive until the call returns. Hoisting it before the statement
+   * would evaluate it once in a loop condition and out of turn in an ELSIF.
+   * A function block pin keeps its descriptor past the call, so the semantic
+   * pass allows only a variable there.
+   */
+  private anyDescriptorForTemporary(
+    expr: Expression,
+    declaredType: string,
+  ): string | undefined {
+    if (arrayElementTypeName(declaredType) !== undefined) return undefined;
+    const fieldType = this.typeCodeGen.mapStructFieldTypeToCpp(declaredType);
+    // An enumeration's field type is the bare enum; its value lives in the
+    // wrapper, which is what the descriptor points into.
+    const cppType = this.enumTypeMembers.has(declaredType.toUpperCase())
+      ? `IEC_ENUM<${fieldType}>`
+      : fieldType;
+    const describe = this.anyDescriptorForStorage(
+      expr,
+      declaredType,
+      "__anyv",
+      false,
+    );
+    if (describe === undefined) return undefined;
+    return (
+      `strucpp::any_of_temporary(${cppType}(${this.generateExpression(expr)}), ` +
+      `[](${cppType}& __anyv) { return ${describe}; })`
+    );
+  }
+
+  /** The descriptor addressing `value`, the storage of `expr`. */
+  private anyDescriptorForStorage(
+    expr: Expression,
+    declaredType: string,
+    value: string,
+    syncStrings = true,
+  ): string | undefined {
     const element = arrayElementTypeName(declaredType);
     if (element) {
       return this.anyDescriptorForArray(
@@ -9570,7 +9659,10 @@ export class CodeGenerator {
 
     const typeClass = TYPE_CLASS_BY_IEC_TYPE[declaredType.toUpperCase()];
     if (typeClass) {
-      if (typeClass === "TYPE_STRING" || typeClass === "TYPE_WSTRING") {
+      if (
+        syncStrings &&
+        (typeClass === "TYPE_STRING" || typeClass === "TYPE_WSTRING")
+      ) {
         // The characters travel through raw_ptr(); the cached length does not.
         this.pendingStringSyncs.push(`${value}.sync_length();`);
       }
@@ -9597,7 +9689,9 @@ export class CodeGenerator {
         : `static_cast<int32_t>(sizeof(${value}))`;
       // An enumeration has no members to describe; a structure does.
       const desc = isEnum ? "nullptr" : this.typeDescriptorArg(declaredType);
-      if (desc !== "nullptr") this.noteStructStringSync(value, declaredType);
+      if (syncStrings && desc !== "nullptr") {
+        this.noteStructStringSync(value, declaredType);
+      }
       return (
         `strucpp::IEC_ANY{ strucpp::TYPE_CLASS::${cls}, ${ptr}, ${size}, 1, ` +
         `static_cast<int32_t>(sizeof(${value})), strucpp::TYPE_CLASS::${cls}, ` +
