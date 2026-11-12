@@ -683,7 +683,10 @@ export class TypeCodeGenerator {
     maxLength?: number | string,
   ): string {
     return referenceChain
-      ? wrapReferenceChain(referenceChain, this.mapTypeToCpp(typeName, maxLength))
+      ? wrapReferenceChain(
+          referenceChain,
+          this.mapTypeToCpp(typeName, maxLength),
+        )
       : this.mapStructFieldTypeToCpp(typeName, maxLength);
   }
 
