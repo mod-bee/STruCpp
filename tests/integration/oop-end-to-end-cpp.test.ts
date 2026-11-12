@@ -199,6 +199,61 @@ END_TEST
   });
 });
 
+describeIfGpp("a REFERENCE TO input is bound by the call", () => {
+  // CODESYS "Data Type: REFERENCE TO": `f(refX := x)` binds refX to x. Before,
+  // the call wrote x's value through the (unbound) reference.
+  it("binds the input to the caller's variable", () => {
+    const { stdout, exitCode } = runE2ETestPipeline({
+      sourceST: `
+FUNCTION_BLOCK FB_Ref
+  VAR_INPUT refX : REFERENCE TO INT; END_VAR
+  VAR_OUTPUT seen : INT; END_VAR
+  seen := refX;
+  refX := refX + 1;
+END_FUNCTION_BLOCK
+`,
+      testST: `
+TEST 'f(refX := x) binds refX to x'
+  VAR f : FB_Ref; x : INT := 5; y : INT := 50; END_VAR
+  f(refX := x);
+  ASSERT_EQ(f.seen, 5);
+  ASSERT_EQ(x, 6);
+  x := 20;
+  f(refX := x);
+  ASSERT_EQ(f.seen, 20);
+  ASSERT_EQ(x, 21);
+  f(refX := y);
+  ASSERT_EQ(f.seen, 50);
+  ASSERT_EQ(y, 51);
+  ASSERT_EQ(x, 21);
+END_TEST
+`,
+      testFileName: "test_ref_bind.st",
+      tempDirPrefix: "strucpp-ref-bind-",
+    });
+    expect(stdout).toContain("[PASS] f(refX := x) binds refX to x");
+    expect(exitCode).toBe(0);
+  });
+
+  it("refuses an argument that is not a variable", () => {
+    expect(
+      errorsOf(`
+FUNCTION_BLOCK FB_Ref
+  VAR_INPUT refX : REFERENCE TO INT; END_VAR
+END_FUNCTION_BLOCK
+PROGRAM P
+  VAR f : FB_Ref; x : INT; END_VAR
+  f(refX := 5);
+  f(refX := x + 1);
+END_PROGRAM
+`),
+    ).toEqual([
+      "Input 'REFX' is REFERENCE TO INT: the call binds it, so pass a variable of type INT",
+      "Input 'REFX' is REFERENCE TO INT: the call binds it, so pass a variable of type INT",
+    ]);
+  });
+});
+
 describe("OOP rules", () => {
   it("accepts the source", () => {
     expect(errorsOf(SOURCE)).toEqual([]);

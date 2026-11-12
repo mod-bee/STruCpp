@@ -21,10 +21,14 @@ import type { StlibArchive } from "../../src/library/library-manifest.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { execSync } from "child_process";
 import {
   compileWithGpp,
   createPCH,
+  CXX_STD,
+  cxxEnv,
   hasGpp,
+  RUNTIME_INCLUDE_PATH,
   runE2ETestPipeline,
 } from "./test-helpers.js";
 
@@ -268,6 +272,89 @@ END_FUNCTION_BLOCK
     expect(result.errors.map((e) => e.message)).toEqual([
       "'F': 'B' is not an FB_Init input of 'FB_L' (A)",
     ]);
+  });
+});
+
+describeIfGpp("FB_Init in a sealed block", () => {
+  // A block with no base, no interface and nothing extending it binds its
+  // methods statically (method-dead-strip-cpp.test.ts): FB_Init, FB_Exit and
+  // an INTERNAL method are plain member functions, and an unused method is
+  // still dropped by the linker.
+  const SEALED = `
+FUNCTION_BLOCK FB_Sealed
+  VAR n : DINT; END_VAR
+  METHOD FB_Init : BOOL
+    VAR_INPUT bInitRetains : BOOL; bInCopyCode : BOOL; nStart : DINT; END_VAR
+    n := nStart;
+  END_METHOD
+  METHOD FB_Exit : BOOL
+    VAR_INPUT bInCopyCode : BOOL; END_VAR
+    n := 0;
+  END_METHOD
+  METHOD INTERNAL Next : DINT
+    n := n + 1;
+    Next := n;
+  END_METHOD
+  METHOD PUBLIC NeverCalled : DINT
+    n := n * 7 + 3;
+    NeverCalled := n;
+  END_METHOD
+END_FUNCTION_BLOCK
+
+PROGRAM Main
+VAR c : FB_Sealed(nStart := 40); r : DINT; END_VAR
+  r := c.Next();
+END_PROGRAM
+
+CONFIGURATION Config0
+  RESOURCE Res0 ON PLC
+    TASK task0(INTERVAL := T#20ms, PRIORITY := 0);
+    PROGRAM instance0 WITH task0 : Main;
+  END_RESOURCE
+END_CONFIGURATION`;
+
+  it("stays sealed: no virtual or override on its methods, unused ones dropped", () => {
+    const result = compile(SEALED, { headerFileName: "generated.hpp" });
+    expect(result.errors.map((e) => e.message)).toEqual([]);
+    const methodLines = result.headerCode
+      .split("\n")
+      .filter((l) => /\b(FB_INIT|FB_EXIT|NEXT|NEVERCALLED)\(/.test(l));
+    expect(methodLines.length).toBe(4);
+    for (const line of methodLines) {
+      expect(line).not.toMatch(/\bvirtual\b|\boverride\b/);
+    }
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-fb-init-sealed-"));
+    try {
+      fs.writeFileSync(path.join(dir, "generated.hpp"), result.headerCode);
+      fs.writeFileSync(path.join(dir, "generated.cpp"), result.cppCode);
+      fs.writeFileSync(
+        path.join(dir, "main.cpp"),
+        `#include "generated.hpp"
+#include <cstdio>
+strucpp::Configuration_CONFIG0 g_config;
+int main() {
+  auto& p = g_config.INSTANCE0;
+  p.run();
+  p.run();
+  std::printf(p.R == 42 ? "ALL_OK\\n" : "FAIL r=%d\\n", (int)p.R);
+  return p.R == 42 ? 0 : 1;
+}
+`,
+      );
+      const bin = path.join(dir, "sealed");
+      execSync(
+        `g++ -std=${CXX_STD} -O1 -ffunction-sections -fdata-sections -Wl,--gc-sections ` +
+          `-I"${RUNTIME_INCLUDE_PATH}" -I"${dir}" -o "${bin}" ` +
+          `"${path.join(dir, "main.cpp")}" "${path.join(dir, "generated.cpp")}"`,
+        { encoding: "utf-8", env: cxxEnv },
+      );
+      expect(execSync(`"${bin}"`, { encoding: "utf-8" }).trim()).toBe("ALL_OK");
+      const symbols = execSync(`nm -C "${bin}"`, { encoding: "utf-8" });
+      expect(symbols).toContain("FB_SEALED::FB_INIT");
+      expect(symbols).not.toContain("FB_SEALED::NEVERCALLED");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
