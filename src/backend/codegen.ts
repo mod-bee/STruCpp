@@ -994,6 +994,11 @@ export class CodeGenerator {
       ...(typeRef.elementTypeName !== undefined
         ? { elementTypeName: typeRef.elementTypeName }
         : {}),
+      // An array of STRING(n) binds only an array of STRING(n): the element
+      // keeps its length (only a scalar string is widened).
+      ...(typeRef.elementMaxLength !== undefined
+        ? { elementMaxLength: typeRef.elementMaxLength }
+        : {}),
       ...(typeRef.elementReferenceChain !== undefined
         ? { elementReferenceChain: typeRef.elementReferenceChain }
         : {}),
@@ -6121,6 +6126,9 @@ export class CodeGenerator {
 
     const cppOp = CodeGenerator.BINARY_OP_MAP[expr.operator] ?? expr.operator;
 
+    const textCompare = this.stringComparison(expr, left, right, cppOp);
+    if (textCompare !== undefined) return textCompare;
+
     // IEC 61131-3 AND/OR/XOR are always bitwise. C++ bitwise & | ^ have
     // higher precedence than comparison operators (== != < >), unlike ST
     // where AND/OR have lower precedence. Parenthesize operands to preserve
@@ -6140,6 +6148,52 @@ export class CodeGenerator {
     }
 
     return `${left} ${cppOp} ${right}`;
+  }
+
+  /**
+   * A comparison of character strings (IEC 61131-3 Table 29), or undefined.
+   *
+   * The runtime orders a string variable only against another, and C++
+   * compares two literals as addresses, so ordering in any form, and = / <>
+   * between two literals, go through `iec_compare_text` (`iec_compare_wtext`).
+   */
+  private stringComparison(
+    expr: BinaryExpression,
+    left: string,
+    right: string,
+    cppOp: string,
+  ): string | undefined {
+    const ordering = ["<", "<=", ">", ">="].includes(expr.operator);
+    const equality = expr.operator === "=" || expr.operator === "<>";
+    if (!ordering && !equality) return undefined;
+    const kind = (e: Expression): "STRING" | "WSTRING" | undefined => {
+      const t = this.inferExprType(e)?.toUpperCase() ?? "";
+      if (
+        t === "STRING" ||
+        t.startsWith("STRING[") ||
+        t.startsWith("STRING(")
+      ) {
+        return "STRING";
+      }
+      if (
+        t === "WSTRING" ||
+        t.startsWith("WSTRING[") ||
+        t.startsWith("WSTRING(")
+      ) {
+        return "WSTRING";
+      }
+      return undefined;
+    };
+    const k = kind(expr.left);
+    if (k === undefined || kind(expr.right) !== k) return undefined;
+    const literal = (e: Expression) =>
+      e.kind === "LiteralExpression" &&
+      (e.literalType === "STRING" || e.literalType === "WSTRING");
+    if (equality && !(literal(expr.left) && literal(expr.right))) {
+      return undefined;
+    }
+    const fn = k === "STRING" ? "iec_compare_text" : "iec_compare_wtext";
+    return `(strucpp::${fn}(${left}, ${right}) ${cppOp} 0)`;
   }
 
   /**

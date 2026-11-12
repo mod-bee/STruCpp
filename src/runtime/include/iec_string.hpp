@@ -1648,4 +1648,25 @@ inline IEC_BOOL TO_BOOL(const IECStringVar<N>& s) noexcept {
     return TO_BOOL(s.get());
 }
 
+// ---------------------------------------------------------------------------
+// Ordering of strings (IEC 61131-3 Table 29: <, <=, >, >= on character
+// strings), whatever form each side has: a variable, a value or a literal.
+// Codegen emits `iec_compare_text(a, b) <op> 0` for them, and for = / <>
+// between two literals, which C++ would otherwise compare as addresses.
+// ---------------------------------------------------------------------------
+
+inline const char* iec_text(const char* s) noexcept { return s ? s : ""; }
+
+template<size_t N>
+inline const char* iec_text(const IECString<N>& s) noexcept { return s.c_str(); }
+
+template<size_t N>
+inline const char* iec_text(const IECStringVar<N>& s) noexcept { return s.c_str(); }
+
+/** Negative, zero or positive as `a` sorts before, with or after `b`, by character code. */
+template<typename A, typename B>
+inline int iec_compare_text(const A& a, const B& b) noexcept {
+    return std::strcmp(iec_text(a), iec_text(b));
+}
+
 } // namespace strucpp

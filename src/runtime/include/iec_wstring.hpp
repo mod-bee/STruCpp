@@ -869,4 +869,25 @@ inline auto LIMIT(const A& mn, const B& in, const C& mx) noexcept {
 }
 #undef STRUCPP_WSTRING_COMPARE_EXTENSIBLE
 
+// Ordering of wide strings: see iec_compare_text in iec_string.hpp.
+inline const char16_t* iec_wtext(const char16_t* s) noexcept { return s ? s : u""; }
+
+template<size_t N>
+inline const char16_t* iec_wtext(const IECWString<N>& s) noexcept { return s.c_str(); }
+
+template<size_t N>
+inline const char16_t* iec_wtext(const IECWStringVar<N>& s) noexcept { return s.c_str(); }
+
+/** Negative, zero or positive as `a` sorts before, with or after `b`, by character code. */
+template<typename A, typename B>
+inline int iec_compare_wtext(const A& a, const B& b) noexcept {
+    const char16_t* x = iec_wtext(a);
+    const char16_t* y = iec_wtext(b);
+    while (*x != 0 && *x == *y) {
+        ++x;
+        ++y;
+    }
+    return static_cast<int>(*x) - static_cast<int>(*y);
+}
+
 } // namespace strucpp
