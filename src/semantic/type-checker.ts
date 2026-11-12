@@ -68,6 +68,7 @@ import {
   fbInterfaces,
   findFunctionBlock,
   findInterface,
+  interfaceClosure,
   implementsInterface,
   interfacePrototypes,
 } from "./interface-utils.js";
@@ -788,6 +789,10 @@ export class TypeChecker {
     if (this.ast) {
       const local = resolveFieldType(typeName, fieldName, this.ast);
       if (local) return local;
+      // A property reads and writes as a variable of its type (CODESYS
+      // "Object: Property").
+      const property = this.propertyType(typeName, fieldName);
+      if (property) return property;
     }
     const fb = this.symbolTables.lookupFunctionBlock(typeName);
     if (fb) {
@@ -1715,6 +1720,34 @@ export class TypeChecker {
         );
       }
     }
+  }
+
+  /**
+   * The type of property `name` of a block (own or inherited) or of an
+   * interface (own or inherited), or undefined.
+   */
+  private propertyType(typeName: string, name: string): string | undefined {
+    if (!this.ast) return undefined;
+    const wanted = name.toUpperCase();
+    const seen = new Set<string>();
+    let fb = findFunctionBlock(this.ast, typeName);
+    while (fb !== undefined && !seen.has(fb.name.toUpperCase())) {
+      seen.add(fb.name.toUpperCase());
+      const own = fb.properties.find((p) => p.name.toUpperCase() === wanted);
+      if (own) return own.type.name;
+      fb =
+        fb.extends !== undefined
+          ? findFunctionBlock(this.ast, fb.extends)
+          : undefined;
+    }
+    if (findInterface(this.ast, typeName) === undefined) return undefined;
+    for (const owner of interfaceClosure(this.ast, [typeName])) {
+      const prop = findInterface(this.ast, owner)?.properties?.find(
+        (p) => p.name.toUpperCase() === wanted,
+      );
+      if (prop) return prop.type.name;
+    }
+    return undefined;
   }
 
   /** A variable of a block the current block EXTENDS, nearest first. */

@@ -303,3 +303,35 @@ END_FUNCTION_BLOCK`,
     ]);
   });
 });
+
+// CODESYS "Object: Property": a property is used like a variable of its type,
+// so reading and writing one is type-checked like a variable.
+describe("property reads and writes are type-checked", () => {
+  const SRC = (body: string) => `
+INTERFACE I_P PROPERTY nVal : INT END_PROPERTY END_INTERFACE
+FUNCTION_BLOCK FB_P IMPLEMENTS I_P
+  VAR n : INT; END_VAR
+  PROPERTY PUBLIC nVal : INT GET nVal := n; END_GET SET n := nVal; END_SET END_PROPERTY
+  PROPERTY PUBLIC sName : STRING GET sName := 'x'; END_GET END_PROPERTY
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK FB_Q EXTENDS FB_P END_FUNCTION_BLOCK
+PROGRAM P
+  VAR f : FB_P; q : FB_Q; i : I_P; b : BOOL; k : INT; s : STRING; END_VAR
+  ${body}
+END_PROGRAM
+`;
+  it("refuses a property of the wrong type, own, inherited or through an interface", () => {
+    expect(errorsOf(SRC("k := q.sName; f.nVal := 'text'; i.nVal := s;"))).toEqual([
+      "Cannot assign STRING to INT",
+      "Cannot assign STRING to INT",
+      "Cannot assign STRING to INT",
+    ]);
+  });
+  it("accepts and warns as for a variable", () => {
+    const r = compile(SRC("k := f.nVal + i.nVal; s := q.sName; b := f.nVal;"));
+    expect(r.errors.map((e) => e.message)).toEqual([]);
+    expect(r.warnings.map((w) => w.message)).toContain(
+      "Implicit narrowing conversion from INT to BOOL",
+    );
+  });
+});
