@@ -757,4 +757,14 @@ inline bool iec_inout_bind(InOut<V>&, A&) noexcept {
 template<typename V, typename A>
 inline void iec_inout_back(InOut<V>&, A&) noexcept {}
 
+/**
+ * A temporary as an lvalue, for an output a call omits: the callee writes it
+ * and the value is dropped. The temporary lives until the end of the full
+ * expression holding the call.
+ */
+template <typename T>
+inline T& as_lvalue(T&& value) {
+    return value;
+}
+
 } // namespace strucpp

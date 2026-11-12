@@ -6218,7 +6218,11 @@ export class CodeGenerator {
     args: ReadonlyArray<A>,
   ): Array<{ arg?: A; code?: string }> {
     const asWritten = args.map((arg) => ({ arg }));
-    if (!args.some((a) => a.name !== undefined)) return asWritten;
+    // A positional call is taken as written; a call with no arguments is a
+    // formal call that omits them all (IEC 61131-3 6.6.1.4.2).
+    if (args.length > 0 && !args.some((a) => a.name !== undefined)) {
+      return asWritten;
+    }
     const decl = this.findMethodDecl(ownerType, methodName);
     if (!decl) return asWritten;
     const plan: Array<{ arg?: A; code?: string }> = [];
@@ -6247,6 +6251,11 @@ export class CodeGenerator {
                 ? this.generateInitializer(d.initialValue, cppType, d.type.name)
                 : `${cppType}{}`,
             });
+          } else if (kind === "VAR_OUTPUT") {
+            // An omitted output: the method writes a temporary that lives
+            // for the call (the parameter is a reference).
+            const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(d.type));
+            plan.push({ code: `strucpp::as_lvalue(${cppType}{})` });
           } else {
             return asWritten;
           }
