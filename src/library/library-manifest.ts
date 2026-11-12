@@ -169,6 +169,16 @@ export interface LibraryMethodEntry {
   isAbstract?: true;
 }
 
+/** A property prototype of a library INTERFACE. */
+export interface LibraryInterfacePropertyEntry {
+  /** The property's name and type (`type`, lengths, reference levels). */
+  type: LibraryVarType;
+  /** The interface declares GET. */
+  get: boolean;
+  /** The interface declares SET. */
+  set: boolean;
+}
+
 /**
  * A library INTERFACE (IEC 61131-3 6.6.6): its method prototypes and the
  * interfaces it EXTENDS (6.6.6.6). The C++ class rides in a `type` chunk of
@@ -186,6 +196,12 @@ export interface LibraryInterfaceEntry {
   extends?: string[];
   /** Its own method prototypes (not the inherited ones). */
   methods: LibraryMethodEntry[];
+  /**
+   * Its own property prototypes (CODESYS "Object: Property"): the type and
+   * the accessors a block implementing it provides. Optional: an older
+   * archive declares none.
+   */
+  properties?: LibraryInterfacePropertyEntry[];
   /** Help text, as for blocks. */
   documentation?: string;
   /** Folder path within the library — see `LibraryFunctionEntry.category`. */

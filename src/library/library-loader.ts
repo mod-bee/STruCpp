@@ -26,6 +26,7 @@ import type {
   IECType,
   InterfaceDeclaration,
   MethodDeclaration,
+  PropertyDeclaration,
   ReferenceKind,
   StructDefinition,
   StructType,
@@ -447,6 +448,21 @@ export function libraryInterfaceDeclaration(
       ? { extends: [...entry.extends] }
       : {}),
     methods: entry.methods.map(makeMethodDeclaration),
+    ...((entry.properties ?? []).length > 0
+      ? {
+          properties: (entry.properties ?? []).map(
+            (p): PropertyDeclaration => ({
+              kind: "PropertyDeclaration",
+              sourceSpan: createDefaultSourceSpan(),
+              name: p.type.name,
+              type: makeSizedTypeRef(p.type),
+              visibility: "PUBLIC",
+              ...(p.get ? { getter: [] } : {}),
+              ...(p.set ? { setter: [] } : {}),
+            }),
+          ),
+        }
+      : {}),
   };
 }
 

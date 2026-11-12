@@ -3780,7 +3780,7 @@ export class SemanticAnalyzer {
     }
     // A property of an interface, own or inherited, through an interface
     // variable: written only when the interface declares SET.
-    for (const iface of ast.interfaces) {
+    for (const iface of [...ast.interfaces, ...(ast.libraryInterfaces ?? [])]) {
       for (const name of interfaceClosure(ast, [iface.name])) {
         for (const prop of findInterface(ast, name)?.properties ?? []) {
           const key = `${iface.name.toUpperCase()}.${prop.name.toUpperCase()}`;

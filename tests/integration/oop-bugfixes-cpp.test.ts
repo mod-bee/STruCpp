@@ -8,6 +8,8 @@
 
 import { describe, it, expect } from "vitest";
 import { compile } from "../../src/index.js";
+import { compileStlib } from "../../src/library/library-compiler.js";
+import type { StlibArchive } from "../../src/library/library-manifest.js";
 import { hasGpp, runE2ETestPipeline } from "./test-helpers.js";
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
@@ -214,5 +216,90 @@ FUNCTION_BLOCK FB_C
 END_FUNCTION_BLOCK
 `),
     ).toEqual([]);
+  });
+});
+
+// CODESYS "Object: Property": a library's interface property is part of the
+// interface a consumer implements and uses.
+describeIfGpp("a library interface's properties", () => {
+  const lib = () => {
+    const built = compileStlib(
+      [
+        {
+          fileName: "parts.st",
+          source: `
+INTERFACE I_Part
+  PROPERTY nVal : INT END_PROPERTY
+  PROPERTY bReady : BOOL GET END_GET END_PROPERTY
+END_INTERFACE
+FUNCTION_BLOCK FB_LibPart IMPLEMENTS I_Part
+  VAR n : INT; END_VAR
+  PROPERTY PUBLIC nVal : INT
+    GET nVal := n; END_GET
+    SET n := nVal; END_SET
+  END_PROPERTY
+  PROPERTY PUBLIC bReady : BOOL
+    GET bReady := n > 2; END_GET
+  END_PROPERTY
+END_FUNCTION_BLOCK
+`,
+        },
+      ],
+      { name: "parts-lib", version: "1.0.0", namespace: "partslib" },
+    );
+    expect(built.errors).toEqual([]);
+    return JSON.parse(JSON.stringify(built.archive)) as StlibArchive;
+  };
+
+  it("are in the manifest, implemented and used by a consumer", () => {
+    const archive = lib();
+    expect(archive.manifest.interfaces?.[0]?.properties).toEqual([
+      { type: { name: "NVAL", type: "INT" }, get: true, set: true },
+      { type: { name: "BREADY", type: "BOOL" }, get: true, set: false },
+    ]);
+    const source = `
+FUNCTION_BLOCK FB_Mine IMPLEMENTS I_Part
+  VAR n : INT := 7; END_VAR
+  PROPERTY PUBLIC nVal : INT
+    GET nVal := n * 10; END_GET
+    SET n := nVal; END_SET
+  END_PROPERTY
+  PROPERTY PUBLIC bReady : BOOL
+    GET bReady := TRUE; END_GET
+  END_PROPERTY
+END_FUNCTION_BLOCK
+FUNCTION F_Parts : INT
+  VAR a : FB_LibPart; m : FB_Mine; i : I_Part; END_VAR
+  i := a;
+  i.nVal := 3;
+  IF i.bReady THEN F_Parts := i.nVal; END_IF
+  i := m;
+  F_Parts := F_Parts + i.nVal;
+END_FUNCTION
+`;
+    const { stdout, exitCode } = runE2ETestPipeline({
+      sourceST: source,
+      testST: `
+TEST 'library interface properties'
+  ASSERT_EQ(F_Parts(), 73);
+END_TEST
+`,
+      testFileName: "test_lib_iface_props.st",
+      tempDirPrefix: "strucpp-lib-iface-props-",
+      compileOptions: { libraries: [archive] },
+    });
+    expect(stdout).toContain("[PASS] library interface properties");
+    expect(exitCode).toBe(0);
+    expect(
+      compile(
+        `FUNCTION_BLOCK FB_Bad IMPLEMENTS I_Part
+  PROPERTY PUBLIC nVal : INT GET nVal := 1; END_GET END_PROPERTY
+END_FUNCTION_BLOCK`,
+        { libraries: [archive] },
+      ).errors.map((e) => e.message),
+    ).toEqual([
+      "Property 'NVAL' of 'FB_BAD' needs SET: INTERFACE 'I_PART' declares it",
+      "FUNCTION_BLOCK 'FB_BAD' does not implement property 'BREADY' of INTERFACE 'I_PART'",
+    ]);
   });
 });

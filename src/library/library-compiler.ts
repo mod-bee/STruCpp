@@ -452,6 +452,15 @@ function buildInterfaceEntry(
       ? { extends: [...iface.extends] }
       : {}),
     methods: iface.methods.map(buildMethodEntry),
+    ...((iface.properties ?? []).length > 0
+      ? {
+          properties: (iface.properties ?? []).map((p) => ({
+            type: serializeVarType(p.name, p.type),
+            get: p.getter !== undefined,
+            set: p.setter !== undefined,
+          })),
+        }
+      : {}),
   };
 }
 

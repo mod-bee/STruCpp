@@ -8362,7 +8362,7 @@ export class CodeGenerator {
    * variable (`i.nCount` → `I->get_NCOUNT()`).
    */
   protected registerInterfaceProperties(ast: CompilationUnit): void {
-    for (const iface of ast.interfaces) {
+    for (const iface of [...ast.interfaces, ...(ast.libraryInterfaces ?? [])]) {
       for (const name of this.interfaceClosure([iface.name])) {
         for (const prop of findInterface(ast, name)?.properties ?? []) {
           this.propertyNameMap.set(
