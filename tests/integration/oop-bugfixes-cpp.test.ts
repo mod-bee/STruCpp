@@ -349,7 +349,7 @@ END_PROGRAM
 // A block nothing can override binds its methods statically (d85b49b,
 // method-dead-strip-cpp.test.ts); its property accessors likewise. An
 // accessor an interface declares, or one a derived block may replace, stays
-// virtual. The names are unchanged: get_NAME() const / set_NAME(T NAME).
+// virtual. The names are unchanged: get_NAME() / set_NAME(T NAME).
 describe("property accessors of a sealed block", () => {
   const SRC = `
 INTERFACE I_P PROPERTY nVal : INT END_PROPERTY END_INTERFACE
@@ -387,14 +387,14 @@ END_CONFIGURATION`;
       .map((l) => l.trim())
       .filter((l) => /\b(get|set)_[A-Z0-9]+\(/.test(l));
     expect(accessors).toEqual([
-      "virtual IEC_INT get_NVAL() const = 0;",
+      "virtual IEC_INT get_NVAL() = 0;",
       "virtual void set_NVAL(IEC_INT NVAL) = 0;",
-      "IEC_INT get_BP1() const;",
+      "IEC_INT get_BP1();",
       "void set_BP1(IEC_INT BP1);",
-      "IEC_INT get_BP2() const;",
-      "virtual IEC_INT get_NVAL() const;",
+      "IEC_INT get_BP2();",
+      "virtual IEC_INT get_NVAL();",
       "virtual void set_NVAL(IEC_INT NVAL);",
-      "virtual IEC_INT get_K() const;",
+      "virtual IEC_INT get_K();",
     ]);
   });
 

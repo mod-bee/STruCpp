@@ -3190,6 +3190,35 @@ export class CodeGenerator {
     return kind === "reference_to";
   }
 
+  /**
+   * The variable a REFERENCE TO parameter or input is bound to by a call
+   * (CODESYS "Data Type: REFERENCE TO"): a REFERENCE TO argument passes on
+   * what it refers to (so a reference to a derived structure binds a
+   * parameter of its base, STRUCT EXTENDS), any other argument itself.
+   */
+  private referenceBindTarget(value: Expression): string {
+    return this.isReferenceToVariable(value)
+      ? `${this.generateExpression(value)}.target()`
+      : `*${this.generateAddressOf(value)}`;
+  }
+
+  /**
+   * The argument for a REFERENCE TO input of a method or function, bound to
+   * the argument; undefined for any other parameter.
+   */
+  private referenceInputArgument(
+    param: { kind: string; type: TypeShape } | undefined,
+    value: Expression,
+  ): string | undefined {
+    if (
+      param?.kind !== "VAR_INPUT" ||
+      param.type.referenceKind !== "reference_to"
+    ) {
+      return undefined;
+    }
+    return `${this.mapTypeRefToCpp(param.type)}(${this.referenceBindTarget(value)})`;
+  }
+
   /** A plain REFERENCE TO variable (not a member or element of it). */
   private isReferenceToVariable(expr: Expression): boolean {
     return (
@@ -3763,7 +3792,7 @@ export class CodeGenerator {
     for (const prop of iface.properties ?? []) {
       const type = this.mapTypeRefToCpp(prop.type);
       if (prop.getter) {
-        this.emitHeader(`    virtual ${type} get_${prop.name}() const = 0;`);
+        this.emitHeader(`    virtual ${type} get_${prop.name}() = 0;`);
       }
       if (prop.setter) {
         this.emitHeader(
@@ -3958,7 +3987,7 @@ export class CodeGenerator {
       this.emitHeaderLineDirective(prop.sourceSpan.startLine);
       const propLine = this.currentHeaderLine;
       if (prop.getter) {
-        this.emitHeader(`    ${virt}${type} get_${prop.name}() const;`);
+        this.emitHeader(`    ${virt}${type} get_${prop.name}();`);
       }
       if (prop.setter) {
         this.emitHeader(
@@ -4078,7 +4107,7 @@ export class CodeGenerator {
     if (prop.getter) {
       this.emitLineDirective(prop.sourceSpan.startLine);
       const getterLine = this.currentLine;
-      this.emit(`${type} ${className}::get_${prop.name}() const {`);
+      this.emit(`${type} ${className}::get_${prop.name}() {`);
       this.emit(`    ${type} ${prop.name}_result;`);
       this.currentFunctionName = prop.name;
       this.generateStatements(prop.getter);
@@ -6896,14 +6925,9 @@ export class CodeGenerator {
         if (descriptor) return descriptor;
       }
       // A REFERENCE TO parameter is bound to the argument (CODESYS "Data
-      // Type: REFERENCE TO"); a REFERENCE TO argument is passed on as it is.
-      if (
-        param?.kind === "VAR_INPUT" &&
-        param.type.referenceKind === "reference_to" &&
-        !this.isReferenceToVariable(arg.value)
-      ) {
-        return `${this.mapTypeRefToCpp(param.type)}(*${this.generateAddressOf(arg.value)})`;
-      }
+      // Type: REFERENCE TO").
+      const bound = this.referenceInputArgument(param, arg.value);
+      if (bound !== undefined) return bound;
       return this.byRefStringArg(param, this.generateExpression(arg.value));
     });
   }
@@ -7559,8 +7583,15 @@ export class CodeGenerator {
       const prefix = expr.functionName.substring(0, dotIdx);
       const methodName = expr.functionName.substring(dotIdx + 1);
 
-      // Resolve method name case from declaration
-      const varType = this.currentScopeVarTypes.get(prefix.toUpperCase());
+      // Resolve method name case from declaration; THIS and SUPER name the
+      // own block and its base, so the call binds like any method call.
+      const prefixUpper = prefix.toUpperCase();
+      const varType =
+        prefixUpper === "THIS"
+          ? this.currentFBName
+          : prefixUpper === "SUPER"
+            ? this.currentFBExtends
+            : this.currentScopeVarTypes.get(prefixUpper);
 
       const resolvedMethod = varType
         ? this.resolveMethodName(varType, methodName)
@@ -7800,6 +7831,25 @@ export class CodeGenerator {
     const byRefCall = this.renderGlobalByRefCall(expr);
     if (byRefCall !== undefined) return byRefCall;
 
+    // 2b. A method of the own block called by its bare name (`ProtOk(...)`):
+    // its arguments as for any method call, REFERENCE TO inputs bound.
+    if (
+      this.currentFBName !== undefined &&
+      !expr.functionName.includes(".") &&
+      expr.instance === undefined &&
+      this.ast?.functions.some((f) => f.name.toUpperCase() === nameUpper) !==
+        true &&
+      !this.libraryFunctionParams.has(nameUpper) &&
+      this.findMethodDecl(this.currentFBName, expr.functionName) !== undefined
+    ) {
+      const args = this.generateCallArguments(
+        this.currentFBName,
+        expr.functionName,
+        expr.arguments,
+      );
+      return `${this.resolveMethodName(this.currentFBName, expr.functionName)}(${args.join(", ")})`;
+    }
+
     // 3. Check for named arguments that may need reordering. A call with no
     // arguments at all is a formal call that omits every input: it too takes
     // the declared initial values (IEC 61131-3 6.6.1.4.2), which a library
@@ -7825,6 +7875,7 @@ export class CodeGenerator {
       if (!arg.name) positionalSlot++;
       const generated =
         this.generateGenericArgument(generics, paramName, arg.value) ??
+        this.referenceInputArgument(param, arg.value) ??
         this.byRefStringArg(param, this.generateExpression(arg.value));
       if (arg.isOutput && arg.value.kind !== "VariableExpression") {
         this.codegenWarnings.push({
@@ -8193,6 +8244,12 @@ export class CodeGenerator {
       param: (typeof params)[number],
     ): string =>
       this.generateGenericArgument(generics, param.name, value) ??
+      (param.typeRef !== undefined
+        ? this.referenceInputArgument(
+            { kind: param.blockType, type: param.typeRef },
+            value,
+          )
+        : undefined) ??
       this.byRefStringArg(
         param.typeRef &&
           (param.blockType === "VAR_IN_OUT" || param.blockType === "VAR_OUTPUT")
@@ -9316,15 +9373,11 @@ export class CodeGenerator {
           `${indent}// WARNING: positional argument ${positionalIndex} could not be resolved`,
         );
         positionalIndex++;
-      } else if (
-        paramName &&
-        this.isReferenceToMember(fbTypeName, paramName) &&
-        !this.isReferenceToVariable(arg.value)
-      ) {
+      } else if (paramName && this.isReferenceToMember(fbTypeName, paramName)) {
         // A REFERENCE TO input is bound to the argument (CODESYS "Data Type:
-        // REFERENCE TO"); a REFERENCE TO argument is copied, rebinding it.
+        // REFERENCE TO"), or to what a REFERENCE TO argument refers to.
         this.emit(
-          `${indent}${instanceName}.${this.fbParamMemberName(paramName, fbTypeName)}.bind(*${this.generateAddressOf(arg.value)});`,
+          `${indent}${instanceName}.${this.fbParamMemberName(paramName, fbTypeName)}.bind(${this.referenceBindTarget(arg.value)});`,
         );
         if (!arg.name) positionalIndex++;
       } else if (paramName) {
