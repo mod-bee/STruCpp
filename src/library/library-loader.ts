@@ -102,6 +102,7 @@ function buildLibraryTypeDefinition(
     return {
       kind: "StructDefinition",
       sourceSpan: createDefaultSourceSpan(),
+      ...(t.extends !== undefined ? { extends: t.extends } : {}),
       fields: t.fields.map((f) => ({
         kind: "VarDeclaration" as const,
         sourceSpan: createDefaultSourceSpan(),
@@ -571,6 +572,31 @@ export function libraryOopDeclarations(manifests: readonly LibraryManifest[]): {
     }
   }
   return { interfaces, functionBlocks };
+}
+
+/**
+ * The structures of the given libraries, members as declarations (inherited
+ * ones first), for a project structure that EXTENDS one.
+ */
+export function libraryStructLookup(
+  manifests: readonly LibraryManifest[],
+): (
+  name: string,
+) => { fields: VarDeclaration[]; extends?: string } | undefined {
+  const structs = new Map<string, LibraryTypeEntry>();
+  for (const m of manifests) {
+    for (const t of m.types) {
+      if (t.kind === "struct") structs.set(t.name.toUpperCase(), t);
+    }
+  }
+  return (name) => {
+    const t = structs.get(name.toUpperCase());
+    if (t === undefined) return undefined;
+    return {
+      fields: (t.fields ?? []).map(makeVarDeclaration),
+      ...(t.extends !== undefined ? { extends: t.extends } : {}),
+    };
+  };
 }
 
 /** The library type carries this attribute pragma (case-insensitive). */

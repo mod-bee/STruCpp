@@ -36,11 +36,13 @@ import type {
 } from "./frontend/ast.js";
 import { mergeCompilationUnits } from "./merge.js";
 import { lowerInlineTypes } from "./frontend/lower-inline-types.js";
+import { lowerStructExtends } from "./frontend/lower-struct-extends.js";
 import { applyTypeDefaults } from "./frontend/type-defaults.js";
 import { walkAST } from "./ast-utils.js";
 import { arrayElementTypeName } from "./semantic/type-utils.js";
 import {
   libraryOopDeclarations,
+  libraryStructLookup,
   libraryTypeDefaults,
   registerLibrarySymbols,
 } from "./library/library-loader.js";
@@ -481,7 +483,15 @@ function runPipeline(
     }
 
     ast = mergeCompilationUnits(units);
-    const loweringErrors = lowerInlineTypes(ast);
+    const loweringErrors = [
+      ...lowerInlineTypes(ast),
+      ...lowerStructExtends(
+        ast,
+        libraryStructLookup(
+          (mergedOptions.libraries ?? []).map((a) => a.manifest),
+        ),
+      ),
+    ];
     errors.push(...loweringErrors);
     if (!continueOnError && loweringErrors.length > 0) {
       return {

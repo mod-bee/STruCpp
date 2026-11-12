@@ -367,6 +367,11 @@ export interface LibraryTypeEntry {
    * enforces as the library does. Absent when there are none.
    */
   attributes?: Array<{ name: string; value?: string }>;
+  /**
+   * For `kind: "struct"`: the structure it EXTENDS (CODESYS "Data Structure:
+   * STRUCT"). `fields` already lists the inherited members first.
+   */
+  extends?: string;
 }
 
 /**

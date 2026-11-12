@@ -266,6 +266,7 @@ edges on `CU` and `CD` leave `CV` unchanged. CODESYS does not document that case
 | Dynamic memory | Supported | `__NEW(type)`, `__DELETE(ptr)` |
 | POINTER TO | Supported | Full pointer type with dereference |
 | Typed literals | Supported | `INT#5`, `DINT#42`, `REAL#3.14` |
+| STRUCT EXTENDS (CODESYS) | Supported | `TYPE D EXTENDS B : STRUCT ... END_STRUCT END_TYPE`: D holds B's members first, then its own; both sets of initial values apply; an initializer names either. A `REFERENCE TO` / `REF_TO` B may refer to a D variable. A D value is not assigned to a B variable (the CODESYS help defines no such conversion). A library carries it (manifest `extends`, inherited members first in `fields`) |
 | `__ISVALIDREF` | Supported | CODESYS: TRUE when a `REFERENCE TO` variable is bound. Other operands are refused (compare a `REF_TO` or `POINTER` with `NULL` / 0) |
 | `__QUERYINTERFACE`, `__QUERYPOINTER` | Supported | CODESYS: from an interface variable or an instance of a block implementing an interface, set an interface variable (as `?=`) or a `POINTER` variable to the instance; TRUE on success. Every interface is queryable; `EXTENDS __SYSTEM.IQueryInterface` is accepted and adds nothing |
 | `__VARINFO` | Supported | CODESYS variable information; yields `__SYSTEM.VAR_INFO`. `Area` is always -1 and `BitAddress` 0 — OpenPLC has no device memory-area numbering |

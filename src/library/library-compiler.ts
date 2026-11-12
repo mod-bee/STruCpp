@@ -942,6 +942,7 @@ export function compileLibrary(
         defaultValue?: string;
         baseType?: string;
         attributes?: Array<{ name: string; value?: string }>;
+        extends?: string;
       } = { name: t.name, kind };
       // Attribute pragmas (`qualified_only`, `strict`), enforced by a consumer.
       if (t.attributes !== undefined && t.attributes.length > 0) {
@@ -992,6 +993,10 @@ export function compileLibrary(
       // Export struct member fields so consumers can type `x.field` access
       // on a dependency struct, and lay out its arrays and strings.
       if (t.definition.kind === "StructDefinition") {
+        // STRUCT EXTENDS: `fields` lists the inherited members first.
+        if (t.definition.extends !== undefined) {
+          entry.extends = t.definition.extends;
+        }
         entry.fields = t.definition.fields.flatMap((decl) =>
           decl.names.map((name, i) => {
             return {

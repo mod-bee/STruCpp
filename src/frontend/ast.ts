@@ -392,6 +392,12 @@ export interface VarDeclaration extends ASTNode {
   edge?: "R_EDGE" | "F_EDGE";
   /** Span of the `R_EDGE` / `F_EDGE` qualifier. */
   edgeSpan?: SourceSpan;
+  /**
+   * A member a structure inherits through EXTENDS: the base structure that
+   * declares it. Set by lower-struct-extends.ts; absent on a structure's own
+   * members and on every other declaration.
+   */
+  inheritedFrom?: string;
 }
 
 // =============================================================================
@@ -419,6 +425,11 @@ export interface TypeDeclaration extends ASTNode {
   defaultValue?: Expression;
   /** Set on a TYPE hoisted from an inline enumeration or subrange. */
   inline?: InlineTypeOrigin;
+  /**
+   * `TYPE D EXTENDS B : STRUCT ...` (CODESYS "Data Structure: STRUCT",
+   * extension of a type declaration): the base structure, as written.
+   */
+  extends?: string;
 }
 
 /** Where a hoisted inline type was written. */
@@ -446,7 +457,14 @@ export type TypeDefinition =
  */
 export interface StructDefinition extends ASTNode {
   kind: "StructDefinition";
+  /**
+   * Its members. For a structure that EXTENDS another (CODESYS "Data
+   * Structure: STRUCT", extension of a type declaration), the base's members
+   * come first, each marked `inheritedFrom` (lower-struct-extends.ts).
+   */
   fields: VarDeclaration[];
+  /** The structure it EXTENDS, as written. */
+  extends?: string;
 }
 
 /**

@@ -191,6 +191,8 @@ export class TypeRegistry {
     def: StructDefinition,
     deps: string[],
   ): void {
+    // STRUCT EXTENDS: the base structure comes first.
+    if (def.extends !== undefined) deps.push(def.extends);
     for (const field of def.fields) {
       this.collectVarDeclDependencies(field, deps);
     }

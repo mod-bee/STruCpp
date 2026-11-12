@@ -32,6 +32,7 @@ import type {
   MethodDeclaration,
   VarDeclaration,
   TypeReference,
+  TypeDefinition,
 } from "../frontend/ast.js";
 import type {
   AnySymbol,
@@ -1750,6 +1751,27 @@ export class TypeChecker {
     return undefined;
   }
 
+  /**
+   * Structure `derived` EXTENDS `base`, directly or through other structures
+   * (CODESYS "Data Structure: STRUCT"): a reference to the base may refer to
+   * it, as one to a base block may refer to a derived instance (IEC 61131-3
+   * 6.4.4.10.1).
+   */
+  private structExtends(derived: string, base: string): boolean {
+    const wanted = base.toUpperCase();
+    const seen = new Set<string>();
+    let current: string | undefined = derived;
+    while (current !== undefined && !seen.has(current.toUpperCase())) {
+      seen.add(current.toUpperCase());
+      const def: TypeDefinition | undefined =
+        this.symbolTables.lookupType(current)?.declaration?.definition;
+      if (def?.kind !== "StructDefinition") return false;
+      current = def.extends;
+      if (current?.toUpperCase() === wanted) return true;
+    }
+    return false;
+  }
+
   /** A variable of a block the current block EXTENDS, nearest first. */
   private inheritedVariable(name: string): AnySymbol | undefined {
     const seen = new Set<string>();
@@ -2311,7 +2333,8 @@ export class TypeChecker {
       t.chain.every((kind, i) => kind === v.chain[i]);
     const sameBase =
       canonicalElementaryName(t.base.toUpperCase()) ===
-      canonicalElementaryName(v.base.toUpperCase());
+        canonicalElementaryName(v.base.toUpperCase()) ||
+      this.structExtends(v.base, t.base);
     if (sameLevels && sameBase) return;
     this.addError(
       `Cannot assign ${describeReferenceShape(v)} to ${describeReferenceShape(t)}: a REF_TO can only hold a reference to its declared type`,
@@ -2644,7 +2667,8 @@ export class TypeChecker {
       !this.isExactlyKnownType(base) ||
       !this.isExactlyKnownType(declared.name) ||
       canonicalElementaryName(declared.name.toUpperCase()) ===
-        canonicalElementaryName(base.toUpperCase());
+        canonicalElementaryName(base.toUpperCase()) ||
+      this.structExtends(declared.name, base);
     if (
       isVariable &&
       sameType &&

@@ -176,6 +176,12 @@ public:
     // Copy and move constructors/assignment - default is fine
     IEC_REF_TO(const IEC_REF_TO&) = default;
     IEC_REF_TO(IEC_REF_TO&&) = default;
+    /** A reference to a structure or block derived from T (STRUCT / FB EXTENDS). */
+    template<typename U,
+             typename = typename std::enable_if<
+                 !std::is_same<U, T>::value && std::is_class<T>::value &&
+                 std::is_base_of<T, U>::value>::type>
+    IEC_REF_TO(const IEC_REF_TO<U>& other) noexcept : ptr_(other.get()) {}
     IEC_REF_TO& operator=(const IEC_REF_TO&) = default;
     IEC_REF_TO& operator=(IEC_REF_TO&&) = default;
 

@@ -1074,6 +1074,8 @@ export class ASTBuilder {
     const declaredName = nameToken ? declaredImageOf(nameToken) : "";
 
     const definition = this.buildTypeDefinition(node);
+    // `TYPE D EXTENDS B : STRUCT` (checked in lower-struct-extends.ts)
+    const baseToken = getFirstToken(children.structBase);
 
     // Default value carried by the type itself (IEC 61131-3 Annex B.1.3.3
     // `initialized_*_type_declaration`). Simple enums keep their `:= MEMBER`
@@ -1090,6 +1092,7 @@ export class ASTBuilder {
       declaredName,
       definition,
       ...(defaultValue !== undefined ? { defaultValue } : {}),
+      ...(baseToken !== undefined ? { extends: baseToken.image } : {}),
     };
   }
 

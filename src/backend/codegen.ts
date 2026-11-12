@@ -8756,6 +8756,8 @@ export class CodeGenerator {
       const definition = td.definition;
       switch (definition.kind) {
         case "StructDefinition":
+          // STRUCT EXTENDS a library structure: the base class first.
+          if (definition.extends !== undefined) names.push(definition.extends);
           for (const field of definition.fields) {
             names.push(field.type.name);
             if (field.type.elementTypeName)

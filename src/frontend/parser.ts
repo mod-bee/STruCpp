@@ -724,6 +724,12 @@ export class STParser extends CstParser {
    */
   public singleTypeDeclaration = this.RULE("singleTypeDeclaration", () => {
     this.CONSUME(tokens.Identifier);
+    // CODESYS "Data Structure: STRUCT", extension of a type declaration:
+    // `TYPE S_PENTAGON EXTENDS S_POLYGONLINE : STRUCT ... END_STRUCT`.
+    this.OPTION5(() => {
+      this.CONSUME(tokens.EXTENDS);
+      this.CONSUME2(tokens.Identifier, { LABEL: "structBase" });
+    });
     this.CONSUME(tokens.Colon);
     // IGNORE_AMBIGUITIES: ARRAY keyword has LONGER_ALT=Identifier which causes
     // Chevrotain to see ambiguity between arrayType (starts with ARRAY token) and

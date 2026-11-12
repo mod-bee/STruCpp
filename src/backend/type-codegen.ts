@@ -432,9 +432,16 @@ export class TypeCodeGenerator {
    *   };
    */
   private generateStructType(name: string, def: StructDefinition): void {
-    this.emit(`struct ${name} {`);
+    // STRUCT EXTENDS: the base structure holds the inherited members and
+    // their initial values; the derived one adds its own.
+    this.emit(
+      def.extends !== undefined
+        ? `struct ${name} : public ${def.extends.toUpperCase()} {`
+        : `struct ${name} {`,
+    );
 
     for (const field of def.fields) {
+      if (field.inheritedFrom !== undefined) continue;
       let cppType: string;
       if (field.type.arrayDimensions && field.type.elementTypeName) {
         // Inline array type: emit Array1D/2D/3D<WrappedElementType, bounds...>
