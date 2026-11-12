@@ -932,7 +932,15 @@ export function compileLibrary(
         values?: Array<string | null>;
         defaultValue?: string;
         baseType?: string;
+        attributes?: Array<{ name: string; value?: string }>;
       } = { name: t.name, kind };
+      // Attribute pragmas (`qualified_only`, `strict`), enforced by a consumer.
+      if (t.attributes !== undefined && t.attributes.length > 0) {
+        entry.attributes = t.attributes.map((a) => ({
+          name: a.name,
+          ...(a.value !== undefined ? { value: a.value } : {}),
+        }));
+      }
       // Only when it says something the folded name does not, so an all-caps
       // library adds nothing to its manifest.
       if (t.declaredName !== undefined && t.declaredName !== t.name) {

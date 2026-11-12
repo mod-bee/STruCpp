@@ -1240,7 +1240,12 @@ export class CodeGenerator {
    * struct types for known-type detection). Private — use registerLibraryArchives().
    */
   private registerLibraryTypes(
-    types: Array<{ name: string; kind: string; members?: string[] }>,
+    types: Array<{
+      name: string;
+      kind: string;
+      members?: string[];
+      attributes?: Array<{ name: string }>;
+    }>,
   ): void {
     for (const t of types) {
       const nameUpper = t.name.toUpperCase();
@@ -1256,7 +1261,11 @@ export class CodeGenerator {
             new Set(members.map((m) => m.toUpperCase())),
           );
         }
-        if (members.length > 0) {
+        // A qualified_only enumeration's values have no bare name.
+        const qualifiedOnly = (t.attributes ?? []).some(
+          (a) => a.name.toLowerCase() === "qualified_only",
+        );
+        if (members.length > 0 && !qualifiedOnly) {
           this.libraryEnumDescriptors.push({ name: t.name, members });
         }
       }

@@ -557,6 +557,15 @@ export function libraryOopDeclarations(manifests: readonly LibraryManifest[]): {
   return { interfaces, functionBlocks };
 }
 
+/** The library type carries this attribute pragma (case-insensitive). */
+export function libraryTypeHasAttribute(
+  t: LibraryTypeEntry,
+  name: string,
+): boolean {
+  const wanted = name.toLowerCase();
+  return (t.attributes ?? []).some((a) => a.name.toLowerCase() === wanted);
+}
+
 /**
  * Register a library's symbols into the compiler's symbol tables.
  * This makes library functions, FBs, and types available for semantic analysis.
@@ -652,6 +661,16 @@ export function registerLibrarySymbols(
             kind: "TypeDeclaration",
             sourceSpan: createDefaultSourceSpan(),
             name: t.name,
+            ...(t.attributes !== undefined
+              ? {
+                  attributes: t.attributes.map((a) => ({
+                    name: a.name.toLowerCase(),
+                    ...(a.value !== undefined ? { value: a.value } : {}),
+                    line: 0,
+                    column: 0,
+                  })),
+                }
+              : {}),
             definition: {
               kind: "EnumDefinition",
               sourceSpan: createDefaultSourceSpan(),
@@ -688,12 +707,15 @@ export function registerLibrarySymbols(
             name: t.name,
             values: [...(t.members ?? [])],
             ...(t.baseType !== undefined ? { baseType: t.baseType } : {}),
+            ...(libraryTypeHasAttribute(t, "strict") ? { strict: true } : {}),
           } as EnumType,
         });
         // Each member as a bare enumerated value, as a project's own
         // enumeration declares them, so `UT_STOP_FULL` is typed UT_STOP
-        // wherever it appears (a generic function's argument included).
-        (t.members ?? []).forEach((member, index) => {
+        // wherever it appears (a generic function's argument included). A
+        // qualified_only enumeration's values have no bare name.
+        const bare = !libraryTypeHasAttribute(t, "qualified_only");
+        (bare ? (t.members ?? []) : []).forEach((member, index) => {
           if (symbolTables.globalScope.hasLocal(member)) return;
           symbolTables.globalScope.define({
             name: member,

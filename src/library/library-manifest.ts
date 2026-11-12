@@ -345,6 +345,12 @@ export interface LibraryTypeEntry {
   documentation?: string;
   /** Folder path within the library — see `LibraryFunctionEntry.category`. */
   category?: string;
+  /**
+   * The type's attribute pragmas (CODESYS "Attribute Pragmas"), e.g.
+   * `qualified_only` and `strict` on an enumeration, which a consumer
+   * enforces as the library does. Absent when there are none.
+   */
+  attributes?: Array<{ name: string; value?: string }>;
 }
 
 /**
