@@ -3388,19 +3388,30 @@ export class ASTBuilder {
     const children = node.children as CstChildren;
     // identifierOrKeyword subrule nodes: first is the variable name, rest are field accessors
     const idOrKwNodes = getAllNodes(children.identifierOrKeyword);
-    const name = idOrKwNodes[0]
-      ? getIdentifierOrKeywordImage(idOrKwNodes[0])
-      : "";
+    // A path rooted at THIS (`THIS.a.b`): every name is a member.
+    const thisToken = getFirstToken(children.THIS);
+    const rootIsThis = thisToken !== undefined;
+    const name = rootIsThis
+      ? "THIS"
+      : idOrKwNodes[0]
+        ? getIdentifierOrKeywordImage(idOrKwNodes[0])
+        : "";
+    // `THIS^.a` is `THIS.a`: the caret right after THIS adds nothing.
+    const carets = getAllTokens(children.Caret).filter(
+      (c) =>
+        !rootIsThis ||
+        c.startOffset !== thisToken.startOffset + thisToken.image.length,
+    );
 
     // Check for dereference operator (^)
-    const isDereference = !!children.Caret;
+    const isDereference = carets.length > 0;
 
     // Field access steps after the base name: struct members, bare bit
     // indices (`var.31`) and partial access (`var.%B3`). Sorted by source
     // offset so `s.field.%B1` keeps its written order; appending each kind in
     // turn would group by kind.
     const fieldAccess: string[] = [
-      ...idOrKwNodes.slice(1).map((node) => ({
+      ...idOrKwNodes.slice(rootIsThis ? 0 : 1).map((node) => ({
         offset: getNodeStartOffset(node),
         image: getIdentifierOrKeywordImage(node),
       })),
@@ -3425,7 +3436,11 @@ export class ASTBuilder {
 
     // Build ordered access chain by sorting markers by source position.
     // This preserves the interleaving of field accesses, subscripts, and dereferences.
-    const accessChain = this.buildAccessChain(children);
+    const accessChain = this.buildAccessChain(
+      children,
+      rootIsThis ? 0 : 1,
+      carets,
+    );
 
     const varExpr: VariableExpression = {
       kind: "VariableExpression",
@@ -3446,7 +3461,11 @@ export class ASTBuilder {
    * Sorts Dot tokens, LBracket tokens, and Caret tokens by source offset
    * to reconstruct the correct interleaving order.
    */
-  private buildAccessChain(children: CstChildren): AccessStep[] {
+  private buildAccessChain(
+    children: CstChildren,
+    firstField = 1,
+    caretTokens: IToken[] = getAllTokens(children.Caret),
+  ): AccessStep[] {
     type Marker =
       | { kind: "field"; offset: number; name: string }
       | { kind: "subscript"; offset: number; indices: Expression[] }
@@ -3461,7 +3480,7 @@ export class ASTBuilder {
 
     // Build a list of field targets sorted by offset: identifier and integer literal tokens after dots
     const fieldTargets: Array<{ offset: number; name: string }> = [];
-    for (let i = 1; i < idOrKwNodes.length; i++) {
+    for (let i = firstField; i < idOrKwNodes.length; i++) {
       const n = idOrKwNodes[i]!;
       fieldTargets.push({
         offset: getNodeStartOffset(n),
@@ -3529,7 +3548,6 @@ export class ASTBuilder {
     }
 
     // Collect dereference markers (Caret tokens)
-    const caretTokens = getAllTokens(children.Caret);
     for (const c of caretTokens) {
       markers.push({ kind: "dereference", offset: c.startOffset });
     }

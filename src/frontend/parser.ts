@@ -1087,7 +1087,8 @@ export class STParser extends CstParser {
         },
         {
           ALT: () => this.SUBRULE(this.thisStatement),
-          GATE: () => this.LA(1).tokenType === tokens.THIS,
+          GATE: () =>
+            this.LA(1).tokenType === tokens.THIS && !this.isLongThisPathAhead(),
         },
         {
           ALT: () => this.SUBRULE(this.superCallStatement),
@@ -1344,9 +1345,33 @@ export class STParser extends CstParser {
     return false;
   }
 
+  /**
+   * `THIS.a` followed by more of a path (`.b`, `[i]`, `^`): parsed as a
+   * variable rooted at THIS rather than by thisStatement / thisAccess, which
+   * take one member.
+   */
+  private isLongThisPathAhead(): boolean {
+    if (this.LA(1).tokenType !== tokens.THIS) return false;
+    let i = 2;
+    if (this.LA(i).tokenType === tokens.Caret) i++;
+    if (this.LA(i).tokenType !== tokens.Dot) return false;
+    if (!this.isIdentifierOrKeywordToken(this.LA(i + 1).tokenType))
+      return false;
+    const next = this.LA(i + 2).tokenType;
+    return (
+      next === tokens.Dot || next === tokens.LBracket || next === tokens.Caret
+    );
+  }
+
   private isMethodCallAhead(): boolean {
-    // `inst.M(`, and a method on a longer path: `units[i].M(`, `a.b.M(`.
-    if (!this.isIdentifierOrKeywordToken(this.LA(1).tokenType)) return false;
+    // `inst.M(`, and a method on a longer path: `units[i].M(`, `a.b.M(`,
+    // `THIS.a.M(`.
+    if (
+      !this.isIdentifierOrKeywordToken(this.LA(1).tokenType) &&
+      !this.isLongThisPathAhead()
+    ) {
+      return false;
+    }
     const MAX_LOOKAHEAD = 64;
     let i = 2;
     while (i <= MAX_LOOKAHEAD) {
@@ -1893,7 +1918,8 @@ export class STParser extends CstParser {
         },
         {
           ALT: () => this.SUBRULE(this.thisAccess),
-          GATE: () => this.LA(1).tokenType === tokens.THIS,
+          GATE: () =>
+            this.LA(1).tokenType === tokens.THIS && !this.isLongThisPathAhead(),
         },
         {
           ALT: () => this.SUBRULE(this.superAccess),
@@ -2077,7 +2103,15 @@ export class STParser extends CstParser {
    * Variable reference (with optional array subscripts and field access)
    */
   public variable = this.RULE("variable", () => {
-    this.SUBRULE(this.identifierOrKeyword);
+    // `THIS.a.b`, `THIS^.a[i]` (IEC 61131-3 6.6.5.7.2, CODESYS THIS^): the
+    // own instance as the root of a longer path.
+    this.OR9([
+      {
+        ALT: () => this.CONSUME(tokens.THIS),
+        GATE: () => this.LA(1).tokenType === tokens.THIS,
+      },
+      { ALT: () => this.SUBRULE(this.identifierOrKeyword) },
+    ]);
     // `.name(` ends the path: it is a method called on the variable so far.
     this.MANY({
       GATE: () =>

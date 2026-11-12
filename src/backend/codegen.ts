@@ -6341,6 +6341,17 @@ export class CodeGenerator {
       if (expr.isDereference && expr.fieldAccess.length === 0) {
         return "(*this)";
       }
+      // A longer path from the own instance (`THIS.s.n`, `THIS.a[i]`).
+      const chain = expr.accessChain ?? [];
+      if (chain.length > 1 || chain.some((s) => s.kind !== "field")) {
+        return this.generateAccessChain(
+          "(*this)",
+          chain,
+          nameUpper,
+          undefined,
+          this.currentFBName,
+        );
+      }
       // THIS.member or THIS^.member → this->member
       // Check if last field is a property → this->get_Prop()
       let result = "this->";
@@ -6589,9 +6600,10 @@ export class CodeGenerator {
     chain: AccessStep[],
     baseNameUpper: string,
     indexCode: (e: Expression) => string = (e) => this.generateExpression(e),
+    rootType?: string,
   ): string {
     let result = base;
-    let currentType = this.currentScopeVarTypes.get(baseNameUpper);
+    let currentType = rootType ?? this.currentScopeVarTypes.get(baseNameUpper);
 
     for (let i = 0; i < chain.length; i++) {
       const step = chain[i]!;
