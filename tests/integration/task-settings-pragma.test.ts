@@ -156,6 +156,45 @@ describe('TASK settings pragma', () => {
   });
 });
 
+describe('TASK RESTART_ON_FAULT pragma', () => {
+  const RESTART = `
+      TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {RESTART_ON_FAULT := 60};
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1) {STOP_ON_STUCK := FALSE, RESTART_ON_FAULT := 30};`;
+
+  it('is not emitted for a project without it', () => {
+    for (const tasks of [PLAIN, CORE_ONLY, ALL]) {
+      const result = compile(config(tasks));
+      expect(result.success).toBe(true);
+      expect(result.cppCode).not.toContain('strucpp_task_restart_on_fault');
+    }
+  });
+
+  it('is emitted with each task\'s seconds', () => {
+    const result = compile(config(RESTART));
+    expect(result.success).toBe(true);
+    expect(result.cppCode).toContain('strucpp_task_restart_on_fault');
+    expect(result.cppCode).toContain('delays[2] = {60u, 30u}');
+  });
+
+  it('refuses a delay that is not 1..86400 whole seconds', () => {
+    for (const bad of ['0', '86401', 'T#1m', '1.5', 'TRUE']) {
+      const result = compile(config(`
+      TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {RESTART_ON_FAULT := ${bad}};
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`));
+      expect(result.success).toBe(false);
+      expect(errors(result)).toMatch(/not a restart delay/);
+    }
+  });
+
+  it('refuses it twice', () => {
+    const result = compile(config(`
+      TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {RESTART_ON_FAULT := 5, RESTART_ON_FAULT := 6};
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`));
+    expect(result.success).toBe(false);
+    expect(errors(result)).toMatch(/more than once/);
+  });
+});
+
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
 describeIfGpp('TASK settings pragma, compiled', () => {
@@ -172,7 +211,7 @@ describeIfGpp('TASK settings pragma, compiled', () => {
   it('reports each task setting by resource and task index, the defaults elsewhere', () => {
     const second = `
     RESOURCE Res2 ON PLC
-      TASK other(INTERVAL := T#20ms, PRIORITY := 0) {STOP_ON_STUCK := FALSE};
+      TASK other(INTERVAL := T#20ms, PRIORITY := 0) {STOP_ON_STUCK := FALSE, RESTART_ON_FAULT := 45};
       PROGRAM c WITH other : Main;
     END_RESOURCE`;
     const result = compile(config(ALL, second), { headerFileName: 'generated.hpp' });
@@ -186,12 +225,15 @@ describeIfGpp('TASK settings pragma, compiled', () => {
 extern "C" int32_t strucpp_task_core(uint32_t resource, uint32_t task);
 extern "C" int32_t strucpp_task_stop_on_stuck(uint32_t resource, uint32_t task);
 extern "C" uint32_t strucpp_task_stack(uint32_t resource, uint32_t task);
+extern "C" uint32_t strucpp_task_restart_on_fault(uint32_t resource, uint32_t task);
 int main() {
   std::printf("core %d %d %d\\n", strucpp_task_core(0, 0), strucpp_task_core(0, 1), strucpp_task_core(1, 0));
   std::printf("stop %d %d %d %d %d\\n", strucpp_task_stop_on_stuck(0, 0), strucpp_task_stop_on_stuck(0, 1),
               strucpp_task_stop_on_stuck(1, 0), strucpp_task_stop_on_stuck(0, 2), strucpp_task_stop_on_stuck(2, 0));
   std::printf("stack %u %u %u %u %u\\n", strucpp_task_stack(0, 0), strucpp_task_stack(0, 1),
               strucpp_task_stack(1, 0), strucpp_task_stack(0, 2), strucpp_task_stack(2, 0));
+  std::printf("restart %u %u %u %u\\n", strucpp_task_restart_on_fault(0, 0), strucpp_task_restart_on_fault(0, 1),
+              strucpp_task_restart_on_fault(1, 0), strucpp_task_restart_on_fault(0, 2));
   return 0;
 }
 `,
@@ -205,6 +247,7 @@ int main() {
       'core -1 0 -1',
       'stop 1 0 0 1 1',
       'stack 8192 16384 0 0 0',
+      'restart 0 0 45 0',
     ]);
   });
 });

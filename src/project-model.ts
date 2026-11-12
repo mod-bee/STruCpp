@@ -157,6 +157,10 @@ export interface TaskDecl {
   stopOnStuck?: boolean;
   /** Stack in bytes from `{STACK := n}`; absent = the target's default. */
   stack?: number;
+  /** From `{RESTART_ON_FAULT := n}`: seconds after a fault of this task (a
+   *  runtime error, a stuck scan, the PLC stopped by it) before the runtime
+   *  recovers it - at most a few times a day; absent = stop and stay stopped. */
+  restartOnFault?: number;
   programInstances: ProgramInstanceDecl[];
 }
 
@@ -551,7 +555,7 @@ export class ProjectModelBuilder {
     if (pinned.length > 1) {
       const second = pinned[1]!;
       this.addError(
-        `Configuration ${second.name}: task settings ({CORE := n}, {STOP_ON_STUCK := b}, {STACK := n}) can be set in one configuration only`,
+        `Configuration ${second.name}: task settings ({CORE := n}, {STOP_ON_STUCK := b}, {STACK := n}, {RESTART_ON_FAULT := n}) can be set in one configuration only`,
         second.sourceSpan.startLine,
         second.sourceSpan.startCol,
       );
@@ -834,7 +838,8 @@ export class ProjectModelBuilder {
       }
     }
 
-    const { core, stopOnStuck, stack } = this.taskSettings(task);
+    const { core, stopOnStuck, stack, restartOnFault } =
+      this.taskSettings(task);
 
     // Use conditional spreading for optional properties to comply with exactOptionalPropertyTypes
     return {
@@ -845,6 +850,7 @@ export class ProjectModelBuilder {
       ...(core !== undefined ? { core } : {}),
       ...(stopOnStuck !== undefined ? { stopOnStuck } : {}),
       ...(stack !== undefined ? { stack } : {}),
+      ...(restartOnFault !== undefined ? { restartOnFault } : {}),
     };
   }
 
@@ -861,14 +867,22 @@ export class ProjectModelBuilder {
    *   detected and reported).
    * - STACK: the task's stack in bytes, a whole number 1024..67108864; the
    *   runtime uses its default for a size it cannot give.
+   * - RESTART_ON_FAULT: seconds, a whole number 1..86400; after a fault of
+   *   this task the runtime recovers it that long later (at most a few times
+   *   a day, then it stays stopped). Absent: stopped, as before.
    */
   private taskSettings(task: TaskDeclaration): {
     core?: number;
     stopOnStuck?: boolean;
     stack?: number;
+    restartOnFault?: number;
   } {
-    const settings: { core?: number; stopOnStuck?: boolean; stack?: number } =
-      {};
+    const settings: {
+      core?: number;
+      stopOnStuck?: boolean;
+      stack?: number;
+      restartOnFault?: number;
+    } = {};
     const seen = new Set<string>();
     for (const pragma of task.taskPragmas ?? []) {
       const refuse = (why: string) =>
@@ -882,9 +896,14 @@ export class ProjectModelBuilder {
         const m = /^\s*([A-Za-z_]\w*)\s*:=\s*(\S(?:.*\S)?)\s*$/.exec(entry);
         const key = m ? m[1]!.toUpperCase() : "";
         const value = m ? m[2]! : "";
-        if (key !== "CORE" && key !== "STOP_ON_STUCK" && key !== "STACK") {
+        if (
+          key !== "CORE" &&
+          key !== "STOP_ON_STUCK" &&
+          key !== "STACK" &&
+          key !== "RESTART_ON_FAULT"
+        ) {
           refuse(
-            "is not a task setting; write {CORE := n}, {STOP_ON_STUCK := TRUE|FALSE} or {STACK := n}, separated by commas",
+            "is not a task setting; write {CORE := n}, {STOP_ON_STUCK := TRUE|FALSE}, {STACK := n} or {RESTART_ON_FAULT := n}, separated by commas",
           );
           continue;
         }
@@ -907,6 +926,14 @@ export class ProjectModelBuilder {
           else
             refuse(
               "is not a setting; write {STOP_ON_STUCK := TRUE} or {STOP_ON_STUCK := FALSE}",
+            );
+        } else if (key === "RESTART_ON_FAULT") {
+          const seconds = /^\d+$/.test(value) ? Number(value) : NaN;
+          if (seconds >= 1 && seconds <= 86400)
+            settings.restartOnFault = seconds;
+          else
+            refuse(
+              "is not a restart delay; write {RESTART_ON_FAULT := n} with n a whole number of seconds from 1 to 86400",
             );
         } else {
           const stack = /^\d+$/.test(value) ? Number(value) : NaN;

@@ -144,13 +144,13 @@ export const ExternalPragma = createToken({
  * A task's settings: `TASK t(INTERVAL := T#10ms, PRIORITY := 0) {CORE := 1, STOP_ON_STUCK := FALSE, STACK := 8192};`.
  * IEC 61131-3 §6.2 leaves a pragma's syntax and meaning to the Implementer;
  * this is the one pragma STruC++ gives one. The token takes any `{...}` that
- * starts with one of its keys (CORE, STOP_ON_STUCK, STACK), so a malformed one
+ * starts with one of its keys (CORE, STOP_ON_STUCK, STACK, RESTART_ON_FAULT), so a malformed one
  * reaches the TASK and is refused there, naming the task; every other `{...}`
  * is lexed as before.
  */
 export const TaskPragma = createToken({
   name: "TaskPragma",
-  pattern: /\{\s*(?:CORE|STOP_ON_STUCK|STACK)\b[^{}]*\}/i,
+  pattern: /\{\s*(?:CORE|STOP_ON_STUCK|STACK|RESTART_ON_FAULT)\b[^{}]*\}/i,
   line_breaks: true,
 });
 

@@ -2330,6 +2330,7 @@ export class CodeGenerator {
       this.generateTaskCoreTable(this.projectModel.configurations);
       this.generateTaskStopOnStuckTable(this.projectModel.configurations);
       this.generateTaskStackTable(this.projectModel.configurations);
+      this.generateTaskRestartOnFaultTable(this.projectModel.configurations);
     } else {
       for (const config of ast.configurations) {
         this.generateConfigurationImplementation(config);
@@ -4762,6 +4763,43 @@ export class CodeGenerator {
         `        static const uint32_t stacks[${stacks.length}] = {${stacks.map((v) => `${v}u`).join(", ")}};`,
       );
       this.emit(`        return task < ${stacks.length} ? stacks[task] : 0u;`);
+      this.emit("    }");
+    });
+    this.emit("    return 0u;");
+    this.emit("}");
+    this.emit("");
+  }
+
+  /**
+   * `strucpp_task_restart_on_fault(resource, task)`: seconds after a fault of
+   * the task before the runtime recovers it, from its `{RESTART_ON_FAULT := n}`
+   * pragma (IEC §6.2), 0 when it stops and stays stopped (the default). Emitted
+   * only when a task has the setting; a runtime treats a missing symbol as every
+   * task staying stopped, as before the setting existed.
+   */
+  private generateTaskRestartOnFaultTable(
+    configs: ProjectModel["configurations"],
+  ): void {
+    const config = configs.find((c) =>
+      c.resources.some((r) =>
+        r.tasks.some((t) => t.restartOnFault !== undefined),
+      ),
+    );
+    if (!config) return;
+    this.emit(
+      "// Recover the task this many seconds after a fault ({RESTART_ON_FAULT := n}); 0 = stay stopped.",
+    );
+    this.emit(
+      'extern "C" uint32_t strucpp_task_restart_on_fault(uint32_t resource, uint32_t task) {',
+    );
+    config.resources.forEach((resource, r) => {
+      const delays = resource.tasks.map((t) => t.restartOnFault ?? 0);
+      if (delays.every((v) => v === 0)) return;
+      this.emit(`    if (resource == ${r}) {`);
+      this.emit(
+        `        static const uint32_t delays[${delays.length}] = {${delays.map((v) => `${v}u`).join(", ")}};`,
+      );
+      this.emit(`        return task < ${delays.length} ? delays[task] : 0u;`);
       this.emit("    }");
     });
     this.emit("    return 0u;");
