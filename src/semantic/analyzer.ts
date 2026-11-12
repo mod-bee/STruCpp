@@ -2697,7 +2697,11 @@ export class SemanticAnalyzer {
       return;
     }
     if (sym.kind !== "variable") return;
-    if (sym.isInput) {
+    // A REFERENCE TO / REF_TO input names the variable it refers to: that
+    // variable, its members and elements are writable (CODESYS "REFERENCE TO").
+    const refKind = sym.declaration?.type?.referenceKind;
+    const viaReference = refKind !== undefined && refKind !== "none";
+    if (sym.isInput && !viaReference) {
       this.addError(
         `'${value.name}' is a VAR_INPUT and cannot be assigned to in-out '${slotName}' of '${callee}' — the callee may write to it`,
         span.startLine,
