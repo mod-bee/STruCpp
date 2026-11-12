@@ -3247,6 +3247,106 @@ export class CodeGenerator {
   }
 
   /**
+   * The arguments of a method call bound by reference (VAR_IN_OUT, VAR_OUTPUT)
+   * to a shared global, or one of its elements or members: they must reach the
+   * method as the global's own storage, never a copy.
+   */
+  private methodGlobalByRefArgs(
+    objectType: string | undefined,
+    method: string,
+    args: Argument[],
+  ): Argument[] {
+    const byRef = this.methodParamByRef(
+      this.findMethodDecl(objectType, method),
+    );
+    const plan = this.methodCallPlan(objectType, method, args);
+    const out: Argument[] = [];
+    plan.forEach((entry, i) => {
+      const value = entry.arg?.value;
+      if (
+        byRef[i] === true &&
+        value !== undefined &&
+        value.kind === "VariableExpression" &&
+        this.isGlobalAccess(value) &&
+        this.splitBitTarget(value).part === undefined
+      ) {
+        out.push(entry.arg!);
+      }
+    });
+    return out;
+  }
+
+  /**
+   * A method call that binds shared globals by reference (and may be called
+   * on one): under the call lock, each global held for the call and passed as
+   * its own storage, as a function's in-outs are. By-value arguments that take
+   * a lock are evaluated first, before the call lock.
+   */
+  private renderMethodCallHeld(
+    object: VariableExpression | string,
+    objectType: string | undefined,
+    method: string,
+    args: Argument[],
+    member: string,
+  ): string {
+    const byRef = this.methodParamByRef(
+      this.findMethodDecl(objectType, method),
+    );
+    const plan = this.methodCallPlan(objectType, method, args);
+    const pre: string[] = [];
+    const holds: string[] = [];
+    const overrides = new Map(this.argOverrides ?? []);
+    const savedHeld = this.callLockHeld;
+    const savedOverrides = this.argOverrides;
+    this.callLockHeld = new Set<string>();
+    try {
+      const key = objectType
+        ? `${objectType.toUpperCase()}.${method.toUpperCase()}`
+        : undefined;
+      const generics = key ? this.methodGenericParams.get(key) : undefined;
+      const globals = new Set(
+        this.methodGlobalByRefArgs(objectType, method, args),
+      );
+      plan.forEach((entry, i) => {
+        const arg = entry.arg;
+        if (arg === undefined) return;
+        const value = arg.value;
+        if (globals.has(arg) && value.kind === "VariableExpression") {
+          const ref = this.globalRefOf(value.name.toUpperCase())!;
+          overrides.set(value, this.heldStorage(value, ref, "", holds));
+          return;
+        }
+        const generic =
+          arg.name !== undefined &&
+          generics?.has(arg.name.toUpperCase()) === true;
+        if (byRef[i] !== true && !generic && this.mayTakeLock(value)) {
+          const tmp = `__gma${this.tempVarCounter++}`;
+          pre.push(`auto ${tmp} = ${this.generateExpression(value)};`);
+          overrides.set(value, tmp);
+        }
+      });
+      const target =
+        typeof object === "string"
+          ? object
+          : this.heldStorage(
+              object,
+              this.globalRefOf(object.name.toUpperCase())!,
+              "",
+              holds,
+            );
+      this.argOverrides = overrides;
+      const codes = this.generateCallArguments(objectType, method, args);
+      return (
+        `[&]{ ${pre.join(" ")} strucpp::GlobalCallLock __gcl${this.tempVarCounter++}; ` +
+        `${holds.join(" ")} return ${target}${member}${method}(${codes.join(", ")}); }()`
+      );
+    } finally {
+      this.argOverrides = savedOverrides;
+      this.callLockHeld = savedHeld;
+    }
+  }
+
+  /**
    * Call of `method` on a function block instance held in a shared global
    * (the global, an element or a member of it), under that global's lock.
    * By-value arguments and indices that take a lock are evaluated first.
@@ -6919,6 +7019,20 @@ export class CodeGenerator {
       const ref = this.isGlobalAccess(expr.object)
         ? this.globalRefOf(expr.object.name)
         : undefined;
+      if (
+        this.methodGlobalByRefArgs(objectType, expr.methodName, expr.arguments)
+          .length > 0
+      ) {
+        return this.renderMethodCallHeld(
+          ref ? expr.object : this.generateExpression(expr.object),
+          ref ? this.accessType(expr.object) : objectType,
+          resolvedName,
+          expr.arguments,
+          objectType !== undefined && this.isInterfaceType(objectType)
+            ? "->"
+            : ".",
+        );
+      }
       if (ref) {
         return this.renderGlobalMethodCall(
           expr.object,
@@ -7402,16 +7516,31 @@ export class CodeGenerator {
 
       // A method of a global FB instance runs under the instance's lock.
       const ref = this.globalRefOf(prefix);
+      const instanceExpr: VariableExpression = {
+        kind: "VariableExpression",
+        sourceSpan: expr.sourceSpan,
+        name: prefix,
+        subscripts: [],
+        fieldAccess: [],
+        isDereference: false,
+      };
+      if (
+        prefix.toUpperCase() !== "THIS" &&
+        prefix.toUpperCase() !== "SUPER" &&
+        this.methodGlobalByRefArgs(varType, methodName, expr.arguments).length >
+          0
+      ) {
+        return this.renderMethodCallHeld(
+          ref ? instanceExpr : this.instanceBaseName(prefix),
+          varType,
+          resolvedMethod,
+          expr.arguments,
+          varType !== undefined && this.isInterfaceType(varType) ? "->" : ".",
+        );
+      }
       if (ref) {
         return this.renderGlobalMethodCall(
-          {
-            kind: "VariableExpression",
-            sourceSpan: expr.sourceSpan,
-            name: prefix,
-            subscripts: [],
-            fieldAccess: [],
-            isDereference: false,
-          },
+          instanceExpr,
           ref,
           varType,
           resolvedMethod,
