@@ -5466,7 +5466,7 @@ export class CodeGenerator {
         } else {
           const fbType = this.getFBInvocationType(
             stmt.call.functionName,
-            stmt.call.instance !== undefined,
+            stmt.call.instance,
           );
           if (fbType) {
             this.generateFBInvocation(stmt.call, indent);
@@ -8878,8 +8878,27 @@ export class CodeGenerator {
    */
   private getFBInvocationType(
     functionName: string,
-    isElementCall = false,
+    instance?: Expression,
   ): string | undefined {
+    const isElementCall = instance !== undefined;
+    // A block reached through a path (`a.b[i]`, `rf^`, `s.r^`): the type the
+    // path lands on, references dereferenced (IEC 61131-3 6.4.4.10.3).
+    if (instance?.kind === "VariableExpression") {
+      const root = this.currentScopeVarTypeRefs.get(
+        instance.name.toUpperCase(),
+      );
+      const landed =
+        root !== undefined
+          ? resolveAccessType(root, instance, this.accessLookup)
+          : undefined;
+      if (
+        landed !== undefined &&
+        (landed.referenceKind ?? "none") === "none" &&
+        this.isFBType(landed.name)
+      ) {
+        return landed.name;
+      }
+    }
     const declaredType = this.currentScopeVarTypes.get(
       functionName.toUpperCase(),
     );
@@ -9027,7 +9046,7 @@ export class CodeGenerator {
     if (this.isGlobalAccess(instanceExpr)) {
       const instanceFbType = this.getFBInvocationType(
         call.functionName,
-        call.instance !== undefined,
+        call.instance,
       );
       this.withCallLock(
         this.callNeedsCallLock(
@@ -9054,7 +9073,7 @@ export class CodeGenerator {
     // lock itself is called under the call lock as well (withCallLock).
     const lockFbType = this.getFBInvocationType(
       call.functionName,
-      call.instance !== undefined,
+      call.instance,
     );
     const boundGlobal = this.fbInoutBoundGlobal(call, lockFbType);
     if (boundGlobal !== undefined && lockFbType !== undefined) {
@@ -9110,7 +9129,7 @@ export class CodeGenerator {
     // Resolve FB type for positional argument mapping
     const fbTypeName = this.getFBInvocationType(
       call.functionName,
-      call.instance !== undefined,
+      call.instance,
     );
     const inputParamNames = fbTypeName
       ? this.fbInputParams.get(fbTypeName.toUpperCase())

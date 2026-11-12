@@ -1409,22 +1409,37 @@ export class STParser extends CstParser {
    * be a method call on the element — to the existing rules.
    */
   private isInstanceCallAhead(): boolean {
+    // A block called through a path that is not a plain name: an element
+    // (`units[0](`, `a.b[i](`) or a dereferenced reference (`rf^(`, IEC
+    // 61131-3 6.4.4.10.3: "A dereferenced reference can be used in the same
+    // way as using a variable directly").
     if (!this.isIdentifierOrKeywordToken(this.LA(1).tokenType)) return false;
-    if (this.LA(2).tokenType !== tokens.LBracket) return false;
-
-    // Walk to the matching `]`, allowing nested subscripts in the index
-    // expressions (`a[b[i]]`). 64 tokens covers any realistic index list.
     const MAX_LOOKAHEAD = 64;
-    let depth = 0;
-    for (let i = 2; i <= MAX_LOOKAHEAD; i++) {
+    let indirect = false;
+    let i = 2;
+    while (i <= MAX_LOOKAHEAD) {
       const tokenType = this.LA(i)?.tokenType;
-      if (tokenType === undefined) return false;
-      if (tokenType === tokens.LBracket) {
-        depth++;
-      } else if (tokenType === tokens.RBracket) {
-        depth--;
-        if (depth === 0) return this.LA(i + 1)?.tokenType === tokens.LParen;
-      } else if (tokenType === tokens.Semicolon) {
+      if (tokenType === tokens.LParen) return indirect;
+      if (tokenType === tokens.Caret) {
+        indirect = true;
+        i++;
+      } else if (
+        tokenType === tokens.Dot &&
+        this.isIdentifierOrKeywordToken(this.LA(i + 1).tokenType)
+      ) {
+        i += 2;
+      } else if (tokenType === tokens.LBracket) {
+        // Walk to the matching `]`, allowing nested subscripts (`a[b[i]]`).
+        let depth = 0;
+        for (; i <= MAX_LOOKAHEAD; i++) {
+          const t = this.LA(i)?.tokenType;
+          if (t === undefined || t === tokens.Semicolon) return false;
+          if (t === tokens.LBracket) depth++;
+          else if (t === tokens.RBracket && --depth === 0) break;
+        }
+        indirect = true;
+        i++;
+      } else {
         return false;
       }
     }

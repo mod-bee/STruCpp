@@ -58,3 +58,39 @@ END_TEST
     expect(exitCode).toBe(0);
   });
 });
+
+// IEC 61131-3 6.4.4.10.3: "A dereferenced reference can be used in the same
+// way as using a variable directly" - a REF_TO a block is called with `r^()`.
+describeIfGpp("a block called through a dereferenced reference", () => {
+  it("runs rf^(), rf^(in := v), s.r^() and arr[i]^()", () => {
+    const { stdout, exitCode } = run(
+      `
+FUNCTION_BLOCK FB_T
+  VAR_INPUT inc : INT := 1; END_VAR
+  VAR_OUTPUT q : INT; END_VAR
+  q := q + inc;
+END_FUNCTION_BLOCK
+TYPE ST : STRUCT r : REF_TO FB_T; END_STRUCT END_TYPE
+FUNCTION F_Calls : INT
+  VAR f : FB_T; rf : REF_TO FB_T; s : ST; arr : ARRAY[1..2] OF REF_TO FB_T; END_VAR
+  rf := REF(f);
+  rf^();
+  rf^(inc := 5);
+  s.r := REF(f);
+  s.r^(inc := 10);
+  arr[2] := REF(f);
+  arr[2]^();
+  F_Calls := rf^.q;
+END_FUNCTION
+`,
+      `
+TEST 'calls through REF_TO'
+  ASSERT_EQ(F_Calls(), 26);  (* 1 + 5 + 10 + 10: an input keeps its last value *)
+END_TEST
+`,
+      "ref_call",
+    );
+    expect(stdout).toContain("[PASS] calls through REF_TO");
+    expect(exitCode).toBe(0);
+  });
+});
