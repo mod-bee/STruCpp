@@ -192,6 +192,33 @@ export function translateIECString(inner: string): string {
 }
 
 /**
+ * Characters a quoted STRING or WSTRING literal holds once its `$` escapes and
+ * doubled quotes are decoded. `$XX` is one character in a STRING and `$XXXX`
+ * one in a WSTRING (IEC 61131-3 6.3.3).
+ */
+export function iecStringLiteralLength(literal: string, wide: boolean): number {
+  const quote = literal[0];
+  const inner =
+    (quote === "'" || quote === '"') && literal.endsWith(quote)
+      ? literal.slice(1, -1)
+      : literal;
+  const hexDigits = wide ? 4 : 2;
+  let count = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i]!;
+    if (ch === "$" && i + 1 < inner.length) {
+      const hex = inner.substring(i + 1, i + 1 + hexDigits);
+      i +=
+        hex.length === hexDigits && /^[0-9A-Fa-f]+$/.test(hex) ? hexDigits : 1;
+    } else if (ch === quote && inner[i + 1] === quote) {
+      i++;
+    }
+    count++;
+  }
+  return count;
+}
+
+/**
  * C++ abstract class of an INTERFACE. The interface's own name is the type of
  * a variable of it — a reference, `IEC_IFACE_REF<NAME__IFACE>` (IEC 61131-3
  * 6.6.6.2 b). `__` cannot occur in an IEC identifier, so it never collides.

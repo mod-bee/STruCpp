@@ -72,6 +72,7 @@ import {
   interfaceClassName,
   sortInterfacesByExtends,
   translateIECString,
+  iecStringLiteralLength,
 } from "./codegen-utils.js";
 import {
   fbMethodNames,
@@ -9685,7 +9686,21 @@ export class CodeGenerator {
     declaredType: string,
   ): string | undefined {
     if (arrayElementTypeName(declaredType) !== undefined) return undefined;
-    const fieldType = this.typeCodeGen.mapStructFieldTypeToCpp(declaredType);
+    // A string literal is as long as it is written: the default STRING (254)
+    // would cut a longer one.
+    const literalLength =
+      expr.kind === "LiteralExpression" &&
+      (expr.literalType === "STRING" || expr.literalType === "WSTRING") &&
+      typeof expr.value === "string"
+        ? Math.max(
+            1,
+            iecStringLiteralLength(expr.value, expr.literalType === "WSTRING"),
+          )
+        : undefined;
+    const fieldType =
+      literalLength === undefined
+        ? this.typeCodeGen.mapStructFieldTypeToCpp(declaredType)
+        : `${expr.kind === "LiteralExpression" && expr.literalType === "WSTRING" ? "IECWStringVar" : "IECStringVar"}<${literalLength}>`;
     // An enumeration's field type is the bare enum; its value lives in the
     // wrapper, which is what the descriptor points into.
     const cppType = this.enumTypeMembers.has(declaredType.toUpperCase())

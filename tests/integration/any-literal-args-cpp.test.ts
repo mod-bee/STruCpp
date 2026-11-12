@@ -66,7 +66,7 @@ VAR
   e : Engine;
   p : DINT;
   k : INT := 3;
-  r_str, r_dint, r_expr, r_enum, f_str, loops : DINT;
+  r_str, r_dint, r_expr, r_enum, f_str, f_esc, f_long, loops : DINT;
   t_str : STRING;
   c_str, c_dint, c_expr, c_enum : DINT;
 END_VAR
@@ -79,6 +79,8 @@ END_VAR
   r_enum := e.Record(DATA := p, SETTINGS := RUN);
   c_enum := e.cls;
   f_str := AnySize(X := 'abcd');
+  f_esc := AnySize(X := 'a$$b$27c''d$N');
+  f_long := AnySize(X := 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
   loops := 0;
   WHILE e.Bump(X := DINT#0) = 1 AND loops < 3 DO
     loops := loops + 1;
@@ -101,8 +103,12 @@ const CHECKS = `
   check("c_expr", p.C_EXPR, (int)strucpp::TYPE_CLASS::TYPE_INT);
   check("r_enum", p.R_ENUM, 1);
   check("c_enum", p.C_ENUM, (int)strucpp::TYPE_CLASS::TYPE_ENUM);
-  // SIZEOF a STRING is its declared size, as for a STRING variable.
-  check("f_str", p.F_STR, 255);
+  // SIZEOF a literal's temporary: its characters and the NUL.
+  check("f_str", p.F_STR, 5);
+  // Escapes and doubled quotes count once each.
+  check("f_esc", p.F_ESC, 9);
+  // A literal longer than the default STRING arrives whole.
+  check("f_long", p.F_LONG, 301);
   check("loops", p.LOOPS, 3);
 `;
 
