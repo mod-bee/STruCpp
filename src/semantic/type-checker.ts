@@ -1798,7 +1798,8 @@ export class TypeChecker {
     const steps =
       expr.accessChain ??
       expr.fieldAccess.map((name) => ({ kind: "field" as const, name }));
-    const sym = scope.lookup(expr.name);
+    // A member inherited from the block's base (EXTENDS) is found there.
+    const sym = scope.lookup(expr.name) ?? this.inheritedVariable(expr.name);
     let type = sym?.kind === "variable" ? sym.declaration?.type : undefined;
     for (const step of steps) {
       if (type === undefined || step.kind !== "field") return undefined;
