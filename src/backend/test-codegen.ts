@@ -17,8 +17,10 @@ import type {
   CompilationUnit,
   FunctionDeclaration,
   TypeReference,
+  VarDeclaration,
 } from "../frontend/ast.js";
 import type { POUInfo } from "./test-main-gen.js";
+
 import { CodeGenerator } from "./codegen.js";
 import type { CodeGenOptions } from "./codegen.js";
 import { buildEnumMemberMap } from "../semantic/type-utils.js";
@@ -197,7 +199,16 @@ export class TestCodeGenerator extends CodeGenerator {
     return this.generateInitializer(expr, cppType, stTypeName);
   }
 
+  /**
+   * What follows a local's name in its definition: ` = init`, `(args)` for an
+   * instance built in place (FB_Init), or nothing.
+   */
+  emitLocalInitializer(decl: VarDeclaration, cppType: string): string {
+    return this.localInitializer(decl, cppType);
+  }
+
   /** Generate C++ statement(s) and append to output buffer. */
+
   emitStatement(stmt: Statement, indent: string): void {
     this.generateStatement(stmt, indent);
   }

@@ -21,7 +21,9 @@ import type {
   VarBlock,
   VarDeclaration,
   Expression,
+  Argument,
 } from "./frontend/ast.js";
+
 import type { CompileError, SourceSpan } from "./types.js";
 
 // =============================================================================
@@ -79,7 +81,10 @@ export interface ProjectVarDeclaration {
    * codegen to re-implement literal lowering for the string form.
    */
   initialValue?: Expression;
+  /** FB_Init arguments written after the type (VarDeclaration.initArguments). */
+  initArguments?: Argument[];
   isConstant: boolean;
+
   isRetain: boolean;
   address?: string;
   /** For inline ARRAY types (typeName like __INLINE_ARRAY_<T>) — bounds carried
@@ -277,7 +282,11 @@ export function toProjectVarDeclaration(
     ...(decl.initialValue !== undefined
       ? { initialValue: decl.initialValue }
       : {}),
+    ...(decl.initArguments !== undefined
+      ? { initArguments: decl.initArguments }
+      : {}),
     ...(decl.address !== undefined ? { address: decl.address } : {}),
+
     ...(decl.type.maxLength !== undefined
       ? { maxLength: decl.type.maxLength }
       : {}),

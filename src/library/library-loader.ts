@@ -473,15 +473,50 @@ export function libraryFunctionBlockDeclaration(
       ? { implements: [...fb.implements] }
       : {}),
     varBlocks: [],
-    methods: (fb.methods ?? []).map(makeMethodDeclaration),
+    methods: [
+      ...(fb.methods ?? []).map(makeMethodDeclaration),
+      ...lifecyclePrototypes(fb),
+    ],
     properties: [],
+
     body: [],
     ...(Object.keys(cppNames).length > 0 ? { libraryCppNames: cppNames } : {}),
   };
 }
 
 /**
+ * FB_Init / FB_Exit of a library block not already listed as PUBLIC methods,
+ * as PROTECTED prototypes: the consumer builds instances with them (CODESYS
+ * "Method: FB_Init") but cannot call them.
+ */
+function lifecyclePrototypes(fb: LibraryFBEntry): MethodDeclaration[] {
+  const listed = new Set((fb.methods ?? []).map((m) => m.name.toUpperCase()));
+  const out: MethodDeclaration[] = [];
+  if (fb.fbInit !== undefined && !listed.has("FB_INIT")) {
+    out.push({
+      ...makeMethodDeclaration(fb.fbInit),
+      name: "FB_INIT",
+      visibility: "PROTECTED",
+    });
+  }
+  if (fb.fbExit === true && !listed.has("FB_EXIT")) {
+    out.push({
+      ...makeMethodDeclaration({
+        name: "FB_EXIT",
+        returnType: "BOOL",
+        inputs: [{ name: "BINCOPYCODE", type: "BOOL" }],
+        outputs: [],
+        inouts: [],
+      }),
+      visibility: "PROTECTED",
+    });
+  }
+  return out;
+}
+
+/**
  * The interfaces and the function blocks with an OOP surface (EXTENDS,
+
  * IMPLEMENTS or methods) of the given libraries, as synthetic declarations.
  * A consumer compilation keeps them beside its own (CompilationUnit
  * `libraryInterfaces` / `libraryFunctionBlocks`) so the interface rules of
@@ -509,7 +544,9 @@ export function libraryOopDeclarations(manifests: readonly LibraryManifest[]): {
       if (
         fb.extends === undefined &&
         (fb.implements ?? []).length === 0 &&
-        (fb.methods ?? []).length === 0
+        (fb.methods ?? []).length === 0 &&
+        fb.fbInit === undefined &&
+        fb.fbExit === undefined
       ) {
         continue;
       }

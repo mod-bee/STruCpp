@@ -414,6 +414,10 @@ function checkDeclarations(
         );
       }
       if (!inherited) continue;
+      // Every block's FB_Init and FB_Exit runs; neither replaces the base's
+      // (CODESYS "Method: FB_Init, FB_Reinit, FB_Exit"), see fb-lifecycle.ts.
+      const upperName = method.name.toUpperCase();
+      if (upperName === "FB_INIT" || upperName === "FB_EXIT") continue;
       const base = inherited.method;
       if (base.visibility === "PRIVATE") {
         // 6.6.5.5.2 rule 1: a PRIVATE method is not inherited.

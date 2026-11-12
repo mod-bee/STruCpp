@@ -354,6 +354,15 @@ function buildDerivedFBEntry(
   );
   const inouts = parts.flatMap((p) => p.inouts);
   const methods = publicMethodsOf(lineage);
+  // FB_Init / FB_Exit (CODESYS): the FB_Init a consumer's declaration sets
+  // the inputs of (the nearest in the lineage), whatever its access.
+  const ownOf = (owner: FunctionBlockDeclaration, name: string) =>
+    owner.methods.find((m) => m.name.toUpperCase() === name);
+  const fbInit = [...lineage]
+    .reverse()
+    .map((owner) => ownOf(owner, "FB_INIT"))
+    .find((m) => m !== undefined);
+  const fbExit = lineage.some((owner) => ownOf(owner, "FB_EXIT") !== undefined);
   return {
     name: fb.name,
     ...declaredNameOf(fb.name, fb.declaredName),
@@ -368,11 +377,14 @@ function buildDerivedFBEntry(
       ? { implements: [...fb.implements] }
       : {}),
     ...(methods.length > 0 ? { methods } : {}),
+    ...(fbInit !== undefined ? { fbInit: buildMethodEntry(fbInit) } : {}),
+    ...(fbExit ? { fbExit: true as const } : {}),
   };
 }
 
 /**
  * The PUBLIC methods a block offers to its callers (IEC 61131-3 6.6.5.4.4):
+
  * those of its lineage, base first, a method of a derived block replacing the
  * base's of the same name (OVERRIDE, 6.6.5.5.5).
  */

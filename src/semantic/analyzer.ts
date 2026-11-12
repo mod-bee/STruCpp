@@ -93,6 +93,8 @@ import {
   type StdSignature,
 } from "./std-function-registry.js";
 import { checkFunctionBlockRules } from "./fb-rules.js";
+import { checkFbLifecycleRules } from "./fb-lifecycle.js";
+
 import { checkDeclarationNames } from "./declaration-names.js";
 
 // =============================================================================
@@ -1050,6 +1052,13 @@ export class SemanticAnalyzer {
       const { startLine, startCol, file } = e.span;
       if (e.warning) this.addWarning(e.message, startLine, startCol, file);
       else this.addError(e.message, startLine, startCol, file);
+    }
+
+    // FB_Init / FB_Exit / FB_Reinit (CODESYS "Method: FB_Init, FB_Reinit,
+    // FB_Exit") and the FB_Init arguments of instance declarations
+    for (const e of checkFbLifecycleRules(ast)) {
+      const { startLine, startCol, file } = e.span;
+      this.addError(e.message, startLine, startCol, file);
     }
 
     // Validate bit access bounds and ADR l-value targets

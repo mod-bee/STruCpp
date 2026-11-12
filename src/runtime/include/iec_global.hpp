@@ -132,6 +132,10 @@ class GlobalVar {
     /** Forward an initial value to the underlying IEC type. */
     template <typename T>
     explicit GlobalVar(T init) : value(init) {}
+    /** Build an instance with FB_Init in place from its constructor arguments. */
+    template <typename... A>
+    explicit GlobalVar(FbCtorArgs, A... args) : value(args...) {}
+
 
     // Non-copyable / non-movable: the mutex is; and a canonical global is a
     // fixed configuration member that nothing copies.

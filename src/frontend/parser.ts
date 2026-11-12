@@ -516,7 +516,20 @@ export class STParser extends CstParser {
         },
       },
     ]);
+    // FB_Init arguments of a function block instance (CODESYS "Method:
+    // FB_Init": `com1 : serialdevice(iCOMnum := 1);`).
+    this.OPTION8({
+      GATE: () => this.LA(1).tokenType === tokens.LParen,
+      DEF: () => {
+        this.CONSUME2(tokens.LParen, { LABEL: "initLParen" });
+        this.OPTION9(() => {
+          this.SUBRULE(this.argumentList, { LABEL: "initArgs" });
+        });
+        this.CONSUME2(tokens.RParen, { LABEL: "initRParen" });
+      },
+    });
     // `R_EDGE` / `F_EDGE` after BOOL (IEC 61131-3 Annex A `Edge_Decl`). Read
+
     // as an identifier so the words stay usable as names, as OSCAT does.
     this.OPTION7({
       GATE: () => isEdgeQualifier(this.LA(1)),

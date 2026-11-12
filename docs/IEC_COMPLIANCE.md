@@ -156,6 +156,7 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | FINAL | Supported | Sealed FB and methods |
 | OVERRIDE | Supported | Method override with C++ override specifier |
 | PUBLIC/PRIVATE/PROTECTED | Supported | On methods and on `VAR` sections |
+| FB_Init / FB_Reinit / FB_Exit (CODESYS) | Supported | `FB_Init` runs for every instance after its implicit initialization and before its initial assignments; inputs after `bInitRetains` / `bInCopyCode` are set at the declaration, `fb : T(p := 1) := (x := 2)`, named, an omitted one at its initial value. With EXTENDS each block's FB_Init runs, base first; a derived FB_Init repeats the base's inputs first; `SUPER^.FB_Init` is refused. `bInitRetains` is TRUE and `bInCopyCode` FALSE (no online change; retained values are restored after FB_Init). `FB_Exit` runs when the instance is destroyed (`__DELETE`, end of a function call, program end), derived first; never for a copy. `FB_Reinit` is only called by the application. An initial value for an array of such instances is refused. Works for library blocks (manifest `fbInit`, `fbExit`) |
 | THIS | Supported | `THIS.m()`, `THIS.v`, and a bare `THIS` (the own instance, e.g. passed to an interface input, §6.6.5.7.2); CODESYS `THIS^` too |
 
 ### Function block inheritance (6.6.7.2.7-11)
@@ -270,7 +271,6 @@ edges on `CU` and `CD` leave `CV` unchanged. CODESYS does not document that case
 | Feature | Notes |
 |---------|-------|
 | UNION | CODESYS union type |
-| FB_Init / FB_Exit | Constructor/destructor lifecycle methods |
 | __QUERYINTERFACE | CODESYS runtime interface query; the IEC assignment attempt `?=` is supported |
 | ACTION blocks | Named action blocks |
 | TRY/CATCH/FINALLY | Exception handling |

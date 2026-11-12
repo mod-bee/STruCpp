@@ -1697,6 +1697,19 @@ export class ASTBuilder {
       }
     }
 
+    // FB_Init arguments: `fb : FB_T(p := 1);` (CODESYS "Method: FB_Init").
+    let initArguments: Argument[] | undefined;
+    if (children.initLParen) {
+      initArguments = [];
+      const argListNode = getFirstNode(children.initArgs);
+      if (argListNode) {
+        const argListChildren = argListNode.children as CstChildren;
+        for (const argNode of getAllNodes(argListChildren.argument)) {
+          initArguments.push(this.buildArgument(argNode));
+        }
+      }
+    }
+
     const edgeToken = getFirstToken(children.edgeQualifier);
     const edge = edgeToken
       ? edgeToken.image.toUpperCase() === "F_EDGE"
@@ -1712,7 +1725,9 @@ export class ASTBuilder {
       declaredNames,
       type,
       ...(initialValue !== undefined ? { initialValue } : {}),
+      ...(initArguments !== undefined ? { initArguments } : {}),
       ...(address !== undefined ? { address } : {}),
+
       ...(addressKind !== undefined ? { addressKind } : {}),
       ...(addressSpan !== undefined ? { addressSpan } : {}),
       ...(nameSpans.length > 0 ? { nameSpans } : {}),

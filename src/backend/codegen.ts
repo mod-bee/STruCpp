@@ -35,7 +35,9 @@ import type {
   InterfaceDeclaration,
   PropertyDeclaration,
   Visibility,
+  FunctionBlockDeclaration,
 } from "../frontend/ast.js";
+
 import { createDefaultSourceSpan } from "../frontend/ast.js";
 import { parseInitialValueText } from "../frontend/expression-text.js";
 import type { SymbolTables } from "../semantic/symbol-table.js";
@@ -113,9 +115,18 @@ import {
 } from "../semantic/type-utils.js";
 import {
   generateInitializerValue,
+  generateStructInitializerSetter,
   isStructInitializerValue,
   type StructInitEmitter,
 } from "./struct-init-codegen.js";
+import {
+  effectiveLifecycleMethod,
+  FB_EXIT,
+  FB_INIT,
+  fbInitUserInputs,
+  fbLineage,
+  ownMethod,
+} from "../semantic/fb-lifecycle.js";
 
 // =============================================================================
 // Located Variable Support
@@ -2023,7 +2034,14 @@ export class CodeGenerator {
             // `inline`, not a static-local behind a reference: the debug table takes
             // their address into PROGMEM, which needs a constant.
             this.emitHeaderChunkMarker("begin", "inlineGlobal", name);
-            if (decl.initialValue) {
+            const inPlace = this.lifecycleCtorArgs(
+              decl.type,
+              decl.initialValue,
+              decl.initArguments,
+            );
+            if (inPlace !== undefined) {
+              this.emitHeader(`inline ${cppType} ${name}{${inPlace}};`);
+            } else if (decl.initialValue) {
               const initExpr = this.generateInitializer(
                 decl.initialValue,
                 cppType,
@@ -2916,7 +2934,221 @@ export class CodeGenerator {
     return undefined;
   }
 
+  // ---------------------------------------------------------------------------
+  // FB_Init / FB_Exit (CODESYS "Method: FB_Init, FB_Reinit, FB_Exit"); the
+  // runtime side is iec_fb_lifecycle.hpp.
+  // ---------------------------------------------------------------------------
+
+  /** True when the block or a block it EXTENDS declares FB_Init or FB_Exit. */
+  private isLifecycleFb(typeName: string | undefined): boolean {
+    if (typeName === undefined || this.ast === undefined) return false;
+    return fbLineage(this.ast, typeName).some(
+      (fb) =>
+        ownMethod(fb, FB_INIT) !== undefined ||
+        ownMethod(fb, FB_EXIT) !== undefined,
+    );
+  }
+
+  /** True when the block or a block it EXTENDS declares FB_Exit. */
+  private hasFbExit(typeName: string): boolean {
+    return (
+      this.ast !== undefined &&
+      effectiveLifecycleMethod(this.ast, typeName, FB_EXIT) !== undefined
+    );
+  }
+
+  /** `TYPE NAME` of each FB_Init input set at a declaration, as C++ parameters. */
+  private fbInitCtorParams(
+    typeName: string,
+    withDefaults: boolean,
+  ): { decl: string; name: string }[] {
+    const init =
+      this.ast !== undefined
+        ? effectiveLifecycleMethod(this.ast, typeName, FB_INIT)
+        : undefined;
+    if (init === undefined) return [];
+    return fbInitUserInputs(init).map(({ name, decl }) => {
+      const cppType = this.mapTypeRefToCpp(decl.type);
+      const param = `__p_${name}`;
+      const dflt = !withDefaults
+        ? ""
+        : decl.initialValue !== undefined
+          ? ` = ${this.generateInitializer(decl.initialValue, cppType, decl.type.name)}`
+          : ` = ${cppType}{}`;
+      return { decl: `${cppType} ${param}${dflt}`, name: param };
+    });
+  }
+
+  /**
+   * The C++ constructor arguments that build an instance of a block with
+   * FB_Init / FB_Exit in place, from the declaration's FB_Init arguments and
+   * initial assignments; undefined when the default constructor does (or the
+   * type is no such block).
+   */
+  private lifecycleCtorArgs(
+    type: { name: string; arrayDimensions?: unknown; referenceKind?: string },
+    initialValue: Expression | undefined,
+    initArguments: readonly Argument[] | undefined,
+  ): string | undefined {
+    if (
+      type.arrayDimensions !== undefined ||
+      (type.referenceKind ?? "none") !== "none" ||
+      !this.isLifecycleFb(type.name)
+    ) {
+      return undefined;
+    }
+    const setter =
+      initialValue?.kind === "StructInitializerExpression"
+        ? generateStructInitializerSetter(
+            initialValue,
+            type.name,
+            this.getStructInitEmitter(),
+          )
+        : undefined;
+    if (setter === undefined && (initArguments ?? []).length === 0) {
+      return undefined;
+    }
+    const hasInit =
+      this.ast !== undefined &&
+      effectiveLifecycleMethod(this.ast, type.name, FB_INIT) !== undefined;
+    // Every FB_Init input in order, an omitted one at its initial value; the
+    // two the system sets come first in the method and are dropped here.
+    const values = hasInit
+      ? this.generateCallArguments(
+          type.name,
+          FB_INIT,
+          initArguments ?? [],
+        ).slice(2)
+      : [];
+    return setter !== undefined
+      ? ["strucpp::FbInitThen{}", setter, ...values].join(", ")
+      : values.join(", ");
+  }
+
+  /**
+   * The constructors of a block with FB_Init / FB_Exit (iec_fb_lifecycle.hpp):
+   * the public one taking the FB_Init inputs, the in-place one applying a
+   * declaration's initial assignments, and the deferred one a derived block
+   * builds its base part with.
+   */
+  private emitLifecycleHeader(fb: FunctionBlockDeclaration): void {
+    const params = this.fbInitCtorParams(fb.name, true);
+    const plain = this.fbInitCtorParams(fb.name, false);
+    this.emitHeader(`    ${fb.name}(${params.map((p) => p.decl).join(", ")});`);
+    this.emitHeader("    template <typename S>");
+    this.emitHeader(
+      `    ${fb.name}(strucpp::FbInitThen, S setter${plain.map((p) => `, ${p.decl}`).join("")})`,
+    );
+    this.emitHeader(
+      `        : ${fb.name}(${plain.map((p) => p.name).join(", ")}) { setter(*this); }`,
+    );
+    const ownInit = ownMethod(fb, FB_INIT);
+    const ownExit = ownMethod(fb, FB_EXIT);
+    // One FbLife per instance, in the first block of the lineage with FB_Exit.
+    if (
+      ownExit !== undefined &&
+      (fb.extends === undefined || !this.hasFbExit(fb.extends))
+    ) {
+      this.emitHeader("    strucpp::FbLife __fb_life_;");
+    }
+    this.emitHeader("protected:");
+    this.emitHeader(`    explicit ${fb.name}(strucpp::FbInitDeferred);`);
+    if (ownInit !== undefined) {
+      const own = fbInitUserInputs(ownInit).map(
+        ({ name, decl }) => `${this.mapTypeRefToCpp(decl.type)} __p_${name}`,
+      );
+      this.emitHeader(`    void __fb_init_own(${own.join(", ")});`);
+    }
+    if (ownExit !== undefined) this.emitHeader("    void __fb_exit_own();");
+    this.emitHeader("public:");
+  }
+
+  /** The constructors and destructor of a block with FB_Init / FB_Exit. */
+  private emitLifecycleImplementation(
+    fb: FunctionBlockDeclaration,
+    implicitInits: string[],
+  ): void {
+    const name = fb.name;
+    // Deferred: the implicit initialization only.
+    const baseInit =
+      fb.extends !== undefined && this.isLifecycleFb(fb.extends)
+        ? [`${fb.extends}(strucpp::FbInitDeferred{})`]
+        : [];
+    const inits = [...baseInit, ...implicitInits];
+    this.emit(`${name}::${name}(strucpp::FbInitDeferred)`);
+    if (inits.length > 0) this.emit(`    : ${inits.join(", ")}`);
+    this.emit("{");
+    this.emit("    // Initialize variables");
+    this.emit("}");
+    this.emit("");
+    // Public: then every FB_Init of the lineage, the base first.
+    const params = this.fbInitCtorParams(name, false);
+    this.emit(`${name}::${name}(${params.map((p) => p.decl).join(", ")})`);
+    this.emit(`    : ${name}(strucpp::FbInitDeferred{})`);
+    this.emit("{");
+    const lineage = this.ast ? fbLineage(this.ast, name) : [];
+    for (const level of [...lineage].reverse()) {
+      const init = ownMethod(level, FB_INIT);
+      if (init === undefined) continue;
+      const args = fbInitUserInputs(init).map((i) => `__p_${i.name}`);
+      this.emit(`    ${level.name}::__fb_init_own(${args.join(", ")});`);
+    }
+    if (this.hasFbExit(name)) this.emit("    __fb_life_.start();");
+    this.emit("}");
+    this.emit("");
+    const ownInit = ownMethod(fb, FB_INIT);
+    if (ownInit !== undefined) {
+      const own = fbInitUserInputs(ownInit);
+      const decls = own.map(
+        ({ name: n, decl }) => `${this.mapTypeRefToCpp(decl.type)} __p_${n}`,
+      );
+      this.emit(`void ${name}::__fb_init_own(${decls.join(", ")}) {`);
+      const args = ["true", "false", ...own.map((i) => `__p_${i.name}`)];
+      this.emit(`    ${name}::FB_INIT(${args.join(", ")});`);
+      this.emit("}");
+      this.emit("");
+    }
+    if (ownMethod(fb, FB_EXIT) !== undefined) {
+      this.emit(`void ${name}::__fb_exit_own() {`);
+      this.emit(`    ${name}::FB_EXIT(false);`);
+      this.emit("}");
+      this.emit("");
+    }
+    // FB_Exit: the most derived destructor runs every FB_Exit, derived first,
+    // while the whole instance still exists.
+    if (this.hasFbExit(name)) {
+      this.emit(`${name}::~${name}() {`);
+      this.emit("    if (__fb_life_.end()) {");
+      for (const level of lineage) {
+        if (ownMethod(level, FB_EXIT) !== undefined) {
+          this.emit(`        ${level.name}::__fb_exit_own();`);
+        }
+      }
+      this.emit("    }");
+      this.emit("}");
+      this.emit("");
+    }
+  }
+
+  /**
+   * What follows a local's name in its C++ definition: `(args)` for an
+   * instance built in place (FB_Init), ` = init` for an initial value, else
+   * nothing.
+   */
+  protected localInitializer(decl: VarDeclaration, cppType: string): string {
+    const inPlace = this.lifecycleCtorArgs(
+      decl.type,
+      decl.initialValue,
+      decl.initArguments,
+    );
+    if (inPlace !== undefined) return `(${inPlace})`;
+    return decl.initialValue
+      ? ` = ${this.generateInitializer(decl.initialValue, cppType, decl.type.name)}`
+      : "";
+  }
+
   /** Whether each positional parameter of a method is passed by reference. */
+
   private methodParamByRef(method: MethodDeclaration | undefined): boolean[] {
     const byRef: boolean[] = [];
     for (const block of method?.varBlocks ?? []) {
@@ -3103,9 +3335,14 @@ export class CodeGenerator {
 
     this.emitHeader("");
     this.emitHeader("    // Constructor");
-    this.emitHeader(`    ${fb.name}();`);
+    if (this.isLifecycleFb(fb.name)) {
+      this.emitLifecycleHeader(fb);
+    } else {
+      this.emitHeader(`    ${fb.name}();`);
+    }
     this.emitHeader("");
     this.emitHeader("    // Execute function block");
+
     // The call of a function block is bound dynamically (IEC 61131-3
     // §6.6.7.2.9 rule 4, §6.6.8.3): a derived instance reached through a base
     // in-out runs its own body. A FINAL block with no base has nothing to bind.
@@ -3130,7 +3367,12 @@ export class CodeGenerator {
     // Virtual destructor (needed for classes with virtual methods)
     if (fb.methods.length > 0 || fb.properties.length > 0 || !fb.isFinal) {
       this.emitHeader("");
-      this.emitHeader(`    virtual ~${fb.name}() = default;`);
+      // FB_Exit runs from the destructor (iec_fb_lifecycle.hpp).
+      this.emitHeader(
+        this.hasFbExit(fb.name)
+          ? `    virtual ~${fb.name}();`
+          : `    virtual ~${fb.name}() = default;`,
+      );
     }
 
     // Assignment attempt (6.6.6.7): this instance as one of its interfaces.
@@ -3445,10 +3687,13 @@ export class CodeGenerator {
         let prefix: string;
         let suffix: string;
 
+        const lifecycle = ["FB_INIT", "FB_EXIT"].includes(
+          method.name.toUpperCase(),
+        );
         if (method.isAbstract) {
           prefix = "virtual ";
           suffix = " = 0";
-        } else if (method.isOverride) {
+        } else if (method.isOverride && !lifecycle) {
           prefix = "";
           suffix = " override";
           if (method.isFinal) suffix += " final";
@@ -3596,9 +3841,7 @@ export class CodeGenerator {
         for (const decl of block.declarations) {
           for (const name of decl.names) {
             const cppType = this.mapTypeRefToCpp(decl.type);
-            const initValue = decl.initialValue
-              ? ` = ${this.generateInitializer(decl.initialValue, cppType, decl.type.name)}`
-              : "";
+            const initValue = this.localInitializer(decl, cppType);
             this.emit(`    ${cppType} ${name}${initValue};`);
           }
         }
@@ -3672,12 +3915,35 @@ export class CodeGenerator {
     // A program has no methods: its members are not renamed for the method
     // names of the block generated before it.
     this.currentFBInterfaceMethods = new Set();
-    // Constructor
-    this.emit(`Program_${prog.name}::Program_${prog.name}() {`);
+    // Constructor. An instance of a block with FB_Init / FB_Exit is built in
+    // place from its FB_Init arguments and initial assignments.
+    const inPlaceInits: string[] = [];
+    const inPlaceDecls = new Set<VarDeclaration>();
+    for (const block of prog.varBlocks) {
+      if (block.blockType === "VAR_TEMP") continue;
+      for (const decl of block.declarations) {
+        const args = this.lifecycleCtorArgs(
+          decl.type,
+          decl.initialValue,
+          decl.initArguments,
+        );
+        if (args === undefined) continue;
+        inPlaceDecls.add(decl);
+        for (const name of decl.names) inPlaceInits.push(`${name}(${args})`);
+      }
+    }
+    if (inPlaceInits.length > 0) {
+      this.emit(`Program_${prog.name}::Program_${prog.name}()`);
+      this.emit(`    : ${inPlaceInits.join(", ")}`);
+      this.emit("{");
+    } else {
+      this.emit(`Program_${prog.name}::Program_${prog.name}() {`);
+    }
     this.emit("    // Initialize variables");
     for (const block of prog.varBlocks) {
       if (block.blockType === "VAR_TEMP") continue; // a local of run()
       for (const decl of block.declarations) {
+        if (inPlaceDecls.has(decl)) continue;
         if (decl.initialValue !== undefined) {
           const initExpr = this.generateInitializer(
             decl.initialValue,
@@ -3757,6 +4023,18 @@ export class CodeGenerator {
       if (block.blockType === "VAR_EXTERNAL") continue;
       if (block.blockType === "VAR_TEMP") continue; // a local of operator()
       for (const decl of block.declarations) {
+        const inPlace = this.lifecycleCtorArgs(
+          decl.type,
+          decl.initialValue,
+          decl.initArguments,
+        );
+        if (inPlace !== undefined) {
+          for (const name of decl.names) {
+            const memberName = this.mangleMemberIfNeeded(name, decl.type.name);
+            fbInits.push(`${memberName}(${inPlace})`);
+          }
+          continue;
+        }
         if (decl.initialValue) {
           const cppType = this.mapTypeRefToCpp(decl.type);
           const initExpr = this.generateInitializer(
@@ -3771,16 +4049,21 @@ export class CodeGenerator {
         }
       }
     }
-    if (fbInits.length > 0) {
+    if (this.isLifecycleFb(fb.name)) {
+      this.emitLifecycleImplementation(fb, fbInits);
+    } else if (fbInits.length > 0) {
       this.emit(`${fb.name}::${fb.name}()`);
       this.emit(`    : ${fbInits.join(", ")}`);
       this.emit("{");
+      this.emit("    // Initialize variables");
+      this.emit("}");
+      this.emit("");
     } else {
       this.emit(`${fb.name}::${fb.name}() {`);
+      this.emit("    // Initialize variables");
+      this.emit("}");
+      this.emit("");
     }
-    this.emit("    // Initialize variables");
-    this.emit("}");
-    this.emit("");
 
     // Operator()
     this.emitLineDirective(fb.sourceSpan.startLine);
@@ -3889,11 +4172,10 @@ export class CodeGenerator {
       if (block.blockType !== "VAR_TEMP") continue;
       for (const decl of block.declarations) {
         const cppType = this.mapTypeRefToCpp(decl.type);
-        const initValue = decl.initialValue
-          ? ` = ${this.generateInitializer(decl.initialValue, cppType, decl.type.name)}`
-          : "";
+        const initValue = this.localInitializer(decl, cppType);
         for (const name of decl.names) {
           const local = this.mangleMemberIfNeeded(name, decl.type.name);
+
           this.emit(`    ${cppType} ${local}${initValue};`);
         }
       }
@@ -3935,9 +4217,7 @@ export class CodeGenerator {
           for (const decl of block.declarations) {
             for (const name of decl.names) {
               const cppType = this.mapTypeRefToCpp(decl.type);
-              const initValue = decl.initialValue
-                ? ` = ${this.generateInitializer(decl.initialValue, cppType, decl.type.name)}`
-                : "";
+              const initValue = this.localInitializer(decl, cppType);
               this.emit(
                 `    ${cppType} ${this.functionVarName(name, decl.type.name)}${initValue};`,
               );
@@ -4472,9 +4752,18 @@ export class CodeGenerator {
         // has nothing to deduce from — name the type for aggregate initialisers
         // (array literals) and pass everything else straight through.
         const rawInit = this.projectVarInitializer(gvar) ?? "";
-        const initVal = rawInit.startsWith("{")
-          ? `${cppType}${rawInit}`
-          : rawInit;
+        const inPlace =
+          rawInit !== "" &&
+          this.lifecycleCtorArgs(
+            this.projectVarToTypeRef(gvar),
+            gvar.initialValue,
+            gvar.initArguments,
+          ) !== undefined;
+        const initVal = inPlace
+          ? `strucpp::FbCtorArgs{}, ${rawInit}`
+          : rawInit.startsWith("{")
+            ? `${cppType}${rawInit}`
+            : rawInit;
 
         if (this.options.plcDataBlock) {
           this.plcDataMembers.push(
@@ -9989,6 +10278,12 @@ export class CodeGenerator {
     ) {
       return undefined;
     }
+    const inPlace = this.lifecycleCtorArgs(
+      this.projectVarToTypeRef(decl),
+      decl.initialValue,
+      decl.initArguments,
+    );
+    if (inPlace !== undefined) return inPlace;
     if (decl.initialValue) {
       return this.generateInitializer(
         decl.initialValue,
@@ -9996,6 +10291,7 @@ export class CodeGenerator {
         decl.typeName,
       );
     }
+
     // Composite types (struct, enum, array, FB instance) report no default here
     // (empty string) and are skipped, so their own default constructor runs.
     const typeDefault = this.getTypeDefaultValue(decl.typeName);
@@ -10071,6 +10367,8 @@ export class CodeGenerator {
         typeName !== undefined && typeName !== "" && this.ast
           ? resolveArrayElementTypeUtil(typeName, this.ast)
           : undefined,
+      initializesInPlace: (stTypeName: string | undefined): boolean =>
+        this.isLifecycleFb(stTypeName),
     };
     return this.structInitEmitter;
   }

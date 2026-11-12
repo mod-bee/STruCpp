@@ -44,6 +44,8 @@
 
 #include "iec_types.hpp"
 #include "iec_fault.hpp"
+#include "iec_fb_lifecycle.hpp"
+
 #include <type_traits>
 #include <utility>
 #if STRUCPP_HAS_EXCEPTIONS

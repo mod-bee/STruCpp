@@ -1629,8 +1629,10 @@ export class TypeChecker {
   private checkVarBlocks(blocks: VarBlock[], scope: Scope): void {
     for (const block of blocks) {
       for (const decl of block.declarations) {
+        if (decl.initArguments) this.checkInitArguments(decl, scope);
         if (!decl.initialValue) continue;
         const outerKind = decl.type.referenceKind;
+
         if (
           (outerKind === "ref_to" || outerKind === "pointer_to") &&
           !isNullInitializer(decl.initialValue)
@@ -1687,8 +1689,49 @@ export class TypeChecker {
   }
 
   /**
+   * The FB_Init arguments of an instance declaration (`fb : T(p := v)`)
+   * against the FB_Init inputs, as the arguments of a method call. Names
+   * and counts are checked in fb-lifecycle.ts.
+   */
+  private checkInitArguments(decl: VarDeclaration, scope: Scope): void {
+    const init = this.findMethodInChain(decl.type.name, "FB_INIT");
+    const args = decl.initArguments ?? [];
+    for (const arg of args) this.resolveExprType(arg.value, scope);
+    if (!init) return;
+    this.validateInterfaceArguments(args, init.varBlocks, scope);
+    for (const arg of args) {
+      if (arg.name === undefined || arg.isOutput) continue;
+      const formal = init.varBlocks
+        .filter((b) => b.blockType === "VAR_INPUT")
+        .flatMap((b) => b.declarations)
+        .find((d) =>
+          d.names.some((n) => n.toUpperCase() === arg.name!.toUpperCase()),
+        );
+      if (!formal || formal.type.referenceKind !== "none") continue;
+      if (formal.type.arrayDimensions !== undefined) continue;
+      const targetType = ELEMENTARY_TYPES[formal.type.name.toUpperCase()];
+      const valueType = arg.value.resolvedType;
+      if (!targetType || !valueType) continue;
+      this.validateAssignment(
+        targetType,
+        valueType,
+        {
+          kind: "VariableExpression",
+          sourceSpan: arg.sourceSpan,
+          name: arg.name,
+          fieldAccess: [],
+          subscripts: [],
+          isDereference: false,
+        },
+        arg.value,
+      );
+    }
+  }
+
+  /**
    * Walk statements, resolve all sub-expressions, and validate type rules.
    */
+
   private checkStatements(stmts: Statement[], scope: Scope): void {
     for (const stmt of stmts) {
       this.checkStatement(stmt, scope);

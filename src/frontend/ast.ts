@@ -306,7 +306,14 @@ export interface VarDeclaration extends ASTNode {
   declaredNames?: string[];
   type: TypeReference;
   initialValue?: Expression;
+  /**
+   * Arguments for the instance's FB_Init, written after the type:
+   * `com1 : serialdevice(iCOMnum := 1);` (CODESYS "Method: FB_Init"). Empty
+   * for `fb : T();`; absent when no parentheses follow the type.
+   */
+  initArguments?: Argument[];
   /** The `AT` operand verbatim: a `%` location, or an OpenPLC alias name. */
+
   address?: string;
   /**
    * Which form {@link address} took.

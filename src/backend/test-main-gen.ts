@@ -569,20 +569,12 @@ class TestFunctionGenerator {
     const cppType = this.testCodegen.resolveType(decl.type);
 
     for (const name of decl.names) {
-      if (decl.initialValue) {
-        // A SETUP/TEST var is a declaration, so `p : Point := (x := 1.0)` is the
-        // legal form and must go through the initializer lowering — the plain
-        // expression emitter has no target type and cannot lower it.
-        lines.push(
-          `${this.indent}${cppType} ${name} = ${this.testCodegen.emitInitializer(
-            decl.initialValue,
-            cppType,
-            decl.type.name,
-          )};`,
-        );
-      } else {
-        lines.push(`${this.indent}${cppType} ${name};`);
-      }
+      // A SETUP/TEST var is a declaration, so `p : Point := (x := 1.0)` is the
+      // legal form and must go through the initializer lowering — the plain
+      // expression emitter has no target type and cannot lower it.
+      lines.push(
+        `${this.indent}${cppType} ${name}${this.testCodegen.emitLocalInitializer(decl, cppType)};`,
+      );
     }
   }
 

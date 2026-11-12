@@ -48,6 +48,12 @@ export interface StructInitEmitter {
   ): string | undefined;
   /** ST element type of the array type `typeName`, when resolvable. */
   arrayElementTypeName(typeName: string | undefined): string | undefined;
+  /**
+   * True for a function block type with FB_Init / FB_Exit: its instance is
+   * initialized where it lives, never copied from a temporary, so a nested
+   * initializer is applied to the member in place. Optional (false).
+   */
+  initializesInPlace?(stTypeName: string | undefined): boolean;
 }
 
 /**
@@ -149,10 +155,35 @@ function generateStructInitializer(
     return "{}";
   }
 
+  return `strucpp::iec_struct_init<${cppTypeExpr}>(${generateStructInitializerSetter(expr, stTypeName, emitter, depth)})`;
+}
+
+/**
+ * The `[](auto& vN) { … }` that writes the elements a structure initializer
+ * names into an existing value.
+ */
+export function generateStructInitializerSetter(
+  expr: StructInitializerExpression,
+  stTypeName: string | undefined,
+  emitter: StructInitEmitter,
+  depth = 0,
+): string {
   const target = `v${depth}`;
   const assignments = expr.elements.map((element) => {
     const member = `${target}.${emitter.memberName(element.name, stTypeName)}`;
     const memberStType = emitter.fieldTypeName(element.name, stTypeName);
+    if (
+      element.value.kind === "StructInitializerExpression" &&
+      emitter.initializesInPlace?.(memberStType) === true
+    ) {
+      const inner = generateStructInitializerSetter(
+        element.value,
+        memberStType,
+        emitter,
+        depth + 1,
+      );
+      return `${inner}(${member});`;
+    }
     const rhs = generateInitializerValue(
       element.value,
       `decltype(${member})`,
@@ -162,8 +193,7 @@ function generateStructInitializer(
     );
     return `${member} = ${rhs};`;
   });
-
-  return `strucpp::iec_struct_init<${cppTypeExpr}>([](auto& ${target}) { ${assignments.join(" ")} })`;
+  return `[](auto& ${target}) { ${assignments.join(" ")} }`;
 }
 
 /**

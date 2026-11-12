@@ -239,6 +239,15 @@ export interface LibraryFBEntry {
   implements?: string[];
   /** Its PUBLIC methods, own and inherited — see {@link LibraryMethodEntry}. */
   methods?: LibraryMethodEntry[];
+  /**
+   * The FB_Init it runs (its own or the nearest base's, CODESYS "Method:
+   * FB_Init"), whatever its access: a consumer's declaration sets the inputs
+   * after the first two (`fb : T(p := 1)`). Absent when there is none.
+   */
+  fbInit?: LibraryMethodEntry;
+  /** The block or a base declares FB_Exit: its instances are built in place. */
+  fbExit?: true;
+
   /** Input variables */
   inputs: LibraryVarType[];
   /** Output variables */
