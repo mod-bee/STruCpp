@@ -94,3 +94,37 @@ END_TEST
     expect(exitCode).toBe(0);
   });
 });
+
+// IEC 61131-3 6.5.2.2 (VAR_GLOBAL): a global may be of any type, a function
+// block included. The C++ variable needs its class complete first.
+describeIfGpp("a top-level VAR_GLOBAL of a block type", () => {
+  it("is emitted after its class and runs", () => {
+    const { stdout, exitCode } = run(
+      `
+FUNCTION_BLOCK FB_X
+  VAR_INPUT x : INT := 3; END_VAR
+  VAR_OUTPUT q : INT; END_VAR
+  q := q + x;
+END_FUNCTION_BLOCK
+VAR_GLOBAL
+  gx : FB_X := (x := 9);
+  ga : ARRAY[1..2] OF FB_X;
+  gn : INT := 4;
+END_VAR
+FUNCTION F_Global : INT
+  gx();
+  ga[2](x := gn);
+  F_Global := gx.q + ga[2].q;
+END_FUNCTION
+`,
+      `
+TEST 'block-typed globals'
+  ASSERT_EQ(F_Global(), 13);
+END_TEST
+`,
+      "fb_global",
+    );
+    expect(stdout).toContain("[PASS] block-typed globals");
+    expect(exitCode).toBe(0);
+  });
+});

@@ -2038,42 +2038,9 @@ export class CodeGenerator {
     this.pendingFbBearingTypes = ast.types.filter(heldBack);
     this.emitTypeDeclarations(ast.types.filter((td) => !heldBack(td)));
 
-    // Generate top-level global variables (GVL files)
-    if (ast.globalVarBlocks.length > 0) {
-      this.emitHeader("// Global variables");
-      for (const block of ast.globalVarBlocks) {
-        const constQualifier = block.isConstant ? "const " : "";
-        for (const decl of block.declarations) {
-          const cppType = this.mapTypeRefToCpp(decl.type);
-          for (const name of decl.names) {
-            // `inline`, not a static-local behind a reference: the debug table takes
-            // their address into PROGMEM, which needs a constant.
-            this.emitHeaderChunkMarker("begin", "inlineGlobal", name);
-            const inPlace = this.lifecycleCtorArgs(
-              decl.type,
-              decl.initialValue,
-              decl.initArguments,
-            );
-            if (inPlace !== undefined) {
-              this.emitHeader(`inline ${cppType} ${name}{${inPlace}};`);
-            } else if (decl.initialValue) {
-              const initExpr = this.generateInitializer(
-                decl.initialValue,
-                cppType,
-                decl.type.name,
-              );
-              this.emitHeader(
-                `${constQualifier}inline ${cppType} ${name} = ${initExpr};`,
-              );
-            } else {
-              this.emitHeader(`inline ${cppType} ${name}{};`);
-            }
-            this.emitHeaderChunkMarker("end", "inlineGlobal", name);
-          }
-        }
-      }
-      this.emitHeader("");
-    }
+    // Generate top-level global variables (GVL files); one of a block type
+    // (or a type holding one) follows the blocks, below.
+    this.emitTopLevelGlobals(ast, "early");
 
     // Inject reachable library chunks (header side).
     //
@@ -2221,6 +2188,7 @@ export class CodeGenerator {
 
     // Globals of those types follow them.
     this.emitFileScopeGlobals("late");
+    this.emitTopLevelGlobals(ast, "late");
 
     // Generate program class declarations
     if (this.projectModel) {
@@ -4877,6 +4845,63 @@ export class CodeGenerator {
    * A global whose type holds a function block instance cannot precede that
    * class, so it is emitted with the types that were held back.
    */
+  /**
+   * The top-level VAR_GLOBAL lists (GVL files) as `inline` variables. A
+   * variable of a block type, or of a type holding one, needs that class
+   * complete: it is emitted in the `late` phase, after the blocks.
+   */
+  private emitTopLevelGlobals(
+    ast: CompilationUnit,
+    phase: "early" | "late",
+  ): void {
+    const follows = (decl: VarDeclaration): boolean =>
+      this.globalFollowsBlocks(decl.type.name) ||
+      (decl.type.elementTypeName !== undefined &&
+        this.globalFollowsBlocks(decl.type.elementTypeName));
+    const blocks = ast.globalVarBlocks
+      .map((block) => ({
+        block,
+        decls: block.declarations.filter(
+          (d) => follows(d) === (phase === "late"),
+        ),
+      }))
+      .filter((b) => b.decls.length > 0);
+    if (blocks.length === 0) return;
+    this.emitHeader("// Global variables");
+    for (const { block, decls } of blocks) {
+      const constQualifier = block.isConstant ? "const " : "";
+      for (const decl of decls) {
+        const cppType = this.mapTypeRefToCpp(decl.type);
+        for (const name of decl.names) {
+          // `inline`, not a static-local behind a reference: the debug table takes
+          // their address into PROGMEM, which needs a constant.
+          this.emitHeaderChunkMarker("begin", "inlineGlobal", name);
+          const inPlace = this.lifecycleCtorArgs(
+            decl.type,
+            decl.initialValue,
+            decl.initArguments,
+          );
+          if (inPlace !== undefined) {
+            this.emitHeader(`inline ${cppType} ${name}{${inPlace}};`);
+          } else if (decl.initialValue) {
+            const initExpr = this.generateInitializer(
+              decl.initialValue,
+              cppType,
+              decl.type.name,
+            );
+            this.emitHeader(
+              `${constQualifier}inline ${cppType} ${name} = ${initExpr};`,
+            );
+          } else {
+            this.emitHeader(`inline ${cppType} ${name}{};`);
+          }
+          this.emitHeaderChunkMarker("end", "inlineGlobal", name);
+        }
+      }
+    }
+    this.emitHeader("");
+  }
+
   private globalFollowsBlocks(typeName: string): boolean {
     const upper = typeName.toUpperCase();
     // `GlobalVar<V>` holds V by value, so the storage cannot precede the
@@ -8563,6 +8588,24 @@ export class CodeGenerator {
     this.currentScopeDeclaredNames.clear();
     this.currentScopeVarTypeRefs.clear();
     this.memberMangledNames.clear();
+    // The top-level VAR_GLOBAL lists (GVL files) are in every scope, below
+    // the POU's own names: their types resolve member access and calls
+    // (`gx(x := 1)`, `ga[2]()`). They are emitted under their own names.
+    for (const block of this.ast?.globalVarBlocks ?? []) {
+      for (const decl of block.declarations) {
+        for (const name of decl.names) {
+          const upper = name.toUpperCase();
+          this.currentScopeVarTypes.set(upper, decl.type.name);
+          this.currentScopeVarTypeRefs.set(upper, decl.type);
+          if (
+            decl.type.referenceKind !== undefined &&
+            decl.type.referenceKind !== "none"
+          ) {
+            this.currentScopeVarRefKinds.set(upper, decl.type.referenceKind);
+          }
+        }
+      }
+    }
     for (const block of varBlocks) {
       for (const decl of block.declarations) {
         const cppType = this.isUserDefinedType(decl.type.name)
