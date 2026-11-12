@@ -677,3 +677,105 @@ END_PROGRAM`;
     );
   });
 });
+
+const CPP_ENGINE = `(* An engine with methods *)
+FUNCTION_BLOCK CPP_ENGINE
+VAR_INPUT
+  ENABLE : BOOL := TRUE;
+END_VAR
+VAR_OUTPUT
+  COUNT : DINT;
+END_VAR
+(* Records one value *)
+METHOD PUBLIC Record : BOOL
+  VAR_INPUT
+    DATA : ANY;
+    NAME : STRING;
+  END_VAR
+  VAR_IN_OUT
+    TOTAL : DINT;
+  END_VAR
+  VAR_OUTPUT
+    SEEN : INT;
+  END_VAR
+END_METHOD
+METHOD PRIVATE Helper
+END_METHOD
+METHOD Hidden
+END_METHOD
+METHOD PUBLIC Reset
+END_METHOD
+#include <cstring>
+// END_VAR and END_METHOD in the C++ are not the header's
+void setup() { }
+void loop() { }
+bool Record() { return true; }
+void Helper() { }
+void Hidden() { }
+void Reset() { COUNT = 0; }
+END_FUNCTION_BLOCK
+`;
+
+describe("a native block that declares methods", () => {
+  it("projects the methods with the header and drops the C++", () => {
+    const out = projectNativeHeaderToSt({
+      fileName: "CPP_ENGINE.cpp",
+      source: CPP_ENGINE,
+      language: "cpp",
+    });
+    if ("message" in out) throw new Error(out.message);
+    expect(out.st).toContain("METHOD PUBLIC Record : BOOL");
+    expect(out.st).toContain("METHOD PUBLIC Reset\nEND_METHOD");
+    expect(out.st).not.toContain("#include");
+    expect(out.st.trimEnd().endsWith("END_FUNCTION_BLOCK")).toBe(true);
+  });
+
+  // A METHOD without an access specifier is PROTECTED (IEC 61131-3 6.6.5.4).
+  it("puts its public methods on the manifest entry", () => {
+    const result = compileLibrary(
+      [{ fileName: "CPP_ENGINE.cpp", source: CPP_ENGINE }],
+      OPTS,
+    );
+    expect(result.errors).toEqual([]);
+    const fb = result.manifest.functionBlocks[0]!;
+    expect(fb.implementation).toBe("cpp");
+    expect(fb.inputs.map((v) => v.name)).toEqual(["ENABLE"]);
+    expect(fb.outputs.map((v) => v.name)).toEqual(["COUNT"]);
+    expect(fb.methods?.map((m) => m.name)).toEqual(["RECORD", "RESET"]);
+    const record = fb.methods![0]!;
+    expect(record.declaredName).toBe("Record");
+    expect(record.returnType).toBe("BOOL");
+    expect(record.inputs.map((v) => [v.name, v.type])).toEqual([
+      ["DATA", "ANY"],
+      ["NAME", "STRING"],
+    ]);
+    expect(record.inouts.map((v) => v.name)).toEqual(["TOTAL"]);
+    expect(record.outputs.map((v) => v.name)).toEqual(["SEEN"]);
+    expect(fb.methods![1]!.returnType).toBeUndefined();
+  });
+
+  it("leaves a block without methods exactly as before", () => {
+    const result = compileLibrary(
+      [{ fileName: "CPP_SCALE.cpp", source: CPP_BLOCK }],
+      OPTS,
+    );
+    expect(result.manifest.functionBlocks[0]).not.toHaveProperty("methods");
+  });
+
+  it("lets a consumer call a method of the archived block", () => {
+    const built = compileStlib(
+      [{ fileName: "CPP_ENGINE.cpp", source: CPP_ENGINE }],
+      OPTS,
+    );
+    expect(built.errors).toEqual([]);
+    const archive = loadStlibFromString(JSON.stringify(built.archive));
+    const result = compile(
+      `PROGRAM Main
+  VAR e : CPP_ENGINE; v : DINT; t : DINT; s : INT; ok : BOOL; END_VAR
+  ok := e.Record(DATA := v, NAME := 'n', TOTAL := t, SEEN => s);
+END_PROGRAM`,
+      { libraries: [archive] },
+    );
+    expect(result.errors.map((e) => e.message)).toEqual([]);
+  });
+});

@@ -604,9 +604,15 @@ function compileNativeEntries(
   };
 
   return {
-    functionBlocks: result.ast.functionBlocks.map((fb) =>
-      tagNative(buildFBEntry(fb)),
-    ),
+    functionBlocks: result.ast.functionBlocks.map((fb) => {
+      // A native block's methods are declared in its header, like an ST
+      // block's; their bodies are native too.
+      const methods = publicMethodsOf([fb]);
+      return tagNative({
+        ...buildFBEntry(fb),
+        ...(methods.length > 0 ? { methods } : {}),
+      });
+    }),
     errors: [],
   };
 }

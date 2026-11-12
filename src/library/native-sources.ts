@@ -21,6 +21,10 @@
  * the manifest looking like any other, distinguished only by
  * `implementation: "cpp" | "python"`. The body between the last `END_VAR` and
  * the closing `END_FUNCTION_BLOCK` is never parsed.
+ *
+ * The header may also declare METHODs after its VAR sections, with no body
+ * (their bodies are native too). They are part of the header and land in the
+ * manifest entry's `methods` as an ST block's do.
  */
 
 /** Body language a native library source is written in. */
@@ -111,6 +115,85 @@ function lastEndVarIndex(source: string): number {
     last = match.index + match[0].length;
   }
   return last;
+}
+
+/** Index just past the comment or string literal at `at`, or `at` if none. */
+function skipCommentOrString(source: string, at: number): number {
+  const two = source.slice(at, at + 2);
+  const close =
+    two === "(*" ? "*)" : two === "/*" ? "*/" : two === "//" ? "\n" : null;
+  if (close !== null) {
+    const end = source.indexOf(close, at + 2);
+    return end === -1 ? source.length : end + close.length;
+  }
+  const quote = source[at];
+  if (quote === "'" || quote === '"') {
+    const end = source.indexOf(quote, at + 1);
+    return end === -1 ? source.length : end + 1;
+  }
+  return at;
+}
+
+/** Index just past the `keyword` that closes the section starting at `from`. */
+function sectionEnd(source: string, from: number, keyword: string): number {
+  const word = new RegExp(`^${keyword}\\b`, "i");
+  let at = from;
+  while (at < source.length) {
+    const skipped = skipCommentOrString(source, at);
+    if (skipped !== at) {
+      at = skipped;
+      continue;
+    }
+    if (
+      /\w/.test(source[at - 1] ?? " ") === false &&
+      word.test(source.slice(at))
+    ) {
+      return at + keyword.length;
+    }
+    at++;
+  }
+  return -1;
+}
+
+/**
+ * Where a native block's header ends when it declares METHODs, or undefined
+ * when it declares none.
+ *
+ * A method has VAR sections of its own, so the last `END_VAR` of the file is
+ * inside a method. The header is read section by section instead: `VAR_*`
+ * blocks and `METHOD ... END_METHOD` declarations, with comments between
+ * them, up to the first text that is neither, which is the native body.
+ */
+export function methodDeclarationsEnd(
+  source: string,
+  from: number,
+): number | undefined {
+  let at = from;
+  let end = from;
+  let sawMethod = false;
+  while (at < source.length) {
+    if (/\s/.test(source[at]!)) {
+      at++;
+      continue;
+    }
+    const skipped = skipCommentOrString(source, at);
+    if (skipped !== at && source[at] !== "'" && source[at] !== '"') {
+      at = skipped;
+      continue;
+    }
+    const rest = source.slice(at);
+    const isMethod = /^METHOD\b/i.test(rest);
+    if (!isMethod && !/^VAR\w*\b/i.test(rest)) break;
+    const closed = sectionEnd(
+      source,
+      at + (isMethod ? 6 : 3),
+      isMethod ? "END_METHOD" : "END_VAR",
+    );
+    if (closed === -1) break;
+    sawMethod ||= isMethod;
+    at = end = closed;
+  }
+  return sawMethod ? end : undefined;
 }
 
 /**
@@ -207,7 +290,11 @@ export function projectNativeHeaderToSt(
     };
   }
 
-  const headerEnd = lastEndVarIndex(body);
+  const methodsEnd = methodDeclarationsEnd(
+    body,
+    declaration.index + declaration[0].length,
+  );
+  const headerEnd = methodsEnd ?? lastEndVarIndex(body);
   if (headerEnd === -1) {
     return {
       fileName: source.fileName,
