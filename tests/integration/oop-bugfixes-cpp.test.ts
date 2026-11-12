@@ -128,3 +128,34 @@ END_TEST
     expect(exitCode).toBe(0);
   });
 });
+
+// A TEST variable is declared like any variable (IEC 61131-3 6.5.1): a
+// POINTER TO / REF_TO a block is a pointer, not an instance.
+describeIfGpp("pointers and references in TEST variables", () => {
+  it("declares POINTER TO and REF_TO a block as pointers", () => {
+    const { stdout, exitCode } = run(
+      `
+FUNCTION_BLOCK FB_C
+  VAR_OUTPUT n : INT; END_VAR
+  METHOD PUBLIC Bump : INT n := n + 1; Bump := n; END_METHOD
+END_FUNCTION_BLOCK
+`,
+      `
+TEST 'pointer test variables'
+  VAR p : POINTER TO FB_C; r : REF_TO FB_C; f : FB_C; k : INT; END_VAR
+  p := __NEW(FB_C);
+  k := p^.Bump();
+  k := p^.Bump();
+  ASSERT_EQ(k, 2);
+  __DELETE(p);
+  r := REF(f);
+  r^.Bump();
+  ASSERT_EQ(f.n, 1);
+END_TEST
+`,
+      "test_ptr",
+    );
+    expect(stdout).toContain("[PASS] pointer test variables");
+    expect(exitCode).toBe(0);
+  });
+});

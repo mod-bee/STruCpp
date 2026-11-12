@@ -239,7 +239,13 @@ export class TestCodeGenerator extends CodeGenerator {
       if (pou) return pou.cppClassName;
       return this.mapVarTypeToCpp(typeOrName);
     }
-    const pou = this.pouMap.get(typeOrName.name.toUpperCase());
+    // A POU's own class is the type of an instance only: a pointer or
+    // reference to one, or an array of them, is mapped as declared.
+    const pou =
+      typeOrName.referenceKind === "none" &&
+      typeOrName.arrayDimensions === undefined
+        ? this.pouMap.get(typeOrName.name.toUpperCase())
+        : undefined;
     if (pou) return pou.cppClassName;
     // Use mapTypeRefToCpp to handle inline array types (__INLINE_ARRAY_*)
     // with arrayDimensions and elementTypeName
