@@ -3134,6 +3134,55 @@ export class CodeGenerator {
   }
 
   /**
+   * VAR_STAT of a block or program (CODESYS "Variable: VAR_STAT"): one
+   * storage for the type, shared by its instances, kept between calls — a
+   * static data member, declared here and defined by
+   * {@link emitStaticMemberDefinitions}.
+   */
+  private emitStaticMembersHeader(
+    varBlocks: readonly CompilationUnit["programs"][0]["varBlocks"][0][],
+  ): void {
+    const statics = varBlocks.filter((b) => b.blockType === "VAR_STAT");
+    if (statics.length === 0) return;
+    this.emitHeader(
+      "    // Static variables (VAR_STAT), shared by every instance",
+    );
+    for (const block of statics) {
+      for (const decl of block.declarations) {
+        const cppType = this.mapTypeRefToCpp(decl.type);
+        for (const name of decl.names) {
+          this.emitHeader(
+            `    static ${cppType} ${this.mangleMemberIfNeeded(name, decl.type.name)};`,
+          );
+        }
+      }
+    }
+  }
+
+  /** The definitions of the static data members of {@link emitStaticMembersHeader}. */
+  private emitStaticMemberDefinitions(
+    className: string,
+    varBlocks: readonly CompilationUnit["programs"][0]["varBlocks"][0][],
+  ): void {
+    let any = false;
+    for (const block of varBlocks) {
+      if (block.blockType !== "VAR_STAT") continue;
+      for (const decl of block.declarations) {
+        const cppType = this.mapTypeRefToCpp(decl.type);
+        const init = this.localInitializer(decl, cppType);
+        for (const name of decl.names) {
+          const member = this.mangleMemberIfNeeded(name, decl.type.name);
+          this.emit(
+            `${cppType} ${className}::${member}${init === "" ? "{}" : init};`,
+          );
+          any = true;
+        }
+      }
+    }
+    if (any) this.emit("");
+  }
+
+  /**
    * What follows a local's name in its C++ definition: `(args)` for an
    * instance built in place (FB_Init), ` = init` for an initial value, else
    * nothing.
@@ -3256,6 +3305,8 @@ export class CodeGenerator {
       // VAR_TEMP is created at each call (IEC 61131-3 6.5.2.1): declared as
       // locals of operator(), not as members of the instance.
       if (block.blockType === "VAR_TEMP") continue;
+      // VAR_STAT is one storage for the type, emitted below.
+      if (block.blockType === "VAR_STAT") continue;
 
       const comment =
         block.blockType === "VAR_INPUT"
@@ -3301,6 +3352,8 @@ export class CodeGenerator {
         }
       }
     }
+
+    this.emitStaticMembersHeader(fb.varBlocks);
 
     // VAR_EXTERNAL members: a pointer to the file-scope canonical GlobalVar<V>
     // (same shape a PROGRAM uses). Bound in the constructor to &<ns>::<name>.
@@ -3432,10 +3485,12 @@ export class CodeGenerator {
     this.recordHeaderLineMapping(prog.sourceSpan.startLine, classLine);
 
     // Generate member variables and collect located variables
+    this.emitStaticMembersHeader(prog.varBlocks);
     for (const block of prog.varBlocks) {
       // VAR_TEMP is created at each call (IEC 61131-3 6.5.2.1): a local of
       // run(), not a member of the instance.
       if (block.blockType === "VAR_TEMP") continue;
+      if (block.blockType === "VAR_STAT") continue;
       for (const decl of block.declarations) {
         const cppType = this.mapTypeRefToCpp(decl.type);
         for (const name of decl.names) {
@@ -3843,14 +3898,22 @@ export class CodeGenerator {
       }
     }
 
-    // Declare local variables (VAR, VAR_TEMP)
+    // Declare local variables (VAR, VAR_TEMP; VAR_STAT kept between calls
+    // and shared by every instance, CODESYS "Variable: VAR_STAT")
     for (const block of method.varBlocks) {
-      if (block.blockType === "VAR" || block.blockType === "VAR_TEMP") {
+      const isStatic = block.blockType === "VAR_STAT";
+      if (
+        block.blockType === "VAR" ||
+        block.blockType === "VAR_TEMP" ||
+        isStatic
+      ) {
         for (const decl of block.declarations) {
           for (const name of decl.names) {
             const cppType = this.mapTypeRefToCpp(decl.type);
             const initValue = this.localInitializer(decl, cppType);
-            this.emit(`    ${cppType} ${name}${initValue};`);
+            this.emit(
+              `    ${isStatic ? "static " : ""}${cppType} ${name}${initValue};`,
+            );
           }
         }
       }
@@ -3925,10 +3988,12 @@ export class CodeGenerator {
     this.currentFBInterfaceMethods = new Set();
     // Constructor. An instance of a block with FB_Init / FB_Exit is built in
     // place from its FB_Init arguments and initial assignments.
+    this.emitStaticMemberDefinitions(`Program_${prog.name}`, prog.varBlocks);
     const inPlaceInits: string[] = [];
     const inPlaceDecls = new Set<VarDeclaration>();
     for (const block of prog.varBlocks) {
-      if (block.blockType === "VAR_TEMP") continue;
+      if (block.blockType === "VAR_TEMP" || block.blockType === "VAR_STAT")
+        continue;
       for (const decl of block.declarations) {
         const args = this.lifecycleCtorArgs(
           decl.type,
@@ -3950,6 +4015,7 @@ export class CodeGenerator {
     this.emit("    // Initialize variables");
     for (const block of prog.varBlocks) {
       if (block.blockType === "VAR_TEMP") continue; // a local of run()
+      if (block.blockType === "VAR_STAT") continue; // a static member
       for (const decl of block.declarations) {
         if (inPlaceDecls.has(decl)) continue;
         if (decl.initialValue !== undefined) {
@@ -4030,6 +4096,7 @@ export class CodeGenerator {
     for (const block of fb.varBlocks) {
       if (block.blockType === "VAR_EXTERNAL") continue;
       if (block.blockType === "VAR_TEMP") continue; // a local of operator()
+      if (block.blockType === "VAR_STAT") continue; // a static member
       for (const decl of block.declarations) {
         const inPlace = this.lifecycleCtorArgs(
           decl.type,
@@ -4057,6 +4124,7 @@ export class CodeGenerator {
         }
       }
     }
+    this.emitStaticMemberDefinitions(fb.name, fb.varBlocks);
     if (this.isLifecycleFb(fb.name)) {
       this.emitLifecycleImplementation(fb, fbInits);
     } else if (fbInits.length > 0) {
@@ -4219,15 +4287,21 @@ export class CodeGenerator {
         ]),
       );
 
-      // Declare local variables (VAR, VAR_TEMP) — same pattern as method locals
+      // Declare local variables (VAR, VAR_TEMP, VAR_STAT) — same pattern as
+      // method locals
       for (const block of func.varBlocks) {
-        if (block.blockType === "VAR" || block.blockType === "VAR_TEMP") {
+        const isStatic = block.blockType === "VAR_STAT";
+        if (
+          block.blockType === "VAR" ||
+          block.blockType === "VAR_TEMP" ||
+          isStatic
+        ) {
           for (const decl of block.declarations) {
             for (const name of decl.names) {
               const cppType = this.mapTypeRefToCpp(decl.type);
               const initValue = this.localInitializer(decl, cppType);
               this.emit(
-                `    ${cppType} ${this.functionVarName(name, decl.type.name)}${initValue};`,
+                `    ${isStatic ? "static " : ""}${cppType} ${this.functionVarName(name, decl.type.name)}${initValue};`,
               );
             }
           }
@@ -4341,6 +4415,8 @@ export class CodeGenerator {
         }
       }
     }
+
+    if (astProg) this.emitStaticMembersHeader(astProg.varBlocks);
 
     // Generate local variable members and collect located variables
     if (prog.varDeclarations.length > 0) {
@@ -4490,6 +4566,12 @@ export class CodeGenerator {
     const astProg = this.ast?.programs.find(
       (p) => p.name.toUpperCase() === prog.name.toUpperCase(),
     );
+    if (astProg) {
+      this.emitStaticMemberDefinitions(
+        `Program_${prog.name}`,
+        astProg.varBlocks,
+      );
+    }
 
     // Constructor
     if (prog.varExternal.length > 0) {

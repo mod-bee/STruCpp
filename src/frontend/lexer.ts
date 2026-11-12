@@ -576,6 +576,11 @@ export const VAR_INST = createToken({
   name: "VAR_INST",
   pattern: /VAR_INST/i,
 });
+/** Static variables (CODESYS "Variable: VAR_STAT"). */
+export const VAR_STAT = createToken({
+  name: "VAR_STAT",
+  pattern: /VAR_STAT/i,
+});
 
 // =============================================================================
 // Literals
@@ -868,6 +873,7 @@ const keywordTokens = [
   PRIVATE,
   PROTECTED,
   VAR_INST,
+  VAR_STAT,
 ];
 
 // Set longer_alt for all keywords
@@ -941,6 +947,7 @@ export const allTokens = [
   VAR_GLOBAL,
   VAR_TEMP,
   VAR_INST,
+  VAR_STAT,
   VAR,
   CONSTANT,
   RETAIN,

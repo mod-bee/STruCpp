@@ -1073,6 +1073,9 @@ export class SemanticAnalyzer {
     // A value of a qualified_only enumeration named bare in an initial value
     this.validateQualifiedOnlyInitializers(ast);
 
+    // VAR_STAT (CODESYS "Variable: VAR_STAT")
+    this.validateStaticSections(ast);
+
     // FB_Init / FB_Exit / FB_Reinit (CODESYS "Method: FB_Init, FB_Reinit,
     // FB_Exit") and the FB_Init arguments of instance declarations
     for (const e of checkFbLifecycleRules(ast)) {
@@ -1099,6 +1102,43 @@ export class SemanticAnalyzer {
     // - Check CASE statement coverage
     // - Validate reference operations
     // - Check for unreachable code
+  }
+
+  /**
+   * VAR_STAT belongs to a program, function, function block or method. Its
+   * RETAIN / PERSISTENT forms are not implemented: retained values live in
+   * the instances, and a static variable is in none.
+   */
+  private validateStaticSections(ast: CompilationUnit): void {
+    const check = (blocks: readonly VarBlock[], inPou: boolean): void => {
+      for (const block of blocks) {
+        if (block.blockType !== "VAR_STAT") continue;
+        const at = block.sourceSpan;
+        if (!inPou) {
+          this.addError(
+            "VAR_STAT is declared in a program, function, function block or method",
+            at.startLine,
+            at.startCol,
+            at.file,
+          );
+        } else if (block.isRetain) {
+          this.addError(
+            "VAR_STAT RETAIN / PERSISTENT is not supported: a static variable is not retained",
+            at.startLine,
+            at.startCol,
+            at.file,
+          );
+        }
+      }
+    };
+    for (const c of ast.configurations) check(c.varBlocks, false);
+    check(ast.globalVarBlocks, false);
+    for (const p of ast.programs) check(p.varBlocks, true);
+    for (const f of ast.functions) check(f.varBlocks, true);
+    for (const fb of ast.functionBlocks) {
+      check(fb.varBlocks, true);
+      for (const m of fb.methods) check(m.varBlocks, true);
+    }
   }
 
   /**
@@ -1641,6 +1681,19 @@ export class SemanticAnalyzer {
       if (scope) {
         this.validateStatementsForConstantAssignment(fb.body, scope);
       }
+      // A method writes its block's variables too (a CONSTANT one is refused).
+      for (const method of fb.methods) {
+        const methodScope = this.symbolTables.getMethodScope(
+          fb.name,
+          method.name,
+        );
+        if (methodScope) {
+          this.validateStatementsForConstantAssignment(
+            method.body,
+            methodScope,
+          );
+        }
+      }
     }
   }
 
@@ -1662,6 +1715,11 @@ export class SemanticAnalyzer {
               stmt.sourceSpan.startLine,
               stmt.sourceSpan.startCol,
               stmt.sourceSpan.file,
+            );
+          } else if (symbol?.kind === "variable") {
+            this.checkConstantMemberWrite(
+              stmt.target,
+              symbol.declaration?.type.name,
             );
           }
         }
@@ -1713,6 +1771,57 @@ export class SemanticAnalyzer {
           scope,
         );
       }
+    }
+  }
+
+  /**
+   * `inst.k := v` where `k` is in a CONSTANT section of the block (`VAR_INPUT
+   * CONSTANT`, `VAR CONSTANT`): read-only through the instance path too
+   * (CODESYS "Variable: CONSTANT").
+   */
+  private checkConstantMemberWrite(
+    target: VariableExpression,
+    rootType: string | undefined,
+  ): void {
+    const steps =
+      target.accessChain ??
+      target.fieldAccess.map((name) => ({ kind: "field" as const, name }));
+    let typeName = rootType;
+    let path = target.name;
+    for (const step of steps) {
+      if (typeName === undefined || step.kind !== "field") return;
+      path = `${path}.${step.name}`;
+      const fieldUpper = step.name.toUpperCase();
+      let member: { block: VarBlock; decl: VarDeclaration } | undefined;
+      const seen = new Set<string>();
+      let fb = this.symbolTables.lookupFunctionBlock(typeName)?.declaration;
+      while (
+        fb !== undefined &&
+        member === undefined &&
+        !seen.has(fb.name.toUpperCase())
+      ) {
+        seen.add(fb.name.toUpperCase());
+        for (const block of fb.varBlocks) {
+          const decl = block.declarations.find((d) =>
+            d.names.some((n) => n.toUpperCase() === fieldUpper),
+          );
+          if (decl) member = { block, decl };
+        }
+        fb =
+          fb.extends !== undefined
+            ? this.symbolTables.lookupFunctionBlock(fb.extends)?.declaration
+            : undefined;
+      }
+      if (member?.block.isConstant === true) {
+        this.addError(
+          `Cannot assign to '${path}': it is declared ${member.block.blockType} CONSTANT, read-only through the instance too`,
+          target.sourceSpan.startLine,
+          target.sourceSpan.startCol,
+          target.sourceSpan.file,
+        );
+        return;
+      }
+      typeName = member?.decl.type.name;
     }
   }
 

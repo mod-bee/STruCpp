@@ -70,6 +70,8 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | VAR_EXTERNAL | Supported | References either a CONFIGURATION or a file-level VAR_GLOBAL |
 | VAR_GLOBAL | Supported | Global variables (CONFIGURATION-scoped or file-level) |
 | CONSTANT | Supported | Compile-time constants |
+| VAR_INPUT CONSTANT (CODESYS) | Supported | A constant input: its value comes from its declaration or the instance's initial assignment (`f : FB := (k := 9)`); written neither in the block's body or methods nor through the instance (`f.k := v`). Passing it in a call is accepted |
+| VAR_STAT (CODESYS) | Supported | In a program, function, function block or method: initialized once, kept between calls, one storage for the POU shared by every instance (a C++ static). Not in the debug table; `VAR_STAT RETAIN` / `PERSISTENT` is refused |
 | RETAIN | Supported | Allowed on `VAR`, `VAR_INPUT`, `VAR_OUTPUT` and `VAR_GLOBAL`, per IEC 61131-3. Rejected on `VAR_IN_OUT` / `VAR_TEMP` / `VAR_EXTERNAL`, and inside a `FUNCTION` or `METHOD` (no instance, nothing to retain) |
 | PERSISTENT | Partial | Accepted and treated as `RETAIN`. CODESYS also keeps a PERSISTENT value across a program download; that is not implemented, so the weaker shared guarantee is what is claimed |
 | NON_RETAIN | Supported | Accepted and treated as the default (a plain `VAR` is already non-retained). Rejected when combined with `RETAIN` or `CONSTANT`. A `VAR` / `VAR_INPUT` / `VAR_OUTPUT NON_RETAIN` member of a function block stays out of an instance declared `RETAIN` (§6.5.6.2), for a library block too (its manifest marks the member `nonRetain`) |

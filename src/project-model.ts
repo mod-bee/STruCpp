@@ -622,6 +622,10 @@ export class ProjectModelBuilder {
         // Created at each call (IEC 61131-3 6.5.2.1): a local of run(), not a
         // member of the program instance (codegen emitTemporaries).
         continue;
+      } else if (block.blockType === "VAR_STAT") {
+        // One storage for the program type (CODESYS "Variable: VAR_STAT"): a
+        // static member, emitted from the AST.
+        continue;
       } else {
         for (const decl of block.declarations) {
           for (const varName of decl.names) {

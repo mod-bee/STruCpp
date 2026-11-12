@@ -313,6 +313,7 @@ export class STParser extends CstParser {
         { ALT: () => this.CONSUME(tokens.VAR_IN_OUT) },
         { ALT: () => this.CONSUME(tokens.VAR_TEMP) },
         { ALT: () => this.CONSUME(tokens.VAR_INST) },
+        { ALT: () => this.CONSUME(tokens.VAR_STAT) },
       ],
       IGNORE_AMBIGUITIES: true,
     });
@@ -440,6 +441,7 @@ export class STParser extends CstParser {
       { ALT: () => this.CONSUME(tokens.VAR_EXTERNAL) },
       { ALT: () => this.CONSUME(tokens.VAR_GLOBAL) },
       { ALT: () => this.CONSUME(tokens.VAR_TEMP) },
+      { ALT: () => this.CONSUME(tokens.VAR_STAT) },
     ]);
     // MANY, not OPTION: IEC and CODESYS both allow a combination, and
     // `VAR RETAIN PERSISTENT` is the form a converted CODESYS project actually
@@ -1162,7 +1164,8 @@ export class STParser extends CstParser {
       t === tokens.VAR_IN_OUT ||
       t === tokens.VAR_EXTERNAL ||
       t === tokens.VAR_GLOBAL ||
-      t === tokens.VAR_TEMP
+      t === tokens.VAR_TEMP ||
+      t === tokens.VAR_STAT
     );
   }
 

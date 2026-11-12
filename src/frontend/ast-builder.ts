@@ -929,6 +929,7 @@ export class ASTBuilder {
     else if (children.VAR_IN_OUT) blockType = "VAR_IN_OUT";
     else if (children.VAR_TEMP) blockType = "VAR_TEMP";
     else if (children.VAR_INST) blockType = "VAR_INST";
+    else if (children.VAR_STAT) blockType = "VAR_STAT";
 
     const isConstant = !!children.CONSTANT;
     // PERSISTENT is RETAIN here — see the note on `VarBlock.isRetain`.
@@ -1592,6 +1593,7 @@ export class ASTBuilder {
     else if (children.VAR_EXTERNAL) blockType = "VAR_EXTERNAL";
     else if (children.VAR_GLOBAL) blockType = "VAR_GLOBAL";
     else if (children.VAR_TEMP) blockType = "VAR_TEMP";
+    else if (children.VAR_STAT) blockType = "VAR_STAT";
 
     const isConstant = !!children.CONSTANT;
     // PERSISTENT is RETAIN here — see the note on `VarBlock.isRetain`.

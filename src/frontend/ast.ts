@@ -282,7 +282,9 @@ export type VarBlockType =
   | "VAR_EXTERNAL"
   | "VAR_GLOBAL"
   | "VAR_TEMP"
-  | "VAR_INST";
+  | "VAR_INST"
+  /** Static: one storage per POU, kept between calls (CODESYS "Variable: VAR_STAT"). */
+  | "VAR_STAT";
 
 /**
  * Variable block (VAR, VAR_INPUT, etc.)
