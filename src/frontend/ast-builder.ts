@@ -3388,30 +3388,19 @@ export class ASTBuilder {
     const children = node.children as CstChildren;
     // identifierOrKeyword subrule nodes: first is the variable name, rest are field accessors
     const idOrKwNodes = getAllNodes(children.identifierOrKeyword);
-    // A path rooted at THIS (`THIS.a.b`): every name is a member.
-    const thisToken = getFirstToken(children.THIS);
-    const rootIsThis = thisToken !== undefined;
-    const name = rootIsThis
-      ? "THIS"
-      : idOrKwNodes[0]
-        ? getIdentifierOrKeywordImage(idOrKwNodes[0])
-        : "";
-    // `THIS^.a` is `THIS.a`: the caret right after THIS adds nothing.
-    const carets = getAllTokens(children.Caret).filter(
-      (c) =>
-        !rootIsThis ||
-        c.startOffset !== thisToken.startOffset + thisToken.image.length,
-    );
+    const name = idOrKwNodes[0]
+      ? getIdentifierOrKeywordImage(idOrKwNodes[0])
+      : "";
 
     // Check for dereference operator (^)
-    const isDereference = carets.length > 0;
+    const isDereference = !!children.Caret;
 
     // Field access steps after the base name: struct members, bare bit
     // indices (`var.31`) and partial access (`var.%B3`). Sorted by source
     // offset so `s.field.%B1` keeps its written order; appending each kind in
     // turn would group by kind.
     const fieldAccess: string[] = [
-      ...idOrKwNodes.slice(rootIsThis ? 0 : 1).map((node) => ({
+      ...idOrKwNodes.slice(1).map((node) => ({
         offset: getNodeStartOffset(node),
         image: getIdentifierOrKeywordImage(node),
       })),
@@ -3436,11 +3425,7 @@ export class ASTBuilder {
 
     // Build ordered access chain by sorting markers by source position.
     // This preserves the interleaving of field accesses, subscripts, and dereferences.
-    const accessChain = this.buildAccessChain(
-      children,
-      rootIsThis ? 0 : 1,
-      carets,
-    );
+    const accessChain = this.buildAccessChain(children);
 
     const varExpr: VariableExpression = {
       kind: "VariableExpression",
@@ -3461,11 +3446,7 @@ export class ASTBuilder {
    * Sorts Dot tokens, LBracket tokens, and Caret tokens by source offset
    * to reconstruct the correct interleaving order.
    */
-  private buildAccessChain(
-    children: CstChildren,
-    firstField = 1,
-    caretTokens: IToken[] = getAllTokens(children.Caret),
-  ): AccessStep[] {
+  private buildAccessChain(children: CstChildren): AccessStep[] {
     type Marker =
       | { kind: "field"; offset: number; name: string }
       | { kind: "subscript"; offset: number; indices: Expression[] }
@@ -3480,7 +3461,7 @@ export class ASTBuilder {
 
     // Build a list of field targets sorted by offset: identifier and integer literal tokens after dots
     const fieldTargets: Array<{ offset: number; name: string }> = [];
-    for (let i = firstField; i < idOrKwNodes.length; i++) {
+    for (let i = 1; i < idOrKwNodes.length; i++) {
       const n = idOrKwNodes[i]!;
       fieldTargets.push({
         offset: getNodeStartOffset(n),
@@ -3548,6 +3529,7 @@ export class ASTBuilder {
     }
 
     // Collect dereference markers (Caret tokens)
+    const caretTokens = getAllTokens(children.Caret);
     for (const c of caretTokens) {
       markers.push({ kind: "dereference", offset: c.startOffset });
     }
@@ -3566,6 +3548,99 @@ export class ASTBuilder {
           return { kind: "dereference" };
       }
     });
+  }
+
+  /**
+   * The path of a THIS access longer than one member (IEC 61131-3
+   * 6.6.5.7.2: THIS is the own instance and a member path follows it):
+   * `THIS.s.n`, `THIS^.a[i]`, ending in `.M(` for a method call. Undefined
+   * for `THIS.m` alone.
+   */
+  private buildThisPath(
+    children: CstChildren,
+    node: CstNode,
+  ): { target: VariableExpression; method?: string } | undefined {
+    const fieldNodes = getAllNodes(children.pathField);
+    const indexNodes = getAllNodes(children.index);
+    const carets = getAllTokens(children.pathCaret);
+    const methodNode = getFirstNode(children.pathMethod);
+    if (
+      fieldNodes.length === 0 &&
+      indexNodes.length === 0 &&
+      carets.length === 0
+    ) {
+      // `THIS.m.M()` with nothing between: a method of member m.
+      if (methodNode === undefined) return undefined;
+    }
+    const first = getFirstNode(children.identifierOrKeyword);
+    const markers: Array<{ offset: number; step: AccessStep }> = [];
+    if (first) {
+      markers.push({
+        offset: getNodeStartOffset(first),
+        step: { kind: "field", name: getIdentifierOrKeywordImage(first) },
+      });
+    }
+    for (const n of fieldNodes) {
+      markers.push({
+        offset: getNodeStartOffset(n),
+        step: { kind: "field", name: getIdentifierOrKeywordImage(n) },
+      });
+    }
+    // Each `[...]` holds the index expressions between its brackets.
+    const lbs = getAllTokens(children.LBracket).sort(
+      (a, b) => a.startOffset - b.startOffset,
+    );
+    const rbs = getAllTokens(children.RBracket).sort(
+      (a, b) => a.startOffset - b.startOffset,
+    );
+    lbs.forEach((lb, i) => {
+      const end = rbs[i]?.startOffset ?? Infinity;
+      const indices = indexNodes
+        .filter((e) => {
+          const o = getNodeStartOffset(e);
+          return o > lb.startOffset && o < end;
+        })
+        .map((e) => this.buildExpression(e))
+        .filter((e): e is Expression => e !== undefined);
+      markers.push({
+        offset: lb.startOffset,
+        step: { kind: "subscript", indices },
+      });
+    });
+    for (const c of carets) {
+      markers.push({ offset: c.startOffset, step: { kind: "dereference" } });
+    }
+    markers.sort((a, b) => a.offset - b.offset);
+    const accessChain = markers.map((m) => m.step);
+    const target: VariableExpression = {
+      kind: "VariableExpression",
+      sourceSpan: nodeToSourceSpan(node),
+      name: "THIS",
+      subscripts: accessChain.flatMap((s) =>
+        s.kind === "subscript" ? s.indices : [],
+      ),
+      fieldAccess: accessChain.flatMap((s) =>
+        s.kind === "field" ? [s.name] : [],
+      ),
+      isDereference: carets.length > 0,
+      accessChain,
+    };
+    return methodNode !== undefined
+      ? { target, method: getIdentifierOrKeywordImage(methodNode) }
+      : { target };
+  }
+
+  /** The arguments of a THIS call (`THIS.m(...)`, `THIS.a.M(...)`). */
+  private buildThisArguments(children: CstChildren): Argument[] {
+    const args: Argument[] = [];
+    const argListNode = getFirstNode(children.argumentList);
+    if (argListNode) {
+      const argListChildren = argListNode.children as CstChildren;
+      for (const argNode of getAllNodes(argListChildren.argument)) {
+        args.push(this.buildArgument(argNode));
+      }
+    }
+    return args;
   }
 
   /**
@@ -3594,6 +3669,19 @@ export class ASTBuilder {
       idOrKwNodes.length > 0
         ? getIdentifierOrKeywordImage(idOrKwNodes[0]!)
         : "";
+
+    // A longer path from THIS: `THIS.s.n`, `THIS^.a[i]`, `THIS.inner.M()`.
+    const path = this.buildThisPath(children, node);
+    if (path !== undefined) {
+      if (path.method === undefined) return path.target;
+      return {
+        kind: "MethodCallExpression",
+        sourceSpan: nodeToSourceSpan(node),
+        object: path.target,
+        methodName: path.method,
+        arguments: this.buildThisArguments(children),
+      };
+    }
 
     // If there's a LParen, it's a method call
     if (children.LParen) {
@@ -3934,6 +4022,35 @@ export class ASTBuilder {
       idOrKwNodes.length > 0
         ? getIdentifierOrKeywordImage(idOrKwNodes[0]!)
         : "";
+
+    // A longer path from THIS: `THIS.s.n := 5;`, `THIS.inner.M();`.
+    const path = this.buildThisPath(children, node);
+    if (path !== undefined) {
+      if (children.Assign) {
+        const exprNode = getFirstNode(children.expression);
+        const value = exprNode
+          ? (this.buildExpression(exprNode) ?? this.createDummyLiteral(node))
+          : this.createDummyLiteral(node);
+        return {
+          kind: "AssignmentStatement",
+          sourceSpan: nodeToSourceSpan(node),
+          target: path.target,
+          value,
+        } as AssignmentStatement;
+      }
+      const call: MethodCallExpression = {
+        kind: "MethodCallExpression",
+        sourceSpan: nodeToSourceSpan(node),
+        object: path.target,
+        methodName: path.method ?? "",
+        arguments: this.buildThisArguments(children),
+      };
+      return {
+        kind: "FunctionCallStatement",
+        sourceSpan: nodeToSourceSpan(node),
+        call,
+      } as FunctionCallStatement;
+    }
 
     // Check if it's an assignment (has Assign token)
     if (children.Assign) {

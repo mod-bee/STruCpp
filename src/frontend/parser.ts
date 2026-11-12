@@ -1087,8 +1087,7 @@ export class STParser extends CstParser {
         },
         {
           ALT: () => this.SUBRULE(this.thisStatement),
-          GATE: () =>
-            this.LA(1).tokenType === tokens.THIS && !this.isLongThisPathAhead(),
+          GATE: () => this.LA(1).tokenType === tokens.THIS,
         },
         {
           ALT: () => this.SUBRULE(this.superCallStatement),
@@ -1175,6 +1174,8 @@ export class STParser extends CstParser {
     this.OPTION2(() => this.CONSUME(tokens.Caret));
     this.CONSUME(tokens.Dot);
     this.SUBRULE(this.identifierOrKeyword);
+    // A longer path: `THIS.s.n := 5;`, `THIS.inner.M();`
+    this.thisPathSteps();
     // Determine if this is an assignment or method call
     this.OR([
       {
@@ -1346,32 +1347,68 @@ export class STParser extends CstParser {
   }
 
   /**
-   * `THIS.a` followed by more of a path (`.b`, `[i]`, `^`): parsed as a
-   * variable rooted at THIS rather than by thisStatement / thisAccess, which
-   * take one member.
+   * One more step of a path after `THIS.m` (IEC 61131-3 6.6.5.7.2): `.x`,
+   * `[i]` or `^` - not `.x(`, which ends the path in a method call.
    */
-  private isLongThisPathAhead(): boolean {
-    if (this.LA(1).tokenType !== tokens.THIS) return false;
-    let i = 2;
-    if (this.LA(i).tokenType === tokens.Caret) i++;
-    if (this.LA(i).tokenType !== tokens.Dot) return false;
-    if (!this.isIdentifierOrKeywordToken(this.LA(i + 1).tokenType))
-      return false;
-    const next = this.LA(i + 2).tokenType;
+  private isThisPathStepAhead(): boolean {
+    const t = this.LA(1).tokenType;
+    if (t === tokens.LBracket || t === tokens.Caret) return true;
     return (
-      next === tokens.Dot || next === tokens.LBracket || next === tokens.Caret
+      t === tokens.Dot &&
+      this.isIdentifierOrKeywordToken(this.LA(2).tokenType) &&
+      this.LA(3).tokenType !== tokens.LParen
     );
+  }
+
+  /** `.m(` after a THIS path: the method it ends with. */
+  private isThisPathMethodAhead(): boolean {
+    return (
+      this.LA(1).tokenType === tokens.Dot &&
+      this.isIdentifierOrKeywordToken(this.LA(2).tokenType) &&
+      this.LA(3).tokenType === tokens.LParen
+    );
+  }
+
+  /** The steps after `THIS.m`: members, elements, dereferences. */
+  private thisPathSteps(): void {
+    this.MANY7({
+      GATE: () => this.isThisPathStepAhead(),
+      DEF: () => {
+        this.OR7([
+          {
+            ALT: () => {
+              this.CONSUME7(tokens.LBracket);
+              this.AT_LEAST_ONE_SEP7({
+                SEP: tokens.Comma,
+                DEF: () => this.SUBRULE7(this.expression, { LABEL: "index" }),
+              });
+              this.CONSUME7(tokens.RBracket);
+            },
+          },
+          {
+            ALT: () => {
+              this.CONSUME7(tokens.Dot, { LABEL: "pathDot" });
+              this.SUBRULE7(this.identifierOrKeyword, { LABEL: "pathField" });
+            },
+          },
+          { ALT: () => this.CONSUME7(tokens.Caret, { LABEL: "pathCaret" }) },
+        ]);
+      },
+    });
+    // A method at the end of the path: `THIS.inner.M(args)`.
+    this.OPTION7({
+      GATE: () => this.isThisPathMethodAhead(),
+      DEF: () => {
+        this.CONSUME8(tokens.Dot, { LABEL: "pathDot" });
+        this.SUBRULE8(this.identifierOrKeyword, { LABEL: "pathMethod" });
+      },
+    });
   }
 
   private isMethodCallAhead(): boolean {
     // `inst.M(`, and a method on a longer path: `units[i].M(`, `a.b.M(`,
     // `THIS.a.M(`.
-    if (
-      !this.isIdentifierOrKeywordToken(this.LA(1).tokenType) &&
-      !this.isLongThisPathAhead()
-    ) {
-      return false;
-    }
+    if (!this.isIdentifierOrKeywordToken(this.LA(1).tokenType)) return false;
     const MAX_LOOKAHEAD = 64;
     let i = 2;
     while (i <= MAX_LOOKAHEAD) {
@@ -1933,8 +1970,7 @@ export class STParser extends CstParser {
         },
         {
           ALT: () => this.SUBRULE(this.thisAccess),
-          GATE: () =>
-            this.LA(1).tokenType === tokens.THIS && !this.isLongThisPathAhead(),
+          GATE: () => this.LA(1).tokenType === tokens.THIS,
         },
         {
           ALT: () => this.SUBRULE(this.superAccess),
@@ -2026,6 +2062,8 @@ export class STParser extends CstParser {
           this.OPTION3(() => this.CONSUME2(tokens.Caret));
           this.CONSUME(tokens.Dot);
           this.SUBRULE(this.identifierOrKeyword);
+          // A longer path: `THIS.s.n`, `THIS^.a[i]`, `THIS.inner.M()`
+          this.thisPathSteps();
           // Optional function call: THIS.Method(args)
           this.OPTION(() => {
             this.CONSUME(tokens.LParen);
@@ -2118,15 +2156,7 @@ export class STParser extends CstParser {
    * Variable reference (with optional array subscripts and field access)
    */
   public variable = this.RULE("variable", () => {
-    // `THIS.a.b`, `THIS^.a[i]` (IEC 61131-3 6.6.5.7.2, CODESYS THIS^): the
-    // own instance as the root of a longer path.
-    this.OR9([
-      {
-        ALT: () => this.CONSUME(tokens.THIS),
-        GATE: () => this.LA(1).tokenType === tokens.THIS,
-      },
-      { ALT: () => this.SUBRULE(this.identifierOrKeyword) },
-    ]);
+    this.SUBRULE(this.identifierOrKeyword);
     // `.name(` ends the path: it is a method called on the variable so far.
     this.MANY({
       GATE: () =>
