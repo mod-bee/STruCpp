@@ -159,3 +159,60 @@ END_TEST
     expect(exitCode).toBe(0);
   });
 });
+
+// IEC 61131-3 6.5.1: an initial value names declared variables, constants
+// and enumeration values only; an unknown name is an error, as in a body.
+describe("names in initial values", () => {
+  it("refuses an undeclared name", () => {
+    expect(
+      errorsOf(`
+TYPE S : STRUCT n : INT := nofield; END_STRUCT END_TYPE
+VAR_GLOBAL g : INT := noglobal; END_VAR
+FUNCTION_BLOCK FB_I
+  METHOD FB_Init : BOOL
+    VAR_INPUT bInitRetains : BOOL; bInCopyCode : BOOL; a : INT; END_VAR
+  END_METHOD
+  METHOD PUBLIC M : INT
+    VAR k : INT := nomethodvar; END_VAR
+    M := k;
+  END_METHOD
+END_FUNCTION_BLOCK
+PROGRAM P
+  VAR
+    x : INT := nosuch;
+    arr : ARRAY[1..2] OF INT := [1, noelement];
+    f : FB_I(a := noarg);
+  END_VAR
+END_PROGRAM
+`),
+    ).toEqual([
+      "Undeclared variable 'NOGLOBAL'",
+      "Undeclared variable 'NOFIELD'",
+      "Undeclared variable 'NOSUCH'",
+      "Undeclared variable 'NOELEMENT'",
+      "Undeclared variable 'NOARG'",
+      "Undeclared variable 'NOMETHODVAR'",
+    ]);
+  });
+
+  it("accepts constants, enumeration values and typed literals", () => {
+    expect(
+      errorsOf(`
+TYPE E : (EA, EB) := EA; END_TYPE
+TYPE U : USINT (UA := 1, UB := 2) := UA; END_TYPE
+VAR_GLOBAL CONSTANT gMax : INT := 10; END_VAR
+FUNCTION_BLOCK FB_C
+  VAR CONSTANT c : INT := 3; END_VAR
+  VAR
+    a : INT := c + gMax;
+    e1 : E := EB;
+    e2 : E := E.EA;
+    e3 : E := E#EB;
+    u : U;
+    e : E;
+  END_VAR
+END_FUNCTION_BLOCK
+`),
+    ).toEqual([]);
+  });
+});

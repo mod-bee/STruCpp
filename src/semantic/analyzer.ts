@@ -1086,9 +1086,6 @@ export class SemanticAnalyzer {
       else this.addError(e.message, startLine, startCol, file);
     }
 
-    // A value of a qualified_only enumeration named bare in an initial value
-    this.validateQualifiedOnlyInitializers(ast);
-
     // VAR_STAT (CODESYS "Variable: VAR_STAT")
     this.validateStaticSections(ast);
 
@@ -1219,40 +1216,6 @@ export class SemanticAnalyzer {
       check(fb.varBlocks, true);
       for (const m of fb.methods) check(m.varBlocks, true);
     }
-  }
-
-  /**
-   * `{attribute 'qualified_only'}` (CODESYS "Attribute: qualified_only"): a
-   * value of such an enumeration is written `E.value`, in an initial value as
-   * in a body (where checkNameDeclared reports it).
-   */
-  private validateQualifiedOnlyInitializers(ast: CompilationUnit): void {
-    if (this.qualifiedOnlyMembers.size === 0) return;
-    walkAST(ast, (node) => {
-      if (node.kind !== "VarDeclaration") return;
-      const init = (node as VarDeclaration).initialValue;
-      if (init === undefined) return;
-      walkAST(init, (inner) => {
-        if (inner.kind !== "VariableExpression") return;
-        const v = inner as VariableExpression;
-        const upper = v.name.toUpperCase();
-        const owner = this.qualifiedOnlyMembers.get(upper);
-        if (
-          owner === undefined ||
-          v.fieldAccess.length > 0 ||
-          this.enumMemberMap.has(upper) ||
-          this.symbolTables.globalScope.lookup(upper)?.kind === "variable"
-        ) {
-          return;
-        }
-        this.addError(
-          `'${v.name}' is a value of '${owner}', declared {attribute 'qualified_only'}: write '${owner}.${v.name}'`,
-          v.sourceSpan.startLine,
-          v.sourceSpan.startCol,
-          v.sourceSpan.file,
-        );
-      });
-    });
   }
 
   /**
@@ -5128,11 +5091,27 @@ export class SemanticAnalyzer {
    * Validate that all variable references in POU bodies refer to declared variables.
    */
   private validateUndeclaredVariables(ast: CompilationUnit): void {
+    const global = this.symbolTables.globalScope;
+    // Initial values of global variables and of structure members
+    this.checkInitializersForUndeclaredVars(ast.globalVarBlocks, global, {});
+    for (const config of ast.configurations) {
+      this.checkInitializersForUndeclaredVars(config.varBlocks, global, {});
+    }
+    for (const td of ast.types) {
+      if (td.definition.kind !== "StructDefinition") continue;
+      for (const field of td.definition.fields) {
+        if (field.initialValue !== undefined) {
+          this.checkExpressionForUndeclaredVars(field.initialValue, global, {});
+        }
+      }
+    }
+
     // Programs
     for (const prog of ast.programs) {
       const scope = this.symbolTables.getProgramScope(prog.name);
       if (scope) {
         this.walkStatementsForUndeclaredVars(prog.body, scope, {});
+        this.checkInitializersForUndeclaredVars(prog.varBlocks, scope, {});
       }
     }
 
@@ -5141,6 +5120,9 @@ export class SemanticAnalyzer {
       const scope = this.symbolTables.getFunctionScope(func.name);
       if (scope) {
         this.walkStatementsForUndeclaredVars(func.body, scope, {
+          functionName: func.name,
+        });
+        this.checkInitializersForUndeclaredVars(func.varBlocks, scope, {
           functionName: func.name,
         });
       }
@@ -5153,10 +5135,18 @@ export class SemanticAnalyzer {
         this.walkStatementsForUndeclaredVars(fb.body, scope, {
           fbName: fb.name,
         });
+        this.checkInitializersForUndeclaredVars(fb.varBlocks, scope, {
+          fbName: fb.name,
+        });
         for (const method of fb.methods) {
           const methodScope = this.symbolTables.getMethodScope(
             fb.name,
             method.name,
+          );
+          this.checkInitializersForUndeclaredVars(
+            method.varBlocks,
+            methodScope ?? scope,
+            { fbName: fb.name, methodName: method.name },
           );
           this.walkStatementsForUndeclaredVars(
             method.body,
@@ -5361,6 +5351,33 @@ export class SemanticAnalyzer {
           this.checkExpressionForUndeclaredVars(expr.arraySize, scope, ctx);
         }
         break;
+      case "StructInitializerExpression":
+        // The element names are members of the target; the values are read.
+        for (const element of expr.elements) {
+          this.checkExpressionForUndeclaredVars(element.value, scope, ctx);
+        }
+        break;
+    }
+  }
+
+  /**
+   * The names an initial value reads (IEC 61131-3 6.5.1: a variable's initial
+   * value), and the FB_Init arguments of an instance, are declared names.
+   */
+  private checkInitializersForUndeclaredVars(
+    blocks: readonly VarBlock[],
+    scope: Scope,
+    ctx: UndeclaredVarContext,
+  ): void {
+    for (const block of blocks) {
+      for (const decl of block.declarations) {
+        if (decl.initialValue !== undefined) {
+          this.checkExpressionForUndeclaredVars(decl.initialValue, scope, ctx);
+        }
+        for (const arg of decl.initArguments ?? []) {
+          this.checkExpressionForUndeclaredVars(arg.value, scope, ctx);
+        }
+      }
     }
   }
 
@@ -5393,6 +5410,10 @@ export class SemanticAnalyzer {
     if (!sym) return; // undeclared — separate diagnostic from checkNameDeclared
 
     if (expr.typedLiteral) {
+      // `E#v` names a type, whatever variable shares its name (IEC 61131-3
+      // 6.4.4.2: the prefix is the data type name).
+      const type = this.symbolTables.lookupType(expr.name);
+      if (type?.resolvedType?.typeKind === "enum") return;
       if (sym.kind === "type" && sym.resolvedType?.typeKind === "enum") return;
       const member = expr.fieldAccess[0] ?? "";
       const hint = /^[0-9A-F_]+$/i.test(member)
