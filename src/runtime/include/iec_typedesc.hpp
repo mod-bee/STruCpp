@@ -64,6 +64,49 @@ namespace strucpp {
 struct TypeDesc;
 
 /**
+ * One member of an enumeration declared {attribute 'to_string'}: its value
+ * and its name as declared ("Running"). CODESYS, "Attribute: to_string".
+ */
+struct EnumValueDesc {
+    int64_t VALUE;
+    const char* NAME;
+};
+
+/**
+ * The names of an enumeration declared {attribute 'to_string'}, in
+ * declaration order. Values need not run 0..n-1 (a typed enumeration's
+ * `A := 100`): look a value up with `enum_value_name`, not by index. Only an
+ * opted-in enumeration has one; for any other the descriptor pointer is null.
+ */
+struct EnumDesc {
+    /** The type's name as declared, e.g. "E_State". */
+    const char* NAME;
+    /** `COUNT` entries. */
+    const EnumValueDesc* VALUES;
+    uint16_t COUNT;
+};
+
+/** The declared name of `value`, or null when no member has that value. */
+inline const char* enum_value_name(const EnumDesc* desc, int64_t value) noexcept {
+    if (desc == nullptr) return nullptr;
+    for (uint16_t i = 0; i < desc->COUNT; ++i) {
+        if (desc->VALUES[i].VALUE == value) return desc->VALUES[i].NAME;
+    }
+    return nullptr;
+}
+
+/**
+ * The name table of the C++ enumeration E: null, unless E was declared
+ * {attribute 'to_string'}, where the generated code specialises this beside
+ * the enumeration. constexpr, so a descriptor table pointing at it stays a
+ * constant (in flash).
+ */
+template <typename E>
+struct iec_enum_names {
+    static constexpr const EnumDesc* desc() noexcept { return nullptr; }
+};
+
+/**
  * One member of a generated STRUCT, in `VAR_INFO`'s vocabulary.
  *
  * `BYTEOFFSET` addresses the member's PAYLOAD, not the wrapper around it.
@@ -115,6 +158,10 @@ struct MemberDesc {
      *  excluding the NUL; 0 otherwise. An addition: CODESYS's `BitSize` covers
      *  the whole object, which is not what sizing a buffer needs. */
     uint8_t CAP;
+    /** The member's (or, for an array, the elements') enumeration names when
+     *  `TYPECLASS` / `BASETYPECLASS` is `TYPE_ENUM` and the enumeration was
+     *  declared {attribute 'to_string'}; null otherwise. An addition. */
+    const EnumDesc* ENUMDESC;
 };
 
 /** The layout of one generated STRUCT type. */

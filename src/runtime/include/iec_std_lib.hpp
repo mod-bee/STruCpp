@@ -1180,6 +1180,40 @@ inline auto TO_STRING(const T& src) noexcept -> decltype(WSTRING_TO_STRING(src))
     return WSTRING_TO_STRING(src);
 }
 
+// Enumeration -> STRING: the member's declared name for an enumeration
+// declared {attribute 'to_string'} (CODESYS, "Attribute: to_string"), else
+// the numeric value, as CODESYS gives without the attribute. A value no
+// member has is given as its number too.
+template<typename E>
+inline IECString<254> iec_enum_to_string(E value) noexcept {
+    using U = typename std::underlying_type<E>::type;
+    const U raw = static_cast<U>(value);
+    const char* name = enum_value_name(iec_enum_names<E>::desc(), static_cast<int64_t>(raw));
+    if (name != nullptr) return IECString<254>(name);
+    char buf[32];
+    if (std::is_unsigned<U>::value) {
+        std::snprintf(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(raw));
+    } else {
+        std::snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(raw));
+    }
+    return IECString<254>(buf);
+}
+
+template<typename E>
+inline IECString<254> TO_STRING(const IEC_ENUM_Var<E>& v) noexcept {
+    return iec_enum_to_string<E>(v.get());
+}
+
+template<typename E>
+inline IECString<254> TO_STRING(const IEC_ENUM_Value<E>& v) noexcept {
+    return iec_enum_to_string<E>(v.get());
+}
+
+template<typename E, std::enable_if_t<std::is_enum<E>::value, int> = 0>
+inline IECString<254> TO_STRING(E v) noexcept {
+    return iec_enum_to_string(v);
+}
+
 // =============================================================================
 // WSTRING → Numeric Conversions
 // =============================================================================

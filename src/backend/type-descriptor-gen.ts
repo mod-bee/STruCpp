@@ -578,6 +578,7 @@ export class TypeDescriptorGenerator {
         typeClass: "TYPE_ARRAY",
         baseTypeClass: elem.typeClass,
         cap: elem.cap,
+        enumDesc: this.enumDescOf(elementTypeName.name, elem.typeClass),
       });
     }
 
@@ -605,7 +606,16 @@ export class TypeDescriptorGenerator {
       // a reader takes one field either way — IEC_ANY::ELEMCLASS's convention.
       baseTypeClass: resolved.typeClass,
       cap: resolved.cap,
+      enumDesc: this.enumDescOf(typeRef.name, resolved.typeClass),
     });
+  }
+
+  /** `iec_enum_names<E>::desc()` for an enumeration (null unless it was
+   *  declared {attribute 'to_string'}; constexpr, so the table stays constant),
+   *  else `nullptr`. */
+  private enumDescOf(typeName: string, typeClass: string): string {
+    if (typeClass !== "TYPE_ENUM") return "nullptr";
+    return `strucpp::iec_enum_names<${this.types.followAliases(typeName)}>::desc()`;
   }
 
   private row(f: {
@@ -620,6 +630,7 @@ export class TypeDescriptorGenerator {
     typeClass: string;
     baseTypeClass: string;
     cap: number;
+    enumDesc: string;
   }): string {
     const nested =
       f.nested === undefined ? "nullptr" : `&${typeDescSymbol(f.nested)}`;
@@ -631,7 +642,7 @@ export class TypeDescriptorGenerator {
       `static_cast<uint32_t>(${f.bitSize}), ` +
       `static_cast<uint32_t>(${f.elemBitSize}), ` +
       `static_cast<uint32_t>(${f.stride}), ` +
-      `${cls(f.typeClass)}, ${cls(f.baseTypeClass)}, ${f.cap} },`
+      `${cls(f.typeClass)}, ${cls(f.baseTypeClass)}, ${f.cap}, ${f.enumDesc} },`
     );
   }
 

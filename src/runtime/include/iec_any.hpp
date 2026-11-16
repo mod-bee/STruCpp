@@ -95,6 +95,10 @@ struct IEC_ANY {
      *  classes but cannot name a user-defined type, and reports every array
      *  as TYPE_ARRAY. */
     const char* TYPENAME = nullptr;
+    /** The enumeration's member names when the argument (or, for an array,
+     *  its elements) is an enumeration declared {attribute 'to_string'}; null
+     *  otherwise. Look a value up with `enum_value_name`. Appended. */
+    const EnumDesc* ENUMDESC = nullptr;
 
     /** Elements, 1 for a scalar and 0 for an unwired pin. */
     int32_t count() const { return DICOUNT; }

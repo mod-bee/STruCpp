@@ -213,9 +213,9 @@ END_STRUCT END_TYPE\n`,
 
   it("records a string's declared capacity, and 254 for an unqualified one", () => {
     const rows = memberRows(STATION, "v : STATION;", "v", "STATION");
-    expect(rows[0].trimEnd().endsWith("20 },")).toBe(true);
+    expect(rows[0].trimEnd().endsWith("20, nullptr },")).toBe(true);
     expect(rows[5]).toContain("strucpp::TYPE_WSTRING");
-    expect(rows[5].trimEnd().endsWith("6 },")).toBe(true);
+    expect(rows[5].trimEnd().endsWith("6, nullptr },")).toBe(true);
 
     const plain = memberRows(
       `TYPE T : STRUCT S : STRING; END_STRUCT END_TYPE\n`,
@@ -225,7 +225,7 @@ END_STRUCT END_TYPE\n`,
     );
     // The real number, not the debug table's "0 means 254" convention: a block
     // sizing a buffer from CAP must not have to know the convention.
-    expect(plain[0].trimEnd().endsWith("254 },")).toBe(true);
+    expect(plain[0].trimEnd().endsWith("254, nullptr },")).toBe(true);
   });
 
   it("gives an enumeration TYPE_ENUM, the class CODESYS uses", () => {
@@ -236,6 +236,8 @@ END_STRUCT END_TYPE\n`,
       "T",
     );
     expect(rows[0]).toContain("strucpp::TYPE_ENUM");
+    // ENUMDESC: the names, null unless declared {attribute 'to_string'}.
+    expect(rows[0]).toContain("strucpp::iec_enum_names<E>::desc()");
   });
 
   it("emits no table at all when a member defies description", () => {

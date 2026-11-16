@@ -10811,15 +10811,19 @@ export class CodeGenerator {
       const size = isEnum
         ? `static_cast<int32_t>(strucpp::IEC_SIZEOF(${value}))`
         : `static_cast<int32_t>(sizeof(${value}))`;
-      // An enumeration has no members to describe; a structure does.
+      // An enumeration has no members to describe; a structure does. An
+      // enumeration may have names ({attribute 'to_string'}).
       const desc = isEnum ? "nullptr" : this.typeDescriptorArg(declaredType);
       if (syncStrings && desc !== "nullptr") {
         this.noteStructStringSync(value, declaredType);
       }
+      const names = isEnum
+        ? `, strucpp::iec_enum_names<${this.typeCodeGen.mapTypeToCpp(declaredType)}>::desc()`
+        : "";
       return (
         `strucpp::IEC_ANY{ strucpp::TYPE_CLASS::${cls}, ${ptr}, ${size}, 1, ` +
         `static_cast<int32_t>(sizeof(${value})), strucpp::TYPE_CLASS::${cls}, ` +
-        `${desc}, ${this.anyIdentityFields(expr, declaredType)} }`
+        `${desc}, ${this.anyIdentityFields(expr, declaredType)}${names} }`
       );
     }
     return undefined;
@@ -10851,11 +10855,15 @@ export class CodeGenerator {
     // For an array of structures the layout that matters is the ELEMENT's —
     // DICOUNT and DISTRIDE already say how to step between them.
     const desc = this.typeDescriptorArg(elementTypeName);
+    const names =
+      elemClass === "strucpp::TYPE_CLASS::TYPE_ENUM"
+        ? `, strucpp::iec_enum_names<${payload}>::desc()`
+        : "";
     return (
       `strucpp::IEC_ANY{ strucpp::TYPE_CLASS::TYPE_ARRAY, ${base}, ` +
       `static_cast<int32_t>(${value}.element_count() * sizeof(${payload})), ` +
       `${count}, static_cast<int32_t>(sizeof(${wrapper})), ${elemClass}, ` +
-      `${desc}, ${identity} }`
+      `${desc}, ${identity}${names} }`
     );
   }
 

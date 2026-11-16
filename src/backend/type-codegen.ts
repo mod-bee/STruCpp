@@ -363,6 +363,9 @@ export class TypeCodeGenerator {
         // Generate IEC_ wrapper for enum variables using IEC_ENUM
         this.emit(`using IEC_${type.name} = IEC_ENUM<${type.name}>;`);
         this.emit("");
+        if (hasAttribute(type, "to_string")) {
+          this.generateEnumNames(type.name, type.declaredName, def);
+        }
         break;
       case "ArrayDefinition":
         this.generateArrayType(type.name, def);
@@ -551,6 +554,44 @@ export class TypeCodeGenerator {
     } else {
       this.emit(`enum class ${name} : INT_t { ${members.join(", ")} };`);
     }
+    this.emit("");
+  }
+
+  /**
+   * The member names of an enumeration declared {attribute 'to_string'}
+   * (CODESYS, "Attribute: to_string"): TO_STRING gives a member's name, and
+   * an ANY descriptor or a struct member's descriptor points at the table.
+   * Class-template statics, so the header may define them (C++14, no inline
+   * variables) and they stay constant data; `iec_enum_names<E>` names them.
+   */
+  private generateEnumNames(
+    name: string,
+    declaredName: string | undefined,
+    def: EnumDefinition,
+  ): void {
+    const holder = `${name}__NAMES`;
+    const count = def.members.length;
+    const literal = (text: string): string =>
+      `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    this.emit(`template <typename D> struct ${holder} {`);
+    this.emit(`    static const EnumValueDesc VALUES[${count}];`);
+    this.emit(`    static const EnumDesc DESC;`);
+    this.emit(`};`);
+    this.emit(
+      `template <typename D> const EnumValueDesc ${holder}<D>::VALUES[${count}] = {`,
+    );
+    for (const member of def.members) {
+      this.emit(
+        `    { static_cast<int64_t>(${name}::${member.name}), ${literal(member.declaredName ?? member.name)} },`,
+      );
+    }
+    this.emit(`};`);
+    this.emit(
+      `template <typename D> const EnumDesc ${holder}<D>::DESC = { ${literal(declaredName ?? name)}, ${holder}<D>::VALUES, ${count} };`,
+    );
+    this.emit(
+      `template <> struct iec_enum_names<${name}> { static constexpr const EnumDesc* desc() noexcept { return &${holder}<void>::DESC; } };`,
+    );
     this.emit("");
   }
 
