@@ -11609,6 +11609,8 @@ export class CodeGenerator {
     cppType: string,
     stTypeName: string | undefined,
   ): string {
+    const enumerator = this.enumeratorOfType(value, stTypeName);
+    if (enumerator !== undefined) return enumerator;
     if (!isStructInitializerValue(value)) {
       return this.generateExpression(value);
     }
@@ -11618,6 +11620,42 @@ export class CodeGenerator {
       stTypeName,
       this.getStructInitEmitter(),
     );
+  }
+
+  /**
+   * A bare name that is a value of the declared enumeration type `T`: `T::v`.
+   *
+   * The value is typed by the declaration it initialises (IEC 61131-3 6.4.4.2:
+   * an enumerated literal takes the type it is assigned to; it is qualified,
+   * `T#v`, only to be unique). A library's manifest records an input's default
+   * as written, and an enumeration type's own default is written bare (`None`
+   * in `E_Unit : (None, Bar) := None`), also for a qualified_only type whose
+   * values have no bare name a call site could resolve. A call omitting that
+   * input emitted `NONE`, a g++ error, where the source build has
+   * `E_UNIT::NONE`. Resolving against the declared type also keeps a value
+   * from being taken for another enumeration's value of the same name.
+   */
+  private enumeratorOfType(
+    value: Expression,
+    stTypeName: string | undefined,
+  ): string | undefined {
+    if (stTypeName === undefined || value.kind !== "VariableExpression") {
+      return undefined;
+    }
+    const v = value as VariableExpression;
+    if (
+      v.fieldAccess.length > 0 ||
+      (v.accessChain?.length ?? 0) > 0 ||
+      (v.subscripts?.length ?? 0) > 0
+    ) {
+      return undefined;
+    }
+    const typeUpper = stTypeName.toUpperCase();
+    const member = v.name.toUpperCase();
+    if (this.enumTypeMembers.get(typeUpper)?.has(member) !== true) {
+      return undefined;
+    }
+    return `${typeUpper}::${member}`;
   }
 
   /**

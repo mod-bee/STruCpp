@@ -1260,11 +1260,13 @@ export function registerLibrarySymbols(
   // are skipped, first-wins), a program importing several libraries can see all
   // of their globals together at the same place — globals are additive.
   for (const g of manifest.globals ?? []) {
-    const varType: ElementaryType = ELEMENTARY_TYPES[g.type.toUpperCase()] ?? {
-      typeKind: "elementary",
-      name: g.type,
-      sizeBits: 0,
-    };
+    // A global of a declared type (an enumeration, a struct the library or
+    // one it depends on exports) takes that type, registered above: a
+    // placeholder made it a distinct type, so passing the global to the
+    // library's own function of that type was refused.
+    const varType: IECType = ELEMENTARY_TYPES[g.type.toUpperCase()] ??
+      symbolTables.lookupType(g.type)?.resolvedType ??
+      ({ typeKind: "elementary", name: g.type, sizeBits: 0 } as ElementaryType);
     try {
       symbolTables.globalScope.define({
         name: g.name,
