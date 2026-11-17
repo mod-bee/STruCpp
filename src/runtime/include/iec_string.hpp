@@ -468,6 +468,13 @@ public:
         return *this;
     }
 
+    // Assignment from a REFERENCE TO STRING of another size: its target's value
+    template<size_t OtherLen, std::enable_if_t<OtherLen != MaxLen, int> = 0>
+    IECStringVar& operator=(const IEC_REFERENCE_TO<IECString<OtherLen>>& other) noexcept {
+        set(IECString<MaxLen>(other.get().c_str()));
+        return *this;
+    }
+
     constexpr value_type get() const noexcept {
         return forced_ ? forced_value_ : value_;
     }
@@ -1175,6 +1182,12 @@ template<> struct iec_string_arg<const char*> {
     static IECString<254> get(const char* s) noexcept { return IECString<254>(s); }
 };
 template<> struct iec_string_arg<char*> : iec_string_arg<const char*> {};
+// A REFERENCE TO STRING(n): the STRING it is bound to (see below).
+template<size_t N> struct iec_string_arg<IEC_REFERENCE_TO<IECString<N>>> {
+    static constexpr bool value = true;
+    static constexpr size_t length = N;
+    static IECString<N> get(const IEC_REFERENCE_TO<IECString<N>>& r) noexcept { return r.get(); }
+};
 
 template<typename T>
 using iec_string_arg_t = iec_string_arg<std::remove_cv_t<T>>;
@@ -1191,6 +1204,29 @@ template<typename T>
 inline auto iec_as_string(const T& s) noexcept -> decltype(iec_string_arg_t<T>::get(s)) {
     return iec_string_arg_t<T>::get(s);
 }
+
+// A REFERENCE TO STRING (CODESYS "Data Type: REFERENCE TO": dereferenced
+// implicitly, used as the variable it is bound to, as IEC 61131-3 Ed.3
+// 6.4.4.10.3 has a dereferenced REF_TO "used in the same way as using a
+// variable directly") compares, and is passed to the STRING functions, as
+// that STRING. Equality and ordering against any STRING form; <= / >= go through
+// iec_compare_text, as for a variable.
+
+#define STRUCPP_STRING_REF_COMPARE(OP)                                                   \
+    template<size_t N, typename U, std::enable_if_t<iec_string_arg_t<U>::value, int> = 0>     \
+    inline bool operator OP(const IEC_REFERENCE_TO<IECString<N>>& a, const U& b) noexcept { \
+        return a.get() OP iec_as_string(b);                                                 \
+    }                                                                               \
+    template<typename U, size_t N,                                                   \
+             std::enable_if_t<iec_string_arg_t<U>::value && !iec_is_reference_to<U>::value, int> = 0> \
+    inline bool operator OP(const U& a, const IEC_REFERENCE_TO<IECString<N>>& b) noexcept { \
+        return iec_as_string(a) OP b.get();                                                 \
+    }
+STRUCPP_STRING_REF_COMPARE(==)
+STRUCPP_STRING_REF_COMPARE(!=)
+STRUCPP_STRING_REF_COMPARE(<)
+STRUCPP_STRING_REF_COMPARE(>)
+#undef STRUCPP_STRING_REF_COMPARE
 
 template<typename S, enable_if_string_args<S> = 0>
 inline size_t LEN(const S& s) noexcept { return LEN(iec_as_string(s)); }
@@ -1326,6 +1362,7 @@ template<typename T> struct iec_sized_string : std::false_type {};
 template<size_t N> struct iec_sized_string<IECString<N>> : std::true_type {};
 template<size_t N> struct iec_sized_string<IECStringVar<N>> : std::true_type {};
 template<size_t N> struct iec_sized_string<IECVar<IECString<N>>> : std::true_type {};
+template<size_t N> struct iec_sized_string<IEC_REFERENCE_TO<IECString<N>>> : std::true_type {};
 
 /** Two or more string variables or values, not all of one type. */
 template<typename... Ts> struct iec_mixed_sized_strings : std::false_type {};
@@ -1676,6 +1713,9 @@ inline const char* iec_text(const IECString<N>& s) noexcept { return s.c_str(); 
 
 template<size_t N>
 inline const char* iec_text(const IECStringVar<N>& s) noexcept { return s.c_str(); }
+
+template<size_t N>
+inline const char* iec_text(const IEC_REFERENCE_TO<IECString<N>>& s) noexcept { return s.target().c_str(); }
 
 /** Negative, zero or positive as `a` sorts before, with or after `b`, by character code. */
 template<typename A, typename B>

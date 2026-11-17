@@ -1809,6 +1809,28 @@ export class TypeChecker {
   }
 
   /**
+   * Whether `target` is a POINTER TO variable (or member) and `valueType` an
+   * address (__XWORD, what ADR gives). The checker types a pointer variable as
+   * its target type, so the address was checked against the target type and
+   * passed only where that is an integer.
+   */
+  private isAddressIntoPointer(
+    target: Expression,
+    valueType: IECType | undefined,
+    scope: Scope,
+  ): boolean {
+    if (
+      valueType?.typeKind !== "elementary" ||
+      (valueType as ElementaryType).name.toUpperCase() !== "__XWORD"
+    ) {
+      return false;
+    }
+    return (
+      this.declaredTypeRefOf(target, scope)?.referenceKind === "pointer_to"
+    );
+  }
+
+  /**
    * CODESYS operators on references (online help "Operator: __ISVALIDREF",
    * "__QUERYINTERFACE", "__QUERYPOINTER"): `__ISVALIDREF(r)` takes a
    * REFERENCE TO variable; the query operators take an interface variable or
@@ -1929,6 +1951,11 @@ export class TypeChecker {
       case "AssignmentStatement": {
         const targetType = this.resolveExprType(stmt.target, scope);
         const valueType = this.resolveExprType(stmt.value, scope);
+        // A POINTER TO variable holds an address, ADR's, whatever its target
+        // type (CODESYS "Operator: ADR", "Data Type: POINTER TO"; IEC
+        // 61131-3 Ed.3 has REF_TO and REF() only, 6.4.4.10), as it did for
+        // an integer target type.
+        if (this.isAddressIntoPointer(stmt.target, valueType, scope)) break;
         const errorsBefore = this.errors.length;
         this.validateAssignment(
           targetType,

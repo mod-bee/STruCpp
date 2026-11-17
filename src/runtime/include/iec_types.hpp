@@ -327,4 +327,10 @@ constexpr size_t iec_concat_capacity(size_t a, size_t b) noexcept {
     return a + b > STRUCPP_STRING_MAX_LENGTH ? size_t{STRUCPP_STRING_MAX_LENGTH} : a + b;
 }
 
+// REFERENCE TO (iec_pointer.hpp), named here for the string headers, which
+// read a REFERENCE TO STRING / WSTRING as the string it is bound to.
+template<typename T> class IEC_REFERENCE_TO;
+template<typename T> struct iec_is_reference_to { static constexpr bool value = false; };
+template<typename T> struct iec_is_reference_to<IEC_REFERENCE_TO<T>> { static constexpr bool value = true; };
+
 } // namespace strucpp

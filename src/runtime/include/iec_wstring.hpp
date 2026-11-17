@@ -438,6 +438,13 @@ public:
         return *this;
     }
 
+    // Assignment from a REFERENCE TO WSTRING of another size: its target's value
+    template<size_t OtherLen, std::enable_if_t<OtherLen != MaxLen, int> = 0>
+    IECWStringVar& operator=(const IEC_REFERENCE_TO<IECWString<OtherLen>>& other) noexcept {
+        set(IECWString<MaxLen>(other.get().c_str()));
+        return *this;
+    }
+
     value_type get() const noexcept {
         return forced_ ? forced_value_ : value_;
     }
@@ -757,6 +764,11 @@ template<size_t N> struct iec_wstring_arg<IECVar<IECWString<N>>> {
     static constexpr bool value = true;
     static IECWString<N> get(const IECVar<IECWString<N>>& s) noexcept { return s.get(); }
 };
+// A REFERENCE TO WSTRING(n): the WSTRING it is bound to, as for STRING.
+template<size_t N> struct iec_wstring_arg<IEC_REFERENCE_TO<IECWString<N>>> {
+    static constexpr bool value = true;
+    static IECWString<N> get(const IEC_REFERENCE_TO<IECWString<N>>& r) noexcept { return r.get(); }
+};
 template<> struct iec_wstring_arg<const char16_t*> {
     static constexpr bool value = true;
     static IECWString<254> get(const char16_t* s) noexcept { return IECWString<254>(s); }
@@ -777,6 +789,24 @@ template<typename T>
 inline auto iec_as_wstring(const T& s) noexcept -> decltype(iec_wstring_arg_t<T>::get(s)) {
     return iec_wstring_arg_t<T>::get(s);
 }
+
+// A REFERENCE TO WSTRING compares as the WSTRING it is bound to: see the
+// STRING ones in iec_string.hpp.
+#define STRUCPP_WSTRING_REF_COMPARE(OP)                                                   \
+    template<size_t N, typename U, std::enable_if_t<iec_wstring_arg_t<U>::value, int> = 0>     \
+    inline bool operator OP(const IEC_REFERENCE_TO<IECWString<N>>& a, const U& b) noexcept { \
+        return a.get() OP iec_as_wstring(b);                                                 \
+    }                                                                               \
+    template<typename U, size_t N,                                                   \
+             std::enable_if_t<iec_wstring_arg_t<U>::value && !iec_is_reference_to<U>::value, int> = 0> \
+    inline bool operator OP(const U& a, const IEC_REFERENCE_TO<IECWString<N>>& b) noexcept { \
+        return iec_as_wstring(a) OP b.get();                                                 \
+    }
+STRUCPP_WSTRING_REF_COMPARE(==)
+STRUCPP_WSTRING_REF_COMPARE(!=)
+STRUCPP_WSTRING_REF_COMPARE(<)
+STRUCPP_WSTRING_REF_COMPARE(>)
+#undef STRUCPP_WSTRING_REF_COMPARE
 
 template<typename S, enable_if_wstring_args<S> = 0>
 inline size_t LEN(const S& s) noexcept { return WLEN(iec_as_wstring(s)); }
@@ -908,6 +938,7 @@ template<typename T> struct iec_sized_wstring : std::false_type {};
 template<size_t N> struct iec_sized_wstring<IECWString<N>> : std::true_type {};
 template<size_t N> struct iec_sized_wstring<IECWStringVar<N>> : std::true_type {};
 template<size_t N> struct iec_sized_wstring<IECVar<IECWString<N>>> : std::true_type {};
+template<size_t N> struct iec_sized_wstring<IEC_REFERENCE_TO<IECWString<N>>> : std::true_type {};
 
 /** Two or more wide string variables or values, not all of one type. */
 template<typename... Ts> struct iec_mixed_sized_wstrings : std::false_type {};
@@ -1053,6 +1084,9 @@ inline const char16_t* iec_wtext(const IECWString<N>& s) noexcept { return s.c_s
 
 template<size_t N>
 inline const char16_t* iec_wtext(const IECWStringVar<N>& s) noexcept { return s.c_str(); }
+
+template<size_t N>
+inline const char16_t* iec_wtext(const IEC_REFERENCE_TO<IECWString<N>>& s) noexcept { return s.target().c_str(); }
 
 /** Negative, zero or positive as `a` sorts before, with or after `b`, by character code. */
 template<typename A, typename B>
