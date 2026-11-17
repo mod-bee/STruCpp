@@ -851,10 +851,11 @@ export class ASTBuilder {
     const name = nameToken?.image ?? "";
     const declaredName = nameToken ? declaredImageOf(nameToken) : "";
 
-    // Access specifier: PROTECTED when none is written (IEC 61131-3
-    // 6.6.5.4.3 rule 5, 6.6.5.9; for function blocks 6.6.7.2.5).
-    let visibility: Visibility = "PROTECTED";
-    if (children.PUBLIC) visibility = "PUBLIC";
+    // Access specifier: PUBLIC when none is written, as in CODESYS and
+    // TwinCAT ("Object: Method": "PUBLIC ... corresponds to having no access
+    // modifier"); IEC 61131-3 6.6.5.9 makes it PROTECTED.
+    let visibility: Visibility = "PUBLIC";
+    if (children.PROTECTED) visibility = "PROTECTED";
     else if (children.PRIVATE) visibility = "PRIVATE";
     else if (children.INTERNAL) visibility = "INTERNAL";
 
