@@ -183,25 +183,20 @@ describe("pointer and reference initializers", () => {
       `PROGRAM main\nVAR x : INT; dw : DWORD; ${decl} END_VAR\nEND_PROGRAM\n`,
     ).errors.map((e) => e.message);
 
-  it.each([
-    [
-      "r : REF_TO REAL := REF(dw);",
-      "REF_TO initializers are not supported; assign 'R' in the body instead",
-    ],
-    [
-      "p : POINTER TO INT := ADR(x);",
-      "POINTER TO initializers are not supported; assign 'P' in the body instead",
-    ],
-  ])("rejects %s", (decl, message) => {
-    expect(errors(decl)).toEqual([message]);
+  it("rejects r : REF_TO REAL := REF(dw);", () => {
+    expect(errors("r : REF_TO REAL := REF(dw);")).toEqual([
+      "Cannot assign REF_TO DWORD to REF_TO REAL: a REF_TO can only hold a reference to its declared type",
+    ]);
   });
 
-  it.each(["r : REF_TO INT := NULL;", "p : POINTER TO INT := 0;"])(
-    "accepts %s",
-    (decl) => {
-      expect(errors(decl)).toEqual([]);
-    },
-  );
+  it.each([
+    "r : REF_TO INT := NULL;",
+    "p : POINTER TO INT := 0;",
+    "p : POINTER TO INT := ADR(x);",
+    "r : REF_TO INT := REF(x);",
+  ])("accepts %s", (decl) => {
+    expect(errors(decl)).toEqual([]);
+  });
 });
 
 describe("REFERENCE TO is not combined with other levels", () => {

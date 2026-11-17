@@ -2010,6 +2010,11 @@ export class SemanticAnalyzer {
       if (block.blockType === "VAR_EXTERNAL") continue;
       for (const decl of block.declarations) {
         if (decl.initialValue === undefined) continue;
+        // A pointer's or reference's initial value is an address (ADR(v),
+        // REF(v)), not a value: it names a variable, checked by the type
+        // checker (checkAddressInitializer).
+        const ref = decl.type.referenceKind;
+        if (ref === "pointer_to" || ref === "ref_to") continue;
         this.foldConstants(
           decl.initialValue,
           constants,

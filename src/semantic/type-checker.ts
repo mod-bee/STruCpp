@@ -299,7 +299,7 @@ export class TypeChecker {
     for (const func of ast.functions) {
       const scope = this.symbolTables.getFunctionScope(func.name);
       if (scope) {
-        this.checkVarBlocks(func.varBlocks, scope);
+        this.checkVarBlocks(func.varBlocks, scope, true);
         this.checkStatements(func.body, scope);
       }
     }
@@ -319,7 +319,7 @@ export class TypeChecker {
             fb.name,
             method.name,
           );
-          this.checkVarBlocks(method.varBlocks, methodScope ?? scope);
+          this.checkVarBlocks(method.varBlocks, methodScope ?? scope, true);
           this.checkStatements(method.body, methodScope ?? scope);
         }
 
@@ -1650,6 +1650,102 @@ export class TypeChecker {
   // ===========================================================================
 
   /**
+   * The initial value of a POINTER TO or REF_TO variable: the address of a
+   * variable that lives at least as long as the pointer. `ADR(v)` for a
+   * POINTER TO (CODESYS "Operator: ADR", "Data Type: POINTER TO": ADR may
+   * initialise a pointer in its declaration), `REF(v)` for a REF_TO (IEC
+   * 61131-3 Ed.3 6.4.4.10.2: "the address of an already declared variable").
+   * `v` is a global or a variable of the same POU: not an in-out (bound per
+   * call), and not a VAR_TEMP unless the pointer is one too. REF() of a
+   * VAR_TEMP or a function's variable is refused (6.4.4.10.3).
+   */
+  private checkAddressInitializer(
+    init: Expression,
+    outerKind: "ref_to" | "pointer_to",
+    block: VarBlock,
+    blocks: VarBlock[],
+    scope: Scope,
+    transient: boolean,
+    declType?: TypeReference,
+  ): void {
+    const fail = (message: string): void =>
+      this.addError(
+        message,
+        init.sourceSpan.startLine,
+        init.sourceSpan.startCol,
+        init.sourceSpan.file,
+      );
+    const op = outerKind === "ref_to" ? "REF" : "ADR";
+    const kindText = outerKind === "ref_to" ? "REF_TO" : "POINTER TO";
+    let operand: Expression | undefined;
+    if (outerKind === "ref_to" && init.kind === "RefExpression") {
+      operand = init.operand;
+    } else if (
+      outerKind === "pointer_to" &&
+      init.kind === "FunctionCallExpression" &&
+      init.functionName.toUpperCase() === "ADR" &&
+      init.arguments.length === 1
+    ) {
+      operand = init.arguments[0]!.value;
+    }
+    if (operand === undefined || operand.kind !== "VariableExpression") {
+      fail(
+        `A ${kindText} variable is initialised with ${op}(variable) or NULL`,
+      );
+      return;
+    }
+    this.resolveExprType(init, scope);
+    if (outerKind === "ref_to" && declType !== undefined) {
+      // A REF_TO holds only a reference to its declared type (6.4.4.10.3).
+      this.validateReferenceValue(
+        {
+          chain: declType.referenceChain ?? ["ref_to"],
+          base: declType.name,
+        },
+        init,
+        scope,
+      );
+    }
+    const rootUpper = operand.name.toUpperCase();
+    const owner = blocks.find((b) =>
+      b.declarations.some((d) =>
+        d.names.some((n) => n.toUpperCase() === rootUpper),
+      ),
+    );
+    if (owner === undefined) {
+      // Not a variable of this POU: a global (as VAR_EXTERNAL elsewhere, or a
+      // file-level global), else the general check reports it.
+      const sym = scope.lookup(operand.name);
+      if (sym?.kind !== "variable" || sym.isGlobal !== true) {
+        fail(
+          `${op}() in an initial value takes a global or a variable of the same POU; '${operand.name}' is neither`,
+        );
+      }
+      return;
+    }
+    if (owner.blockType === "VAR_IN_OUT") {
+      fail(
+        `${op}() in an initial value cannot take the in-out '${operand.name}': it is bound anew at every call`,
+      );
+      return;
+    }
+    const temp = (b: VarBlock): boolean => b.blockType === "VAR_TEMP";
+    // A function's or method's variables live for one call (6.4.4.10.3).
+    const inFunction = transient && owner.blockType !== "VAR_STAT";
+    if (outerKind === "ref_to" && (temp(owner) || inFunction)) {
+      fail(
+        `REF() cannot take the temporary variable '${operand.name}' (IEC 61131-3 6.4.4.10.3)`,
+      );
+      return;
+    }
+    if (temp(owner) && !temp(block)) {
+      fail(
+        `${op}() in an initial value cannot take the VAR_TEMP '${operand.name}': it would outlive it`,
+      );
+    }
+  }
+
+  /**
    * Walk variable declarations and validate every initialiser against the
    * declared type. Without this pass, nonsense like `WSTRING := 'foo'`
    * (STRING literal into a WSTRING variable) reaches codegen unchecked,
@@ -1661,7 +1757,11 @@ export class TypeChecker {
    * assignment statements — no separate compatibility rules — so anything
    * the standard considers an implicit assignment also passes here.
    */
-  private checkVarBlocks(blocks: VarBlock[], scope: Scope): void {
+  private checkVarBlocks(
+    blocks: VarBlock[],
+    scope: Scope,
+    transient = false,
+  ): void {
     for (const block of blocks) {
       for (const decl of block.declarations) {
         if (decl.initArguments) this.checkInitArguments(decl, scope);
@@ -1672,12 +1772,14 @@ export class TypeChecker {
           (outerKind === "ref_to" || outerKind === "pointer_to") &&
           !isNullInitializer(decl.initialValue)
         ) {
-          const kindText = outerKind === "ref_to" ? "REF_TO" : "POINTER TO";
-          this.addError(
-            `${kindText} initializers are not supported; assign '${decl.names[0] ?? ""}' in the body instead`,
-            decl.initialValue.sourceSpan.startLine,
-            decl.initialValue.sourceSpan.startCol,
-            decl.initialValue.sourceSpan.file,
+          this.checkAddressInitializer(
+            decl.initialValue,
+            outerKind,
+            block,
+            blocks,
+            scope,
+            transient,
+            decl.type,
           );
           continue;
         }
