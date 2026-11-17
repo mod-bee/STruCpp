@@ -388,6 +388,16 @@ function partLabel(part: { resultType: string }): string {
     : part.resultType.charAt(0) + part.resultType.slice(1).toLowerCase();
 }
 
+/** IEC operators CODESYS refuses as method names; type conversions are checked through the registry. */
+const OPERATOR_NAMES: ReadonlySet<string> = new Set([
+  ...["ADD", "SUB", "MUL", "DIV", "MOD", "EXPT", "MOVE"],
+  ...["SEL", "MAX", "MIN", "LIMIT", "MUX"],
+  ...["GT", "GE", "EQ", "LE", "LT", "NE", "AND", "OR", "XOR", "NOT"],
+  ...["SHL", "SHR", "ROL", "ROR", "ABS", "SQRT", "LN", "LOG", "EXP"],
+  ...["SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "TRUNC", "TRUNC_INT"],
+  ...["ADR", "BITADR", "SIZEOF", "INDEXOF", "LOWER_BOUND", "UPPER_BOUND"],
+]);
+
 /** Value range of each named-values base type, where a JS number holds it. */
 const NAMED_VALUES_RANGE: Record<string, [number, number]> = {
   SINT: [-128, 127],
@@ -3287,7 +3297,40 @@ export class SemanticAnalyzer {
   /**
    * Validate OOP modifier contradictions on function blocks and methods.
    */
+  /**
+   * A method may not take the name of an IEC operator or a type conversion
+   * (`ADD`, `MAX`, `SIN`, `INT_TO_REAL`...): CODESYS reserves them as
+   * keywords (Online Help, "Keywords": "keywords that for example denote
+   * scopes, data types, or operators ... cannot be used as variable names",
+   * e.g. `BOOL_TO_INT`, `MUL`). Standard functions that are not operators
+   * (`LEN`, `ROUND`, `MEMCPY`...) remain valid method names.
+   */
+  private validateMethodName(method: MethodDeclaration, owner: string): void {
+    const upper = method.name.toUpperCase();
+    if (
+      !OPERATOR_NAMES.has(upper) &&
+      this.stdRegistry.lookup(upper)?.category !== "conversion" &&
+      this.stdRegistry.resolveConversion(upper) === undefined
+    ) {
+      return;
+    }
+    this.addError(
+      `Method '${method.name}' in '${owner}' is named like the operator ${upper}; rename it.`,
+      method.sourceSpan.startLine,
+      method.sourceSpan.startCol,
+      method.sourceSpan.file,
+    );
+  }
+
   private validateOOPModifiers(ast: CompilationUnit): void {
+    for (const iface of ast.interfaces) {
+      for (const method of iface.methods) {
+        this.validateMethodName(method, iface.name);
+      }
+    }
+    for (const fb of ast.functionBlocks) {
+      for (const method of fb.methods) this.validateMethodName(method, fb.name);
+    }
     // Build FB lookup map for OVERRIDE and IMPLEMENTS validation
     const fbMap = new Map<string, FunctionBlockDeclaration>();
     for (const fb of ast.functionBlocks) {
