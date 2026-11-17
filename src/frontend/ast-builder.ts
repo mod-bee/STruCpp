@@ -4004,6 +4004,35 @@ export class ASTBuilder {
           value,
         } as AssignmentStatement;
       }
+      // `THIS^.cs[0](inc := 5)`: a call of the block instance at the path,
+      // as `cs[0](inc := 5)` is (the path is the block's own member).
+      const steps = path.target.accessChain ?? [];
+      const first = steps[0];
+      if (path.method === undefined && first?.kind === "field") {
+        const rest = steps.slice(1);
+        const instance: VariableExpression = {
+          kind: "VariableExpression",
+          sourceSpan: path.target.sourceSpan,
+          name: first.name,
+          subscripts: rest[0]?.kind === "subscript" ? [...rest[0].indices] : [],
+          fieldAccess: rest.flatMap((st) =>
+            st.kind === "field" ? [st.name] : [],
+          ),
+          isDereference: false,
+          accessChain: rest,
+        };
+        return {
+          kind: "FunctionCallStatement",
+          sourceSpan: nodeToSourceSpan(node),
+          call: {
+            kind: "FunctionCallExpression",
+            sourceSpan: nodeToSourceSpan(node),
+            functionName: first.name,
+            arguments: this.buildThisArguments(children),
+            instance,
+          },
+        } as FunctionCallStatement;
+      }
       const call: MethodCallExpression = {
         kind: "MethodCallExpression",
         sourceSpan: nodeToSourceSpan(node),

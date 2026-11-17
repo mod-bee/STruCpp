@@ -3005,6 +3005,9 @@ export class CodeGenerator {
           : undefined;
       } else if (step.kind === "field") {
         type = this.resolveMemberType(type, step.name);
+      } else if (step.kind === "dereference") {
+        // A pointer's or reference's type is recorded as its target's.
+        continue;
       } else {
         return undefined;
       }
@@ -6666,7 +6669,12 @@ export class CodeGenerator {
     if (upper.includes(".")) return true;
     return (
       this.ast?.functions.some((f) => f.name.toUpperCase() === upper) ===
-        true || this.libraryFunctionParams.has(upper)
+        true ||
+      this.libraryFunctionParams.has(upper) ||
+      // A method of the own block called by its bare name.
+      (this.currentFBName !== undefined &&
+        this.findMethodDecl(this.currentFBName, expr.functionName) !==
+          undefined)
     );
   }
 
