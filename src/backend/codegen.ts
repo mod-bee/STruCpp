@@ -8854,7 +8854,16 @@ export class CodeGenerator {
         ...this.libraryDescribedStructs.values(),
         ...this.describedProjectStructs,
       ],
-      externalEnums: this.libraryEnumNames,
+      // The library's enumerations, and the project's: a struct held back to a
+      // later batch (one with a library type in it) names enumerations an
+      // earlier batch emitted, which its layout table and its forceable
+      // IEC_<Name> fields must still know as enumerations.
+      externalEnums: [
+        ...this.libraryEnumNames,
+        ...(this.ast?.types ?? [])
+          .filter((t) => t.definition.kind === "EnumDefinition")
+          .map((t) => t.name),
+      ],
       // Element defaults qualify bare enumerators by the same lookup as every
       // other expression: the library's enumerations and all of the project's.
       enumMembers: this.enumMemberToType,
