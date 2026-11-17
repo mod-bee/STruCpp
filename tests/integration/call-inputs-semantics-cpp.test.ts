@@ -2,10 +2,10 @@
  * How a call passes its inputs, pinned before the call-site size work and
  * kept after it (behaviour identical):
  * - a METHOD or FUNCTION input the call omits takes its declared initial
- *   value at every call (IEC 61131-3 Ed.3 6.6.1.4.2, "Function... the values
- *   of the input variables ... shall be assigned their initial values" when
- *   not given; a method is called as a function is, 6.6.5.4), even after an
- *   earlier call gave it a value;
+ *   value at every call (IEC 61131-3 Ed.3 6.6.1.4.2: "Any variable to which
+ *   no value is assigned in the list shall have the initial value, if any,
+ *   assigned in the declaration of the called entity, or the default value
+ *   for the associated data type"), even after an earlier call gave it one;
  * - an FB instance call that omits an input keeps its last value (6.6.3.4);
  * - an input is the callee's own copy: writing it there changes nothing for
  *   the caller; a STRING input holds at most its declared length;
