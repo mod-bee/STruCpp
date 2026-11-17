@@ -104,6 +104,10 @@ inline const char* enum_value_name(const EnumDesc* desc, int64_t value) noexcept
 template <typename E>
 struct iec_enum_names {
     static constexpr const EnumDesc* desc() noexcept { return nullptr; }
+    /** The enumeration's TypeDesc (its ENUMDESC the names), null unless
+     *  declared {attribute 'to_string'}: what an ANY argument's TYPEDESC and
+     *  a struct member's NESTED point at. */
+    static constexpr const TypeDesc* type_desc() noexcept { return nullptr; }
 };
 
 /**
@@ -128,7 +132,9 @@ struct MemberDesc {
      *  `VAR_INFO::TYPENAME`, as a pointer — see the deviation note. */
     const char* TYPENAME;
     /** The member's own layout for a nested STRUCT, or the element's layout for
-     *  an array of STRUCT. Null for everything else. An addition. */
+     *  an array of STRUCT; for an enumeration declared {attribute 'to_string'}
+     *  (or an array of one) its TypeDesc, whose ENUMDESC holds the names (see
+     *  `member_enum_desc`). Null for everything else. An addition. */
     const TypeDesc* NESTED;
     /** Bytes from the struct's base to this member's payload.
      *  `VAR_INFO::BYTEOFFSET`. */
@@ -158,10 +164,6 @@ struct MemberDesc {
      *  excluding the NUL; 0 otherwise. An addition: CODESYS's `BitSize` covers
      *  the whole object, which is not what sizing a buffer needs. */
     uint8_t CAP;
-    /** The member's (or, for an array, the elements') enumeration names when
-     *  `TYPECLASS` / `BASETYPECLASS` is `TYPE_ENUM` and the enumeration was
-     *  declared {attribute 'to_string'}; null otherwise. An addition. */
-    const EnumDesc* ENUMDESC;
 };
 
 /** The layout of one generated STRUCT type. */
@@ -175,6 +177,19 @@ struct TypeDesc {
      *  which is what `IEC_ANY::DISIZE` reports for a `TYPE_USERDEF`. */
     uint32_t SIZE;
     uint16_t MEMBERCOUNT;
+    /** An enumeration declared {attribute 'to_string'} has a TypeDesc too:
+     *  no members, SIZE its width, and here its names. Null for a STRUCT.
+     *  An addition. */
+    const EnumDesc* ENUMDESC;
 };
+
+/** The names of the enumeration a member holds (or, for an array, its
+ *  elements), or null: `NESTED` points at the enumeration's TypeDesc when it
+ *  was declared {attribute 'to_string'}. */
+inline const EnumDesc* member_enum_desc(const MemberDesc& member) noexcept {
+    return (member.BASETYPECLASS == TYPE_CLASS::TYPE_ENUM && member.NESTED != nullptr)
+               ? member.NESTED->ENUMDESC
+               : nullptr;
+}
 
 } // namespace strucpp

@@ -481,6 +481,7 @@ export class TypeDescriptorGenerator {
       `${ind}${typeNameRef}, ${membersSymbol(typeName)},`,
       `${ind}static_cast<uint32_t>(sizeof(${typeName})),`,
       `${ind}static_cast<uint16_t>(${rows.length}),`,
+      `${ind}nullptr,`,
       "};",
     );
     return lines;
@@ -578,7 +579,7 @@ export class TypeDescriptorGenerator {
         typeClass: "TYPE_ARRAY",
         baseTypeClass: elem.typeClass,
         cap: elem.cap,
-        enumDesc: this.enumDescOf(elementTypeName.name, elem.typeClass),
+        enumNames: this.enumNamesOf(elementTypeName.name, elem.typeClass),
       });
     }
 
@@ -606,16 +607,16 @@ export class TypeDescriptorGenerator {
       // a reader takes one field either way — IEC_ANY::ELEMCLASS's convention.
       baseTypeClass: resolved.typeClass,
       cap: resolved.cap,
-      enumDesc: this.enumDescOf(typeRef.name, resolved.typeClass),
+      enumNames: this.enumNamesOf(typeRef.name, resolved.typeClass),
     });
   }
 
-  /** `iec_enum_names<E>::desc()` for an enumeration (null unless it was
-   *  declared {attribute 'to_string'}; constexpr, so the table stays constant),
-   *  else `nullptr`. */
-  private enumDescOf(typeName: string, typeClass: string): string {
-    if (typeClass !== "TYPE_ENUM") return "nullptr";
-    return `strucpp::iec_enum_names<${this.types.followAliases(typeName)}>::desc()`;
+  /** For an enumeration, `iec_enum_names<E>::type_desc()` as its NESTED: the
+   *  enumeration's TypeDesc, null unless it was declared
+   *  {attribute 'to_string'} (constexpr, so the table stays constant). */
+  private enumNamesOf(typeName: string, typeClass: string): string | undefined {
+    if (typeClass !== "TYPE_ENUM") return undefined;
+    return `strucpp::iec_enum_names<${this.types.followAliases(typeName)}>::type_desc()`;
   }
 
   private row(f: {
@@ -630,10 +631,12 @@ export class TypeDescriptorGenerator {
     typeClass: string;
     baseTypeClass: string;
     cap: number;
-    enumDesc: string;
+    enumNames: string | undefined;
   }): string {
     const nested =
-      f.nested === undefined ? "nullptr" : `&${typeDescSymbol(f.nested)}`;
+      f.nested !== undefined
+        ? `&${typeDescSymbol(f.nested)}`
+        : (f.enumNames ?? "nullptr");
     return (
       `{ ${this.poolText(f.name)}, ` +
       `${this.poolText(f.typeName)}, ${nested}, ` +
@@ -642,7 +645,7 @@ export class TypeDescriptorGenerator {
       `static_cast<uint32_t>(${f.bitSize}), ` +
       `static_cast<uint32_t>(${f.elemBitSize}), ` +
       `static_cast<uint32_t>(${f.stride}), ` +
-      `${cls(f.typeClass)}, ${cls(f.baseTypeClass)}, ${f.cap}, ${f.enumDesc} },`
+      `${cls(f.typeClass)}, ${cls(f.baseTypeClass)}, ${f.cap} },`
     );
   }
 

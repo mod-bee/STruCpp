@@ -10871,19 +10871,18 @@ export class CodeGenerator {
       const size = isEnum
         ? `static_cast<int32_t>(strucpp::IEC_SIZEOF(${value}))`
         : `static_cast<int32_t>(sizeof(${value}))`;
-      // An enumeration has no members to describe; a structure does. An
-      // enumeration may have names ({attribute 'to_string'}).
-      const desc = isEnum ? "nullptr" : this.typeDescriptorArg(declaredType);
-      if (syncStrings && desc !== "nullptr") {
+      // A structure's layout; an enumeration's TypeDesc, which holds its names
+      // ({attribute 'to_string'}; null otherwise).
+      const desc = isEnum
+        ? `strucpp::iec_enum_names<${this.typeCodeGen.mapTypeToCpp(declaredType)}>::type_desc()`
+        : this.typeDescriptorArg(declaredType);
+      if (syncStrings && !isEnum && desc !== "nullptr") {
         this.noteStructStringSync(value, declaredType);
       }
-      const names = isEnum
-        ? `, strucpp::iec_enum_names<${this.typeCodeGen.mapTypeToCpp(declaredType)}>::desc()`
-        : "";
       return (
         `strucpp::IEC_ANY{ strucpp::TYPE_CLASS::${cls}, ${ptr}, ${size}, 1, ` +
         `static_cast<int32_t>(sizeof(${value})), strucpp::TYPE_CLASS::${cls}, ` +
-        `${desc}, ${this.anyIdentityFields(expr, declaredType)}${names} }`
+        `${desc}, ${this.anyIdentityFields(expr, declaredType)} }`
       );
     }
     return undefined;
@@ -10914,16 +10913,15 @@ export class CodeGenerator {
         : "strucpp::TYPE_CLASS::TYPE_USERDEF";
     // For an array of structures the layout that matters is the ELEMENT's —
     // DICOUNT and DISTRIDE already say how to step between them.
-    const desc = this.typeDescriptorArg(elementTypeName);
-    const names =
+    const desc =
       elemClass === "strucpp::TYPE_CLASS::TYPE_ENUM"
-        ? `, strucpp::iec_enum_names<${payload}>::desc()`
-        : "";
+        ? `strucpp::iec_enum_names<${payload}>::type_desc()`
+        : this.typeDescriptorArg(elementTypeName);
     return (
       `strucpp::IEC_ANY{ strucpp::TYPE_CLASS::TYPE_ARRAY, ${base}, ` +
       `static_cast<int32_t>(${value}.element_count() * sizeof(${payload})), ` +
       `${count}, static_cast<int32_t>(sizeof(${wrapper})), ${elemClass}, ` +
-      `${desc}, ${identity}${names} }`
+      `${desc}, ${identity} }`
     );
   }
 

@@ -33,7 +33,9 @@ const unpool = (cpp: string, text: string): string =>
   text.replace(/(\w+)__STRINGS \+ (\d+)/g, (_m, type: string, off: string) => {
     const start = cpp.indexOf(`static const char ${type}__STRINGS[] =`);
     const end = cpp.indexOf(";", start);
-    const pieces = [...cpp.slice(start, end).matchAll(/"((?:[^"\\]|\\.)*)\\0"/g)];
+    const pieces = [
+      ...cpp.slice(start, end).matchAll(/"((?:[^"\\]|\\.)*)\\0"/g),
+    ];
     let at = 0;
     for (const p of pieces) {
       const t = p[1]!;
@@ -152,7 +154,9 @@ END_STRUCT END_TYPE\n`,
     const result = build(STATION, "v : STATION;", "v");
     const header = result.headerCode ?? "";
     for (const t of ["STATION", "INNER"]) {
-      expect(header).toContain(`extern const strucpp::TypeDesc ${t}__TYPEDESC;`);
+      expect(header).toContain(
+        `extern const strucpp::TypeDesc ${t}__TYPEDESC;`,
+      );
       expect(header).not.toContain(`const strucpp::TypeDesc ${t}__TYPEDESC =`);
       expect(header).not.toContain(`${t}__MEMBERS[]`);
       const defining = result.cppFiles
@@ -213,9 +217,9 @@ END_STRUCT END_TYPE\n`,
 
   it("records a string's declared capacity, and 254 for an unqualified one", () => {
     const rows = memberRows(STATION, "v : STATION;", "v", "STATION");
-    expect(rows[0].trimEnd().endsWith("20, nullptr },")).toBe(true);
+    expect(rows[0].trimEnd().endsWith("20 },")).toBe(true);
     expect(rows[5]).toContain("strucpp::TYPE_WSTRING");
-    expect(rows[5].trimEnd().endsWith("6, nullptr },")).toBe(true);
+    expect(rows[5].trimEnd().endsWith("6 },")).toBe(true);
 
     const plain = memberRows(
       `TYPE T : STRUCT S : STRING; END_STRUCT END_TYPE\n`,
@@ -225,7 +229,7 @@ END_STRUCT END_TYPE\n`,
     );
     // The real number, not the debug table's "0 means 254" convention: a block
     // sizing a buffer from CAP must not have to know the convention.
-    expect(plain[0].trimEnd().endsWith("254, nullptr },")).toBe(true);
+    expect(plain[0].trimEnd().endsWith("254 },")).toBe(true);
   });
 
   it("gives an enumeration TYPE_ENUM, the class CODESYS uses", () => {
@@ -236,8 +240,9 @@ END_STRUCT END_TYPE\n`,
       "T",
     );
     expect(rows[0]).toContain("strucpp::TYPE_ENUM");
-    // ENUMDESC: the names, null unless declared {attribute 'to_string'}.
-    expect(rows[0]).toContain("strucpp::iec_enum_names<E>::desc()");
+    // NESTED: the enumeration's TypeDesc (its names), null unless declared
+    // {attribute 'to_string'}.
+    expect(rows[0]).toContain("strucpp::iec_enum_names<E>::type_desc()");
   });
 
   it("emits no table at all when a member defies description", () => {
@@ -393,9 +398,10 @@ describe("the argument's own name and type", () => {
     // call site would report one variable under two spellings depending on
     // which the pin happened to be wired with.
     const types = `TYPE Tags : STRUCT spPressureAlt : REAL; END_STRUCT END_TYPE\n`;
-    expect(
-      identityOf(types, "Plant : Tags;", "PLANT.SPPRESSUREALT"),
-    ).toEqual({ name: '"Plant.spPressureAlt"', typeName: '"REAL"' });
+    expect(identityOf(types, "Plant : Tags;", "PLANT.SPPRESSUREALT")).toEqual({
+      name: '"Plant.spPressureAlt"',
+      typeName: '"REAL"',
+    });
   });
 
   it("spells an array type the way an engineer would, not the synthetic name", () => {

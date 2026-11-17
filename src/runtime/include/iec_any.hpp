@@ -76,8 +76,10 @@ struct IEC_ANY {
      *  reader takes one field either way. */
     TYPE_CLASS ELEMCLASS = static_cast<TYPE_CLASS>(0);
     /** The argument's member layout when it has one: a STRUCT, or the element
-     *  type of an array of STRUCT. Null otherwise, where TYPECLASS and
-     *  ELEMCLASS already say everything. See iec_typedesc.hpp.
+     *  type of an array of STRUCT; for an enumeration declared
+     *  {attribute 'to_string'} (or an array of one) its TypeDesc, whose
+     *  ENUMDESC holds the names (see `any_enum_desc`). Null otherwise, where
+     *  TYPECLASS and ELEMCLASS already say everything. See iec_typedesc.hpp.
      *
      *  Appended, like DICOUNT, DISTRIDE and ELEMCLASS. The first three fields
      *  are CODESYS's layout and an imported POU reads them by position. */
@@ -95,10 +97,6 @@ struct IEC_ANY {
      *  classes but cannot name a user-defined type, and reports every array
      *  as TYPE_ARRAY. */
     const char* TYPENAME = nullptr;
-    /** The enumeration's member names when the argument (or, for an array,
-     *  its elements) is an enumeration declared {attribute 'to_string'}; null
-     *  otherwise. Look a value up with `enum_value_name`. Appended. */
-    const EnumDesc* ENUMDESC = nullptr;
 
     /** Elements, 1 for a scalar and 0 for an unwired pin. */
     int32_t count() const { return DICOUNT; }
@@ -116,6 +114,15 @@ struct IEC_ANY {
     template <typename T>
     T& element(int32_t index) const { return *reinterpret_cast<T*>(at(index)); }
 };
+
+/** The names of the enumeration an ANY argument holds (or, for an array, its
+ *  elements), or null unless it was declared {attribute 'to_string'}. Look a
+ *  value up with `enum_value_name`. */
+inline const EnumDesc* any_enum_desc(const IEC_ANY& any) noexcept {
+    return (any.ELEMCLASS == TYPE_CLASS::TYPE_ENUM && any.TYPEDESC != nullptr)
+               ? any.TYPEDESC->ENUMDESC
+               : nullptr;
+}
 
 /*
  * There is deliberately no `TYPE_CLASS`-from-C++-type trait here. It cannot be

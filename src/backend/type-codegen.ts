@@ -560,7 +560,10 @@ export class TypeCodeGenerator {
   /**
    * The member names of an enumeration declared {attribute 'to_string'}
    * (CODESYS, "Attribute: to_string"): TO_STRING gives a member's name, and
-   * an ANY descriptor or a struct member's descriptor points at the table.
+   * the enumeration gets a TypeDesc of its own (no members, its names in
+   * ENUMDESC) that an ANY argument's TYPEDESC and a struct member's NESTED
+   * point at. Nothing is added to an IEC_ANY or a MemberDesc, so code that
+   * does not use the names pays nothing per call.
    * Class-template statics, so the header may define them (C++14, no inline
    * variables) and they stay constant data; `iec_enum_names<E>` names them.
    */
@@ -576,6 +579,7 @@ export class TypeCodeGenerator {
     this.emit(`template <typename D> struct ${holder} {`);
     this.emit(`    static const EnumValueDesc VALUES[${count}];`);
     this.emit(`    static const EnumDesc DESC;`);
+    this.emit(`    static const TypeDesc TDESC;`);
     this.emit(`};`);
     this.emit(
       `template <typename D> const EnumValueDesc ${holder}<D>::VALUES[${count}] = {`,
@@ -590,7 +594,10 @@ export class TypeCodeGenerator {
       `template <typename D> const EnumDesc ${holder}<D>::DESC = { ${literal(declaredName ?? name)}, ${holder}<D>::VALUES, ${count} };`,
     );
     this.emit(
-      `template <> struct iec_enum_names<${name}> { static constexpr const EnumDesc* desc() noexcept { return &${holder}<void>::DESC; } };`,
+      `template <typename D> const TypeDesc ${holder}<D>::TDESC = { ${literal(declaredName ?? name)}, nullptr, static_cast<uint32_t>(sizeof(${name})), 0, &${holder}<D>::DESC };`,
+    );
+    this.emit(
+      `template <> struct iec_enum_names<${name}> { static constexpr const EnumDesc* desc() noexcept { return &${holder}<void>::DESC; } static constexpr const TypeDesc* type_desc() noexcept { return &${holder}<void>::TDESC; } };`,
     );
     this.emit("");
   }

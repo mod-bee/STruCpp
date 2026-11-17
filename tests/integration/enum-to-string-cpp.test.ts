@@ -43,8 +43,8 @@ FUNCTION F_Desc : DINT
   VAR_INPUT v : ANY; END_VAR
   {external
     const int16_t* raw = reinterpret_cast<const int16_t*>(V.PVALUE);
-    const char* n = strucpp::enum_value_name(V.ENUMDESC, static_cast<int64_t>(raw[0]));
-    F_DESC_result = (V.ENUMDESC == nullptr) ? -1 : (n != nullptr && std::strcmp(n, "LinkLost") == 0 ? 205 : (n != nullptr && std::strcmp(n, "Running") == 0 ? 2 : 0));
+    const char* n = strucpp::enum_value_name(strucpp::any_enum_desc(V), static_cast<int64_t>(raw[0]));
+    F_DESC_result = (strucpp::any_enum_desc(V) == nullptr) ? -1 : (n != nullptr && std::strcmp(n, "LinkLost") == 0 ? 205 : (n != nullptr && std::strcmp(n, "Running") == 0 ? 2 : 0));
   }
 END_FUNCTION
 
@@ -102,8 +102,13 @@ describeIfGpp("{attribute 'to_string'} on an enumeration", () => {
     fs.writeFileSync(
       path.join(tempDir, "main.cpp"),
       `#include "generated.hpp"
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+// The names cost nothing per call: an IEC_ANY ends at TYPENAME, as before.
+static_assert(sizeof(strucpp::IEC_ANY) ==
+                  offsetof(strucpp::IEC_ANY, TYPENAME) + sizeof(const char*),
+              "IEC_ANY grew");
 strucpp::Configuration_CONFIG0 g_config;
 static int fails = 0;
 static void eqs(const char* what, const char* got, const char* want) {
@@ -124,11 +129,11 @@ int main() {
   eq("ANY: named values", (long)p.D2, 205);
   eq("ANY: no names without the attribute", (long)p.D3, -1);
   const strucpp::TypeDesc& t = strucpp::S_REC__TYPEDESC;
-  eq("struct member: names", t.MEMBERS[0].ENUMDESC != nullptr, 1);
-  eq("array of enumerations: the elements' names", t.MEMBERS[1].ENUMDESC != nullptr, 1);
-  eq("struct member without the attribute: none", t.MEMBERS[2].ENUMDESC == nullptr, 1);
-  eqs("the type's declared name", t.MEMBERS[0].ENUMDESC->NAME, "E_State");
-  const char* unknown = strucpp::enum_value_name(t.MEMBERS[0].ENUMDESC, 42);
+  eq("struct member: names", strucpp::member_enum_desc(t.MEMBERS[0]) != nullptr, 1);
+  eq("array of enumerations: the elements' names", strucpp::member_enum_desc(t.MEMBERS[1]) != nullptr, 1);
+  eq("struct member without the attribute: none", strucpp::member_enum_desc(t.MEMBERS[2]) == nullptr, 1);
+  eqs("the type's declared name", strucpp::member_enum_desc(t.MEMBERS[0])->NAME, "E_State");
+  const char* unknown = strucpp::enum_value_name(strucpp::member_enum_desc(t.MEMBERS[0]), 42);
   eq("a value no member has", unknown == nullptr, 1);
   eqs("TO_STRING of a value no member has: the number",
       strucpp::iec_enum_to_string(static_cast<strucpp::E_ERR>(42)).c_str(), "42");
