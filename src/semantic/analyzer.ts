@@ -2332,7 +2332,10 @@ export class SemanticAnalyzer {
   ): FunctionBlockSymbol | undefined {
     const sym = scope.lookup(name);
     if (!sym || sym.kind !== "variable") return undefined;
-    return this.symbolTables.lookupFunctionBlock(sym.declaration.type.name);
+    // A method's or function's result variable has no declaration.
+    const typeName = sym.declaration?.type?.name;
+    if (typeName === undefined) return undefined;
+    return this.symbolTables.lookupFunctionBlock(typeName);
   }
 
   /**
