@@ -360,20 +360,6 @@ export class TypeChecker {
       depth++
     ) {
       if (cur.properties.some((p) => p.name.toUpperCase() === upper)) return;
-      // A member (a block instance called, `fb.inner(...)`), not a method.
-      if (
-        cur.varBlocks.some((b) =>
-          b.declarations.some((d) =>
-            d.names.some((n) => n.toUpperCase() === upper),
-          ),
-        )
-      ) {
-        return;
-      }
-      const sym = this.symbolTables.lookupFunctionBlock(cur.name);
-      if (sym !== undefined && libraryBlockMember(sym, upper) !== undefined) {
-        return;
-      }
       cur =
         cur.extends === undefined
           ? undefined

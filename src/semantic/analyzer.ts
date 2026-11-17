@@ -3572,6 +3572,40 @@ export class SemanticAnalyzer {
    * - An interface is not an in-out variable (6.6.6.2 b).
    */
   private validateInterfaceRules(ast: CompilationUnit): void {
+    // A property prototype of an interface (CODESYS "Object: Property"): no
+    // access specifier (an interface's members are PUBLIC, 6.6.6.4.2), GET,
+    // SET or both, and no body.
+    for (const iface of ast.interfaces) {
+      for (const prop of iface.properties) {
+        const name = prop.name.toUpperCase();
+        const owner = iface.name.toUpperCase();
+        const at = prop.sourceSpan;
+        if (prop.visibility !== "PUBLIC") {
+          this.addError(
+            `PROPERTY '${name}' of INTERFACE '${owner}' cannot have an access modifier.`,
+            at.startLine,
+            at.startCol,
+            at.file,
+          );
+        }
+        if (prop.getter === undefined && prop.setter === undefined) {
+          this.addError(
+            `PROPERTY '${name}' of INTERFACE '${owner}' must declare GET, SET or both.`,
+            at.startLine,
+            at.startCol,
+            at.file,
+          );
+        }
+        if ((prop.getter?.length ?? 0) > 0 || (prop.setter?.length ?? 0) > 0) {
+          this.addError(
+            `PROPERTY '${name}' of INTERFACE '${owner}' cannot have a body.`,
+            at.startLine,
+            at.startCol,
+            at.file,
+          );
+        }
+      }
+    }
     // The unit's own interfaces and those of the libraries it is compiled
     // against: a block may IMPLEMENT or EXTEND a library interface (6.6.6).
     const ifaces = new Map(

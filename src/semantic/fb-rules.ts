@@ -152,8 +152,13 @@ class Family {
 function addNames(map: Map<string, string>, blocks: readonly VarBlock[]): void {
   for (const block of blocks) {
     for (const decl of block.declarations) {
-      for (const n of decl.names)
-        map.set(n.toUpperCase(), decl.type.name.toUpperCase());
+      // An array is reached through its elements (`arr[1].M()`).
+      const type =
+        decl.type.arrayDimensions !== undefined &&
+        decl.type.elementTypeName !== undefined
+          ? decl.type.elementTypeName
+          : decl.type.name;
+      for (const n of decl.names) map.set(n.toUpperCase(), type.toUpperCase());
     }
   }
 }
@@ -687,6 +692,23 @@ function checkMemberAccess(
               const outside = upper !== "THIS" && upper !== "SUPER";
               if (hit)
                 reportVar(hit, `${v.name}.${field}`, v.sourceSpan, outside);
+              // Further down the path (`o.mm.sub`): each member of a block is
+              // reached from outside that block.
+              let at = hit;
+              let path = `${v.name}.${field}`;
+              for (const next of v.fieldAccess.slice(1)) {
+                if (at === undefined) break;
+                const t = at.decl.type;
+                const owner = family.get(
+                  t.arrayDimensions !== undefined && t.elementTypeName
+                    ? t.elementTypeName
+                    : t.name,
+                );
+                if (owner === undefined) break;
+                at = family.findVar(owner, next);
+                path = `${path}.${next}`;
+                if (at) reportVar(at, path, v.sourceSpan, true);
+              }
               // A property's access specifier (6.6.5.9 applies to it as to
               // a method): read and written through its accessors.
               const found = hit
@@ -741,7 +763,8 @@ function checkMemberAccess(
           const mc = n as MethodCallExpression;
           if (
             mc.object.kind === "VariableExpression" &&
-            mc.object.fieldAccess.length === 0
+            mc.object.fieldAccess.length === 0 &&
+            !mc.object.isDereference
           ) {
             objName = mc.object.name;
             methodName = mc.methodName;
