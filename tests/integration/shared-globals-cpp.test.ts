@@ -564,6 +564,99 @@ int main() {
     expectNoNestedLocks(result.cppCode);
   }, 120000);
 
+  it("binds a REFERENCE TO input, REF= and ADR() to a shared global's own storage", () => {
+    // IEC 61131-3 Ed.3 6.4.4.10.3 (REFERENCE TO, REF=) and CODESYS "Data Type: REFERENCE TO": an input
+    // REFERENCE TO wired to x binds to x itself, and stays bound across calls; ADR / REF= address x.
+    // A reference is not locked (CODESYS). Found 2026-11-18: a block instance shared by two tasks
+    // called with refData := IO.mapIn stored THROUGH its unbound reference (SIGSEGV on the first
+    // scan; ref_store), from a copy of IO.mapIn read under IO's lock; REF= and ADR() of a shared
+    // global bound to / took the address of such a copy.
+    const source = `
+      TYPE ST_D : STRUCT n : DINT; END_STRUCT; END_TYPE
+      TYPE ST_IO : STRUCT mapIn : ST_D; k : INT; arr : ARRAY[1..3] OF ST_D; END_STRUCT; END_TYPE
+      FUNCTION_BLOCK FB_W
+        VAR_INPUT refData : REFERENCE TO ST_D; nIn : INT; END_VAR
+        VAR_OUTPUT stOut : ST_D; END_VAR
+        METHOD PUBLIC Bump : BOOL
+          VAR_INPUT r : REFERENCE TO ST_D; END_VAR
+          r.n := r.n + 1;
+          Bump := TRUE;
+        END_METHOD
+        refData.n := refData.n + 1;
+      END_FUNCTION_BLOCK
+      FUNCTION F_Bump : BOOL
+        VAR_INPUT r : REFERENCE TO ST_D; END_VAR
+        r.n := r.n + 1;
+        F_Bump := TRUE;
+      END_FUNCTION
+      FUNCTION_BLOCK FB_IO
+        VAR_IN_OUT d : ST_D; END_VAR
+        d.n := d.n + 1;
+      END_FUNCTION_BLOCK
+      PROGRAM Worker
+        VAR_EXTERNAL IO : ST_IO; gW : FB_W; gW2 : FB_W; GI : INT; G : ST_D; G2 : ST_D; G3 : ST_D; G4 : ST_D; G5 : ST_D; G6 : ST_D; G7 : ST_D; END_VAR
+        VAR
+          first : BOOL := TRUE;
+          w : FB_W; w2 : FB_W; lio : FB_IO;
+          r : REFERENCE TO ST_D; p : POINTER TO ST_D; ok : BOOL;
+        END_VAR
+        IF first THEN
+          gW(nIn := IO.k, refData := IO.mapIn);   // a shared instance, bound to a member of another shared global
+          first := FALSE;
+        ELSE
+          gW(nIn := IO.k);                       // still bound
+        END_IF;
+        w(refData := G);
+        w2(refData := gW.stOut);                  // a member of a shared block instance
+        r REF= G2;
+        r.n := r.n + 1;
+        p := ADR(G3);
+        p^.n := p^.n + 1;
+        lio(d := G4);
+        gW2(refData := IO.arr[GI]);              // an index reading another shared global
+        ok := gW.Bump(r := G6);                  // a method of a shared instance
+        ok := F_Bump(r := G7);                   // a function
+        G5.n := G5.n + gW.nIn;
+      END_PROGRAM
+      CONFIGURATION Cfg
+        VAR_GLOBAL IO : ST_IO := (k := 1); gW : FB_W; gW2 : FB_W; GI : INT := 2; G : ST_D; G2 : ST_D; G3 : ST_D; G4 : ST_D; G5 : ST_D; G6 : ST_D; G7 : ST_D; END_VAR
+        RESOURCE Res ON PLC
+          TASK t1(INTERVAL := T#10ms, PRIORITY := 0);
+          TASK t2(INTERVAL := T#10ms, PRIORITY := 1);
+          PROGRAM instA WITH t1 : Worker;
+          PROGRAM instB WITH t2 : Worker;
+        END_RESOURCE
+      END_CONFIGURATION
+    `;
+    const result = buildAndRun(
+      "reference-input-binding",
+      source,
+      `int main() {
+  strucpp::Configuration_CFG cfg;
+  const int N = 1000;
+  // One thread: a reference is not locked, so the counts are exact only without a race.
+  for (int i = 0; i < N; ++i) { cfg.INSTA.run(); cfg.INSTB.run(); }
+  CHECK(strucpp::IO.value.MAPIN.N == 2 * N);
+  CHECK(strucpp::G.value.N == 2 * N);
+  CHECK(strucpp::GW.value.STOUT.N == 2 * N);
+  CHECK(strucpp::G2.value.N == 2 * N);
+  CHECK(strucpp::G3.value.N == 2 * N);
+  CHECK(strucpp::G4.value.N == 2 * N);
+  CHECK(strucpp::G5.value.N == 2 * N);
+  CHECK(strucpp::IO.value.ARR[2].N == 2 * N);
+  CHECK(strucpp::G6.value.N == 2 * N);
+  CHECK(strucpp::G7.value.N == 2 * N);
+  return fails ? 1 : 0;
+}`,
+    );
+    // Bound to the global's own storage, inside the shared instance's lock: no copy.
+    expect(result.cppCode).toMatch(/__fbi\.REFDATA\.bind\(\*&IO->value\.MAPIN\);/);
+    expect(result.cppCode).not.toMatch(/__fbi\.REFDATA = /);
+    expect(result.cppCode).toContain("R.bind(G2->value);");
+    expect(result.cppCode).toContain("P = &(G3->value);");
+    expectNoNestedLocks(result.cppCode);
+  }, 120000);
+
   it("loses no other task's write when a block that takes locks works on a global in place", () => {
     // IEC 61131-3 Ed.3 6.8.2 g) and Table 13: a VAR_IN_OUT is the caller's
     // own variable. A block that takes another global's lock (VAR_EXTERNAL,

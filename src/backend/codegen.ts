@@ -6038,9 +6038,12 @@ export class CodeGenerator {
     const target = this.generateExpression(stmt.target);
     // `r REF= other` where `other` is itself a REFERENCE TO: bind to what it
     // refers to.
+    // Any other source is bound in place: a shared global's own storage, not
+    // a copy read under its lock (IEC 61131-3 Ed.3 6.4.4.10.3; a reference
+    // is not locked, as in CODESYS).
     const source = this.isReferenceToVariable(stmt.source)
       ? `${this.generateExpression(stmt.source)}.target()`
-      : this.generateExpression(stmt.source);
+      : this.generateAliasLvalue(stmt.source);
     const targetKind =
       stmt.target.kind === "VariableExpression"
         ? this.refAssignTargetKind(stmt.target)
@@ -6536,6 +6539,28 @@ export class CodeGenerator {
    */
   private generateAddressOf(expr: Expression): string {
     return `&${this.generateAliasLvalue(expr)}`;
+  }
+
+  /**
+   * Whether addressing `expr` takes a lock: a shared global is addressed in
+   * place (no lock), so only an index reading another one does; anything
+   * else when it reads a shared global at all.
+   */
+  private addressTakesLock(expr: Expression): boolean {
+    if (
+      expr.kind === "VariableExpression" &&
+      !expr.isDereference &&
+      this.globalRefOf(expr.name) !== undefined
+    ) {
+      const indices = [
+        ...expr.subscripts,
+        ...(expr.accessChain ?? []).flatMap((step) =>
+          step.kind === "subscript" ? step.indices : [],
+        ),
+      ];
+      return indices.some((i) => this.mayTakeLock(i));
+    }
+    return this.mayTakeLock(expr);
   }
 
   private generateVariableExpression(expr: VariableExpression): string {
@@ -7880,8 +7905,10 @@ export class CodeGenerator {
 
     // 0. ADR(x) → &(x) (CODESYS address-of operator)
     if (nameUpper === "ADR") {
+      // The operand itself: a shared global's own storage, not a copy read
+      // under its lock (the address of that copy did not compile).
       const args = expr.arguments.map((arg) =>
-        this.generateExpression(arg.value),
+        this.generateAliasLvalue(arg.value),
       );
       return `&(${args[0] ?? ""})`;
     }
@@ -10131,6 +10158,22 @@ export class CodeGenerator {
         copiedBack.push({ tmp, target: v });
         settled.add(arg);
         if (arg.name === undefined) positionalIndex++;
+      } else if (paramName && this.isReferenceToMember(fbTypeName, paramName)) {
+        // A REFERENCE TO input is bound to the argument's own storage, as a
+        // call outside a lock binds it (IEC 61131-3 Ed.3 6.4.4.10.3, CODESYS
+        // "Data Type: REFERENCE TO"), and stays bound. It was given a copy
+        // read under the argument's lock and stored through while unbound.
+        // An index that takes a lock is addressed before this lock.
+        const member = this.fbParamMemberName(paramName, fbTypeName);
+        let bindTarget = this.referenceBindTarget(v);
+        if (this.addressTakesLock(v)) {
+          const ptr = `__gfr${this.tempVarCounter++}`;
+          this.emit(`${indent}auto* ${ptr} = &(${bindTarget});`);
+          bindTarget = `*${ptr}`;
+        }
+        lockedBind.push(`__fbi.${member}.bind(${bindTarget});`);
+        settled.add(arg);
+        if (!arg.name) positionalIndex++;
       } else if (paramName && !this.isOutputParam(fbTypeName, paramName)) {
         // An input reading the locked global reads it inside the lock, so the
         // call sees one consistent state of it. A global instance to an
