@@ -9,7 +9,6 @@
 
 import type { CstNode, IToken } from "chevrotain";
 import type {
-  ASTNode,
   CompilationUnit,
   ProgramDeclaration,
   FunctionDeclaration,
@@ -69,7 +68,7 @@ import type {
   BinaryOperator,
   UnaryOperator,
 } from "./ast.js";
-import { declaredImageOf, pragmaAttributesOf } from "./lexer.js";
+import { declaredImageOf } from "./lexer.js";
 
 import { applyTypeDefaults } from "./type-defaults.js";
 import type { SourceSpan } from "../types.js";
@@ -102,23 +101,6 @@ function tokenToSourceSpan(token: IToken): SourceSpan {
 /**
  * Create a source span from a CST node.
  */
-/** The token a CST node starts with (the lowest offset beneath it). */
-function firstTokenOf(node: CstNode): IToken | undefined {
-  let best: IToken | undefined;
-  for (const childArray of Object.values(node.children)) {
-    for (const child of childArray ?? []) {
-      const token = "image" in child ? child : firstTokenOf(child);
-      if (
-        token &&
-        (best === undefined || token.startOffset < best.startOffset)
-      ) {
-        best = token;
-      }
-    }
-  }
-  return best;
-}
-
 function nodeToSourceSpan(node: CstNode): SourceSpan {
   const children = node.children as CstChildren;
   let startLine = Number.MAX_SAFE_INTEGER;
@@ -559,7 +541,7 @@ export class ASTBuilder {
    * Build a ProgramDeclaration from a CST node.
    */
   buildProgramDeclaration(node: CstNode): ProgramDeclaration {
-    return this.withAttributes(node, this.buildProgramDeclarationBody(node));
+    return this.buildProgramDeclarationBody(node);
   }
 
   private buildProgramDeclarationBody(node: CstNode): ProgramDeclaration {
@@ -601,7 +583,7 @@ export class ASTBuilder {
    * Build a FunctionDeclaration from a CST node.
    */
   buildFunctionDeclaration(node: CstNode): FunctionDeclaration {
-    return this.withAttributes(node, this.buildFunctionDeclarationBody(node));
+    return this.buildFunctionDeclarationBody(node);
   }
 
   private buildFunctionDeclarationBody(node: CstNode): FunctionDeclaration {
@@ -665,10 +647,7 @@ export class ASTBuilder {
    * Build a FunctionBlockDeclaration from a CST node.
    */
   buildFunctionBlockDeclaration(node: CstNode): FunctionBlockDeclaration {
-    return this.withAttributes(
-      node,
-      this.buildFunctionBlockDeclarationBody(node),
-    );
+    return this.buildFunctionBlockDeclarationBody(node);
   }
 
   private buildFunctionBlockDeclarationBody(
@@ -759,7 +738,7 @@ export class ASTBuilder {
    * Build an InterfaceDeclaration from a CST node.
    */
   buildInterfaceDeclaration(node: CstNode): InterfaceDeclaration {
-    return this.withAttributes(node, this.buildInterfaceDeclarationBody(node));
+    return this.buildInterfaceDeclarationBody(node);
   }
 
   private buildInterfaceDeclarationBody(node: CstNode): InterfaceDeclaration {
@@ -811,7 +790,7 @@ export class ASTBuilder {
       declaredName,
       methods,
       ...(extendsList !== undefined ? { extends: extendsList } : {}),
-      ...(properties.length > 0 ? { properties } : {}),
+      properties,
     };
   }
 
@@ -820,10 +799,7 @@ export class ASTBuilder {
    * Interface methods are implicitly public and abstract.
    */
   buildInterfaceMethodDeclaration(node: CstNode): MethodDeclaration {
-    return this.withAttributes(
-      node,
-      this.buildInterfaceMethodDeclarationBody(node),
-    );
+    return this.buildInterfaceMethodDeclarationBody(node);
   }
 
   private buildInterfaceMethodDeclarationBody(
@@ -866,7 +842,7 @@ export class ASTBuilder {
    * Build a MethodDeclaration from a methodDeclaration CST node.
    */
   buildMethodDeclaration(node: CstNode): MethodDeclaration {
-    return this.withAttributes(node, this.buildMethodDeclarationBody(node));
+    return this.buildMethodDeclarationBody(node);
   }
 
   private buildMethodDeclarationBody(node: CstNode): MethodDeclaration {
@@ -930,7 +906,7 @@ export class ASTBuilder {
    * Build a VarBlock from a methodVarBlock CST node (supports VAR_INST).
    */
   buildMethodVarBlock(node: CstNode): VarBlock {
-    return this.withAttributes(node, this.buildMethodVarBlockBody(node));
+    return this.buildMethodVarBlockBody(node);
   }
 
   private buildMethodVarBlockBody(node: CstNode): VarBlock {
@@ -971,7 +947,7 @@ export class ASTBuilder {
    * Build a PropertyDeclaration from a propertyDeclaration CST node.
    */
   buildPropertyDeclaration(node: CstNode): PropertyDeclaration {
-    return this.withAttributes(node, this.buildPropertyDeclarationBody(node));
+    return this.buildPropertyDeclarationBody(node);
   }
 
   private buildPropertyDeclarationBody(node: CstNode): PropertyDeclaration {
@@ -1035,36 +1011,17 @@ export class ASTBuilder {
     const types: TypeDeclaration[] = [];
 
     for (const singleTypeNode of getAllNodes(children.singleTypeDeclaration)) {
-      // An attribute above TYPE decorates the types the block declares.
-      types.push(
-        this.withAttributes(
-          node,
-          this.buildSingleTypeDeclaration(singleTypeNode),
-        ),
-      );
+      types.push(this.buildSingleTypeDeclaration(singleTypeNode));
     }
 
     return types;
   }
 
   /**
-   * Attach the attribute pragmas written right before `cst` (CODESYS
-   * "Attribute Pragmas"; see `AttributePragma` in lexer.ts) to `result`.
-   */
-  private withAttributes<T extends ASTNode>(cst: CstNode, result: T): T {
-    const first = firstTokenOf(cst);
-    const attrs = first ? pragmaAttributesOf(first) : [];
-    if (attrs.length > 0) {
-      result.attributes = [...(result.attributes ?? []), ...attrs];
-    }
-    return result;
-  }
-
-  /**
    * Build a single TypeDeclaration from a singleTypeDeclaration CST node.
    */
   buildSingleTypeDeclaration(node: CstNode): TypeDeclaration {
-    return this.withAttributes(node, this.buildSingleTypeDeclarationBody(node));
+    return this.buildSingleTypeDeclarationBody(node);
   }
 
   private buildSingleTypeDeclarationBody(node: CstNode): TypeDeclaration {
@@ -1596,7 +1553,7 @@ export class ASTBuilder {
    * Build a VarBlock from a CST node.
    */
   buildVarBlock(node: CstNode): VarBlock {
-    return this.withAttributes(node, this.buildVarBlockBody(node));
+    return this.buildVarBlockBody(node);
   }
 
   private buildVarBlockBody(node: CstNode): VarBlock {
@@ -1718,7 +1675,7 @@ export class ASTBuilder {
    * Build a VarDeclaration from a CST node.
    */
   buildVarDeclaration(node: CstNode): VarDeclaration {
-    return this.withAttributes(node, this.buildVarDeclarationBody(node));
+    return this.buildVarDeclarationBody(node);
   }
 
   private buildVarDeclarationBody(node: CstNode): VarDeclaration {

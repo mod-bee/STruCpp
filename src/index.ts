@@ -16,6 +16,8 @@ import {
 import { parse as parseSource } from "./frontend/parser.js";
 import { suggestionForParseError } from "./frontend/parser-error-message-provider.js";
 import { buildAST } from "./frontend/ast-builder.js";
+import type { IToken } from "chevrotain";
+import { attachAttributes } from "./frontend/attributes.js";
 import { transpileILSource } from "./il/il-transpiler.js";
 import { buildProjectModel } from "./project-model.js";
 import { SymbolTables } from "./semantic/symbol-table.js";
@@ -382,6 +384,41 @@ function collectUsedSymbols(
 // Shared pipeline
 // ---------------------------------------------------------------------------
 
+/** Names a unit's namespace cannot take: C++ keywords and alternative tokens, and `std`. */
+const RESERVED_NAMESPACES = new Set(
+  (
+    "alignas alignof and and_eq asm auto bitand bitor bool break case catch char char8_t char16_t char32_t class " +
+    "compl concept const consteval constexpr constinit const_cast continue co_await co_return co_yield decltype " +
+    "default delete do double dynamic_cast else enum explicit export extern false float for friend goto if inline " +
+    "int long mutable namespace new noexcept not not_eq nullptr operator or or_eq private protected public register " +
+    "reinterpret_cast requires return short signed sizeof static static_assert static_cast struct switch template " +
+    "this thread_local throw true try typedef typeid typename union unsigned using virtual void volatile wchar_t " +
+    "while xor xor_eq std"
+  ).split(" "),
+);
+
+/** A warning for each attribute pragma that is not `{attribute 'name' [:= 'value']}`, so a typo is not silent. */
+function warnUnreadablePragmas(
+  pragmas: readonly IToken[],
+  source: string,
+  file: string,
+  warnings: CompileError[],
+): void {
+  for (const p of pragmas) {
+    const text = source.slice(
+      p.startOffset,
+      (p.endOffset ?? p.startOffset) + 1,
+    );
+    warnings.push({
+      message: `Attribute pragma ${text.replace(/\s+/g, " ")} is ignored: write it as {attribute 'name'} or {attribute 'name' := 'value'}.`,
+      line: p.startLine ?? 0,
+      column: p.startColumn ?? 0,
+      severity: "warning",
+      file,
+    });
+  }
+}
+
 interface PipelineResult {
   ast: CompilationUnit | undefined;
   projectModel: import("./project-model.js").ProjectModel | undefined;
@@ -518,6 +555,12 @@ function runPipeline(
       mergedOptions.fileName ?? "main.st",
       globalConstants,
     );
+    warnUnreadablePragmas(
+      attachAttributes(primaryAst, parseResult.pragmas, parseResult.tokens),
+      effectiveSource,
+      mergedOptions.fileName ?? "main.st",
+      warnings,
+    );
     const units: CompilationUnit[] = [primaryAst];
 
     // Parse additional source files. Each gets the same Phase 0
@@ -574,13 +617,22 @@ function runPipeline(
         }
         if (addlParseResult.cst) {
           try {
-            units.push(
-              buildAST(
-                addlParseResult.cst,
-                addlSource.fileName,
-                globalConstants,
-              ),
+            const addlAst = buildAST(
+              addlParseResult.cst,
+              addlSource.fileName,
+              globalConstants,
             );
+            warnUnreadablePragmas(
+              attachAttributes(
+                addlAst,
+                addlParseResult.pragmas,
+                addlParseResult.tokens,
+              ),
+              effectiveAddlSource,
+              addlSource.fileName,
+              warnings,
+            );
+            units.push(addlAst);
           } catch (e) {
             errors.push({
               message: `AST build failed for ${addlSource.fileName}: ${e instanceof Error ? e.message : String(e)}`,
@@ -675,6 +727,19 @@ function runPipeline(
   try {
     const projectModelResult = buildProjectModel(ast);
     projectModel = projectModelResult.model;
+    const ns = mergedOptions.namespace;
+    if (ns !== undefined) {
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(ns) && !RESERVED_NAMESPACES.has(ns)) {
+        projectModel.config = { name: ns, namespace: ns, libraries: [] };
+      } else {
+        errors.push({
+          message: `Namespace '${ns}' is not a C++ identifier, or is reserved (a C++ keyword or 'std').`,
+          line: 0,
+          column: 0,
+          severity: "error",
+        });
+      }
+    }
     for (const err of projectModelResult.errors) {
       errors.push({
         message: err.message,
@@ -935,9 +1000,26 @@ export function compile(
   }
 
   // Phase 6: Generate C++ code
-  // Collect library headers for #include directives
+  // Function-level tree-shake: figure out which library chunks the
+  // user's AST actually reaches (transitively through chunk dep
+  // edges), then hand the reachable subset of each archive to the
+  // codegen for emission. Test builds bypass the shake — the test
+  // harness may reference symbols not present in the source AST.
+  const isTestBuild = pipeline.mergedOptions.isTestBuild ?? false;
+  const reachableByArchive = collectUsedSymbols(
+    pipeline.ast,
+    pipeline.allArchives,
+    isTestBuild,
+  );
+
+  // Collect library headers for #include directives: those of a library whose code the unit uses, and those of a
+  // library without chunks, whose code is in the headers themselves.
   const libraryHeaders: string[] = [];
   for (const archive of pipeline.allArchives) {
+    const used =
+      (archive.chunks ?? []).length === 0 ||
+      (reachableByArchive.get(archive.manifest.name)?.size ?? 0) > 0;
+    if (!used) continue;
     for (const header of archive.manifest.headers) {
       if (!libraryHeaders.includes(header)) {
         libraryHeaders.push(header);
@@ -958,6 +1040,9 @@ export function compile(
     pouIncludes: pipeline.mergedOptions.pouIncludes ?? [],
     isTestBuild: pipeline.mergedOptions.isTestBuild ?? false,
     globalConstants: pipeline.mergedOptions.globalConstants ?? {},
+    ...(pipeline.mergedOptions.separateLibraryFiles === true
+      ? { separateLibraryFiles: true }
+      : {}),
     ...(pipeline.mergedOptions.emitChunkMarkers
       ? { emitChunkMarkers: true }
       : {}),
@@ -968,18 +1053,6 @@ export function compile(
 
   // Register all library metadata (FB types, field mappings, enum/struct types)
   codegen.registerLibraryArchives(pipeline.allArchives);
-
-  // Function-level tree-shake: figure out which library chunks the
-  // user's AST actually reaches (transitively through chunk dep
-  // edges), then hand the reachable subset of each archive to the
-  // codegen for emission. Test builds bypass the shake — the test
-  // harness may reference symbols not present in the source AST.
-  const isTestBuild = pipeline.mergedOptions.isTestBuild ?? false;
-  const reachableByArchive = collectUsedSymbols(
-    pipeline.ast,
-    pipeline.allArchives,
-    isTestBuild,
-  );
 
   for (const archive of pipeline.allArchives) {
     const reachable = reachableByArchive.get(archive.manifest.name);
@@ -1082,6 +1155,9 @@ export function compile(
     cppFiles: codeResult.cppFiles,
     cppCode: codeResult.cppCode,
     headerCode: codeResult.headerCode,
+    ...(codeResult.libraryHeader !== undefined
+      ? { libraryHeader: codeResult.libraryHeader }
+      : {}),
     lineMap: codeResult.lineMap,
     headerLineMap: codeResult.headerLineMap,
     errors: pipeline.errors,
@@ -1126,10 +1202,18 @@ export function analyze(
  * Parse ST source code and return the AST without code generation.
  * Useful for syntax checking and IDE integration.
  *
+ * With `recover`, source with syntax errors still yields the AST the parser recovered, together with the errors, so
+ * an editor can keep working on the declarations around the code being typed. Without it, any syntax error means no
+ * AST.
+ *
  * @param source - The ST source code to parse
- * @returns The parsed AST or parse errors
+ * @param options - `recover`: return a partial AST alongside syntax errors
+ * @returns The parsed AST and/or the errors
  */
-export function parse(source: string): {
+export function parse(
+  source: string,
+  options: { recover?: boolean } = {},
+): {
   ast?: CompilationUnit;
   errors: CompileError[];
 } {
@@ -1151,7 +1235,7 @@ export function parse(source: string): {
         severity: "error",
       });
     }
-    return { errors };
+    if (options.recover !== true) return { errors };
   }
 
   // Build AST from CST
@@ -1166,6 +1250,7 @@ export function parse(source: string): {
   }
   try {
     const ast = buildAST(parseResult.cst);
+    attachAttributes(ast, parseResult.pragmas, parseResult.tokens);
     return { ast, errors };
   } catch (e) {
     errors.push({

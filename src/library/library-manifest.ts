@@ -108,11 +108,10 @@ export interface LibraryVarType {
    *
    * Emitted only when the library's own codegen mangled it — a member whose
    * name matches its own user-defined type's name, or one colliding with a
-   * method of an interface the block implements (see member-mangling.ts).
-   * Both are decided against the DECLARING unit, so a consumer cannot always
-   * re-derive them; carrying the answer costs one optional string in the rare
-   * case and nothing in the common one. Across the five bundled archives —
-   * 224 function blocks, 7,639 leaves — it is currently emitted zero times.
+   * method of the block's class hierarchy (see member-mangling.ts). Both are
+   * decided against the DECLARING unit, so a consumer cannot always re-derive
+   * them; carrying the answer costs one optional string in the rare case and
+   * nothing in the common one.
    */
   cppName?: string;
   /** The declaring block was `VAR CONSTANT`: read-only in every instance. */
@@ -264,6 +263,8 @@ export interface LibraryFBEntry {
   /** The block or a base declares FB_Exit: its instances are built in place. */
   fbExit?: true;
 
+  /** CODESYS attribute pragmas written before the declaration. */
+  attributes?: LibraryAttribute[];
   /** Input variables */
   inputs: LibraryVarType[];
   /** Output variables */
@@ -320,6 +321,12 @@ export interface LibraryFBEntry {
  *  so a consumer lays it out as the library declared it. */
 export type LibraryStructField = LibraryVarType;
 
+/** A CODESYS attribute pragma, `{attribute 'name' [:= 'value']}`, as written. */
+export interface LibraryAttribute {
+  name: string;
+  value?: string;
+}
+
 export interface LibraryTypeEntry {
   /** Type name */
   name: string;
@@ -366,7 +373,7 @@ export interface LibraryTypeEntry {
    * `qualified_only` and `strict` on an enumeration, which a consumer
    * enforces as the library does. Absent when there are none.
    */
-  attributes?: Array<{ name: string; value?: string }>;
+  attributes?: LibraryAttribute[];
   /**
    * For `kind: "struct"`: the structure it EXTENDS (CODESYS "Data Structure:
    * STRUCT"). `fields` already lists the inherited members first.
@@ -392,12 +399,16 @@ export interface LibraryGlobalEntry {
    *  a consumer matches, links and generates code with `name`. Optional: an
    *  older archive, or an all-caps declaration, has only `name`. */
   declaredName?: string;
+  /** CODESYS attribute pragmas written before the declaration. */
+  attributes?: LibraryAttribute[];
   /** Declared type name (elementary or a library type, e.g. CONSTANTS_MATH). */
   type: string;
   /** True for `VAR_GLOBAL CONSTANT` entries. */
   constant?: boolean;
   /** Folder path within the library — see `LibraryFunctionEntry.category`. */
   category?: string;
+  /** Initial value as written in the declaration (ST text). */
+  initialValue?: string;
 }
 
 /**
@@ -596,3 +607,10 @@ export interface StlibCompileResult {
   /** Compilation errors */
   errors: Array<{ message: string; file?: string; line?: number }>;
 }
+
+/**
+ * An `#include "..."` file name: relative, no `.` or `..` segment, and only letters, digits, '.', '-', '_', '+' and
+ * '/' between segments, so no quote, backslash or line break can end the directive.
+ */
+export const HEADER_NAME_RE =
+  /^(?!\.{1,2}(?:\/|$))[\w.+-]+(?:\/(?!\.{1,2}(?:\/|$))[\w.+-]+)*$/;

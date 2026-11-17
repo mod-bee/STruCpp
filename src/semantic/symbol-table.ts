@@ -138,6 +138,8 @@ export interface FunctionBlockSymbol extends BaseSymbol {
    * this only answers "is it derived from", never where a member lives.
    */
   libraryExtends?: string;
+  /** The library archive exports this block's methods and properties, so its declaration lists all of them. */
+  membersExported?: true;
 }
 
 /**

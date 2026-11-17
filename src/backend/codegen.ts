@@ -341,6 +341,14 @@ export interface CodeGenOptions {
   /** Whether this is a test build (adds mock infrastructure to FB classes) */
   isTestBuild: boolean;
 
+  /**
+   * Emit linked libraries' code apart from the unit's own: their declarations
+   * in a libraries header that the unit's header includes, and each library's
+   * implementation in its own translation unit that includes only that header.
+   * A library's object then stays valid while the unit's own code changes.
+   */
+  separateLibraryFiles?: boolean;
+
   /** Global constants injected as constexpr into the header preamble (before namespace) */
   globalConstants: Record<string, number>;
 
@@ -481,6 +489,9 @@ export interface CodeGenResult {
   /** Generated C++ header code */
   headerCode: string;
 
+  /** The libraries header, written next to the unit's header, when `separateLibraryFiles` is set. */
+  libraryHeader?: { name: string; content: string };
+
   /** Line mapping from ST to C++ implementation lines */
   lineMap: Map<number, LineMapEntry>;
 
@@ -563,6 +574,10 @@ export class CodeGenerator {
   private currentLine = 1; // line counter within currently-active file
 
   private headerOutput: string[] = [];
+  /** The libraries header, when `separateLibraryFiles` moved the libraries out of the unit's header. */
+  private libraryHeader: { name: string; content: string } | undefined;
+  /** Library chunks held back to follow program blocks (see generateHeader). */
+  private deferredLibraryChunkNames = new Set<string>();
   private lineMap: Map<number, LineMapEntry> = new Map();
   private headerLineMap: Map<number, LineMapEntry> = new Map();
   private currentHeaderLine = 1;
@@ -1729,6 +1744,7 @@ export class CodeGenerator {
     this.outputFiles = new Map();
     this.output = [];
     this.headerOutput = [];
+    this.libraryHeader = undefined;
     this.lineMap = new Map();
     this.headerLineMap = new Map();
     this.currentLine = 1;
@@ -1872,10 +1888,190 @@ export class CodeGenerator {
       // public compile() wrapper exposes this verbatim.
       cppCode: cppFiles.map((f) => f.content).join(eol),
       headerCode: this.headerOutput.join(eol),
+      ...(this.libraryHeader !== undefined
+        ? { libraryHeader: this.libraryHeader }
+        : {}),
       lineMap: this.lineMap,
       headerLineMap: this.headerLineMap,
       warnings: [...this.libraryArchiveWarnings, ...this.codegenWarnings],
     };
+  }
+
+  /**
+   * The global constants as `constexpr` definitions before the namespace, so
+   * they work as template parameters. Guarded by a macro keyed on their names
+   * and values: two units built with the same constants (a PLC program and an
+   * HMI unit) can be included in one translation unit, while different values
+   * still conflict.
+   */
+  private globalConstantLines(): string[] {
+    const entries = Object.entries(this.options.globalConstants);
+    if (entries.length === 0) return [];
+    let hash = 0x811c9dc5;
+    for (const ch of entries.map(([n, v]) => `${n}=${v};`).join("")) {
+      hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+    }
+    const guard = `STRUCPP_GLOBAL_CONSTANTS_${hash.toString(16).toUpperCase()}`;
+    return [
+      "",
+      "// Global constants",
+      `#ifndef ${guard}`,
+      `#define ${guard}`,
+      ...entries.map(([name, value]) => `constexpr size_t ${name} = ${value};`),
+      "#endif",
+    ];
+  }
+
+  /**
+   * The library chunks that hold a program block by value (a library's C/C++
+   * block grafted into the program as a POU of its own), and those that need
+   * them: upper-case chunk names. They follow the program blocks they need
+   * (deferredLibraryChunks); the program blocks are recorded in deferredNeeds.
+   */
+  private computeDeferredLibraryChunks(ast: CompilationUnit): Set<string> {
+    this.deferredNeeds = new Set<string>();
+    const userFbNames = new Set(
+      ast.functionBlocks.map((fb) => fb.name.toUpperCase()),
+    );
+    const chunkNames = new Set<string>();
+    for (const { archive } of this.libraryEmissions) {
+      for (const chunk of archive.chunks ?? [])
+        chunkNames.add(chunk.name.toUpperCase());
+    }
+    const deferredNames = new Set<string>();
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const { archive, reachable } of this.libraryEmissions) {
+        for (const chunk of archive.chunks ?? []) {
+          const name = chunk.name.toUpperCase();
+          if (
+            !reachable.has(chunk.name) ||
+            deferredNames.has(name) ||
+            chunk.header.length === 0
+          )
+            continue;
+          let defer = false;
+          for (const dep of chunk.deps ?? []) {
+            const d = dep.name.toUpperCase();
+            if (userFbNames.has(d) && !chunkNames.has(d)) {
+              this.deferredNeeds.add(d);
+              defer = true;
+            } else if (deferredNames.has(d)) {
+              defer = true;
+            }
+          }
+          if (defer) {
+            deferredNames.add(name);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    return deferredNames;
+  }
+
+  /** Reachable chunks with a `part` slice that live in the libraries header and files (not held back). */
+  private separableLibraryChunks(
+    part: "header" | "cpp",
+  ): Array<{ archive: StlibArchive; chunks: LibraryChunk[] }> {
+    const out: Array<{ archive: StlibArchive; chunks: LibraryChunk[] }> = [];
+    for (const { archive, reachable } of this.libraryEmissions) {
+      const chunks = (archive.chunks ?? []).filter(
+        (c) =>
+          c[part].length > 0 &&
+          reachable.has(c.name) &&
+          !this.deferredLibraryChunkNames.has(c.name.toUpperCase()),
+      );
+      if (chunks.length > 0) out.push({ archive, chunks });
+    }
+    return out;
+  }
+
+  /** Name of the libraries header: the unit's header name with `_libraries` before the extension. */
+  private libraryHeaderName(): string {
+    const header = this.options.headerFileName;
+    const dot = header.lastIndexOf(".");
+    return dot > 0
+      ? `${header.slice(0, dot)}_libraries${header.slice(dot)}`
+      : `${header}_libraries`;
+  }
+
+  /**
+   * The libraries header (`separateLibraryFiles`): the unit header's includes,
+   * the global constants, then per library forward declarations of its blocks
+   * and each chunk's declarations, guarded against platform macros named like
+   * their identifiers as the unit's header is.
+   */
+  private buildLibraryHeader(
+    prelude: string[],
+    constants: string[],
+    ns: string,
+  ): { name: string; content: string } {
+    const body: string[] = [];
+    for (const { archive, chunks } of this.separableLibraryChunks("header")) {
+      body.push(`// Library: ${archive.manifest.name}`);
+      for (const chunk of chunks) {
+        if (chunk.kind === "functionBlock") body.push(`class ${chunk.name};`);
+      }
+      for (const chunk of chunks) body.push(...chunk.header.split("\n"));
+      body.push("");
+    }
+    const guarded = guardedIdentifiers(body);
+    return {
+      name: this.libraryHeaderName(),
+      content: [
+        ...prelude,
+        ...guarded.flatMap((m) => [
+          `#pragma push_macro("${m}")`,
+          `#undef ${m}`,
+        ]),
+        ...constants,
+        "",
+        `namespace ${ns} {`,
+        ...(ns !== "strucpp" ? ["using namespace strucpp;"] : []),
+        "",
+        ...body,
+        `}  // namespace ${ns}`,
+        "",
+        `#ifndef ${GENERATED_TU_MACRO}`,
+        ...guarded.map((m) => `#pragma pop_macro("${m}")`),
+        "#endif",
+        "",
+      ].join(this.options.lineEnding),
+    };
+  }
+
+  /** One translation unit per library (`separateLibraryFiles`): its chunks' code, including only the libraries header. */
+  private emitLibraryTranslationUnits(): void {
+    if (this.libraryHeader === undefined) return;
+    const ns = this.projectModel
+      ? getProjectNamespace(this.projectModel)
+      : "strucpp";
+    const fileNames = new Set<string>();
+    for (const { archive, chunks } of this.separableLibraryChunks("cpp")) {
+      const base = `lib_${archive.manifest.name.replace(/[^A-Za-z0-9_]/g, "_")}`;
+      let fileName = `${base}.cpp`;
+      for (let n = 2; fileNames.has(fileName); n++) {
+        fileName = `${base}_${n}.cpp`;
+      }
+      fileNames.add(fileName);
+      this.setOutputFile(fileName);
+      this.emit(
+        "// Generated by STruC++ - IEC 61131-3 Structured Text to C++ Compiler",
+      );
+      this.emit(`// Library: ${archive.manifest.name}`);
+      this.emit(`#define ${GENERATED_TU_MACRO}`);
+      this.emit(`#include "${this.libraryHeader.name}"`);
+      this.emit("");
+      this.emit(`namespace ${ns} {`);
+      this.emit("");
+      for (const chunk of chunks) {
+        for (const line of chunk.cpp.split("\n")) this.emit(line);
+      }
+      this.emit("");
+      this.emit(`}  // namespace ${ns}`);
+    }
   }
 
   /**
@@ -1973,16 +2169,25 @@ export class CodeGenerator {
     this.emitHeader(MACRO_GUARD_PLACEHOLDER);
 
     // Emit global constants (before namespace, so they work as template parameters)
-    const globalConsts = Object.entries(this.options.globalConstants);
-    if (globalConsts.length > 0) {
-      this.emitHeader("");
-      this.emitHeader("// Global constants");
-      for (const [name, value] of globalConsts) {
-        this.emitHeader(`constexpr size_t ${name} = ${value};`);
-      }
-    }
+    const constants = this.globalConstantLines();
+    for (const line of constants) this.emitHeader(line);
 
     this.emitHeader("");
+
+    // Library chunks held back until the program blocks they hold exist.
+    this.deferredLibraryChunkNames = this.computeDeferredLibraryChunks(ast);
+    if (
+      this.options.separateLibraryFiles === true &&
+      this.separableLibraryChunks("header").length > 0
+    ) {
+      this.libraryHeader = this.buildLibraryHeader(
+        this.headerOutput.slice(0, macroGuardAt),
+        constants,
+        ns,
+      );
+      this.emitHeader(`#include "${this.libraryHeader.name}"`);
+      this.emitHeader("");
+    }
 
     // Open namespace
     this.emitHeader(`namespace ${ns} {`);
@@ -2037,45 +2242,8 @@ export class CodeGenerator {
     // that block's class: it is held back (its forward decl stays here) and
     // emitted after the program blocks it needs (deferredLibraryChunks).
     this.deferredLibraryChunks = [];
-    this.deferredNeeds = new Set<string>();
-    const userFbNames = new Set(
-      ast.functionBlocks.map((fb) => fb.name.toUpperCase()),
-    );
-    const chunkNames = new Set<string>();
-    for (const { archive } of this.libraryEmissions) {
-      for (const chunk of archive.chunks ?? [])
-        chunkNames.add(chunk.name.toUpperCase());
-    }
-    const deferredNames = new Set<string>();
-    for (let changed = true; changed; ) {
-      changed = false;
-      for (const { archive, reachable } of this.libraryEmissions) {
-        for (const chunk of archive.chunks ?? []) {
-          const name = chunk.name.toUpperCase();
-          if (
-            !reachable.has(chunk.name) ||
-            deferredNames.has(name) ||
-            chunk.header.length === 0
-          )
-            continue;
-          let defer = false;
-          for (const dep of chunk.deps ?? []) {
-            const d = dep.name.toUpperCase();
-            if (userFbNames.has(d) && !chunkNames.has(d)) {
-              this.deferredNeeds.add(d);
-              defer = true;
-            } else if (deferredNames.has(d)) {
-              defer = true;
-            }
-          }
-          if (defer) {
-            deferredNames.add(name);
-            changed = true;
-          }
-        }
-      }
-    }
-
+    const deferredNames = this.deferredLibraryChunkNames;
+    const separate = this.libraryHeader !== undefined;
     for (const { archive, reachable } of this.libraryEmissions) {
       const reachableChunks: LibraryChunk[] = [];
       for (const chunk of archive.chunks ?? []) {
@@ -2084,28 +2252,35 @@ export class CodeGenerator {
       }
       if (reachableChunks.length === 0) continue;
 
-      this.emitHeader(`// Library: ${archive.manifest.name}`);
-
-      for (const chunk of reachableChunks) {
-        if (chunk.kind === "functionBlock") {
-          this.emitHeader(`class ${chunk.name};`);
+      // Separate library files: the libraries header holds every chunk but
+      // the held-back ones, which stay here.
+      if (!separate) {
+        this.emitHeader(`// Library: ${archive.manifest.name}`);
+        for (const chunk of reachableChunks) {
+          if (chunk.kind === "functionBlock") {
+            this.emitHeader(`class ${chunk.name};`);
+          }
         }
       }
 
       for (const chunk of reachableChunks) {
         if (deferredNames.has(chunk.name.toUpperCase())) {
+          if (separate && chunk.kind === "functionBlock") {
+            this.emitHeader(`class ${chunk.name};`);
+          }
           this.deferredLibraryChunks.push({
             library: archive.manifest.name,
             chunk,
           });
           continue;
         }
+        if (separate) continue;
         for (const line of chunk.header.split("\n")) {
           this.emitHeader(line);
         }
       }
 
-      this.emitHeader("");
+      if (!separate) this.emitHeader("");
     }
 
     // Generate forward declarations
@@ -2308,6 +2483,13 @@ export class CodeGenerator {
       const reachableChunks: LibraryChunk[] = [];
       for (const chunk of archive.chunks ?? []) {
         if (chunk.cpp.length === 0) continue;
+        // In its own file with separate library files, unless held back.
+        if (
+          this.libraryHeader !== undefined &&
+          !this.deferredLibraryChunkNames.has(chunk.name.toUpperCase())
+        ) {
+          continue;
+        }
         if (reachable.has(chunk.name)) reachableChunks.push(chunk);
       }
       if (reachableChunks.length === 0) continue;
@@ -2338,6 +2520,9 @@ export class CodeGenerator {
     }
 
     this.endTranslationUnit();
+
+    // Separate library files: each library's code in its own TU.
+    this.emitLibraryTranslationUnits();
 
     // 2. One TU per program.
     if (this.projectModel) {

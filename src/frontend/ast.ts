@@ -28,27 +28,21 @@ export interface ASTNode {
 
   /**
    * Attribute pragmas written right before the declaration
-   * (`{attribute 'qualified_only'}`, CODESYS "Attribute Pragmas"). Set on
-   * POUs, methods, properties, types, variable sections and declarations;
-   * absent when there are none.
+   * (`{attribute 'qualified_only'}`, CODESYS "Attribute Pragmas"), attached
+   * after parsing (frontend/attributes.ts). Absent when there are none.
    */
-  attributes?: PragmaAttribute[];
+  attributes?: Attribute[];
 }
 
-/** One `{attribute 'name'}` / `{attribute 'name' := 'value'}` pragma. */
-export interface PragmaAttribute {
-  /** Attribute name, lower case (`qualified_only`, `strict`, `hide`). */
-  name: string;
-  /** The value after `:=`, as written; absent for a bare attribute. */
-  value?: string;
-  line: number;
-  column: number;
-}
+/** An attribute pragma; see {@link Attribute}. */
+export type PragmaAttribute = Attribute;
 
 /** True when the node carries the attribute (case-insensitive name). */
 export function hasAttribute(node: ASTNode | undefined, name: string): boolean {
   const wanted = name.toLowerCase();
-  return node?.attributes?.some((a) => a.name === wanted) ?? false;
+  return (
+    node?.attributes?.some((a) => a.name.toLowerCase() === wanted) ?? false
+  );
 }
 
 /**
@@ -143,6 +137,14 @@ export interface FunctionBlockType extends IECType {
 // =============================================================================
 
 /**
+ * A CODESYS attribute pragma, `{attribute 'name'}` or `{attribute 'name' := 'value'}`, as written.
+ */
+export interface Attribute {
+  name: string;
+  value?: string;
+}
+
+/**
  * Root node representing a complete compilation unit.
  */
 export interface CompilationUnit extends ASTNode {
@@ -177,6 +179,8 @@ export interface CompilationUnit extends ASTNode {
  */
 export interface ProgramDeclaration extends ASTNode {
   kind: "ProgramDeclaration";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   name: string;
   /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
   declaredName?: string;
@@ -189,6 +193,8 @@ export interface ProgramDeclaration extends ASTNode {
  */
 export interface FunctionDeclaration extends ASTNode {
   kind: "FunctionDeclaration";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   name: string;
   /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
   declaredName?: string;
@@ -202,6 +208,8 @@ export interface FunctionDeclaration extends ASTNode {
  */
 export interface FunctionBlockDeclaration extends ASTNode {
   kind: "FunctionBlockDeclaration";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   name: string;
   /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
   declaredName?: string;
@@ -236,6 +244,8 @@ export type Visibility = "PUBLIC" | "PRIVATE" | "PROTECTED" | "INTERNAL";
  */
 export interface MethodDeclaration extends ASTNode {
   kind: "MethodDeclaration";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   name: string;
   /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
   declaredName?: string;
@@ -253,6 +263,8 @@ export interface MethodDeclaration extends ASTNode {
  */
 export interface InterfaceDeclaration extends ASTNode {
   kind: "InterfaceDeclaration";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   name: string;
   /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
   declaredName?: string;
@@ -262,16 +274,20 @@ export interface InterfaceDeclaration extends ASTNode {
    * Property prototypes (CODESYS "Object: Property", on an interface): the
    * accessors a block implementing the interface provides. `getter` /
    * `setter` are empty arrays for an accessor the interface declares, absent
-   * otherwise. Absent when the interface declares no property.
+   * otherwise. Empty when the interface declares no property.
    */
-  properties?: PropertyDeclaration[];
+  properties: PropertyDeclaration[];
+  /** Set on an interface a linked library declares: checked like the unit's own, emitted by the library. */
+  library?: string;
 }
 
 /**
- * PROPERTY declaration within a Function Block
+ * PROPERTY declaration within a Function Block, or a property signature within an INTERFACE
  */
 export interface PropertyDeclaration extends ASTNode {
   kind: "PropertyDeclaration";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   name: string;
   type: TypeReference;
   visibility: Visibility;
@@ -303,6 +319,8 @@ export type VarBlockType =
  */
 export interface VarBlock extends ASTNode {
   kind: "VarBlock";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   blockType: VarBlockType;
   isConstant: boolean;
   /**
@@ -338,6 +356,8 @@ export interface VarBlock extends ASTNode {
  */
 export interface VarDeclaration extends ASTNode {
   kind: "VarDeclaration";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   names: string[];
   /**
    * The same names, spelled as they were declared.
@@ -409,6 +429,8 @@ export interface VarDeclaration extends ASTNode {
  */
 export interface TypeDeclaration extends ASTNode {
   kind: "TypeDeclaration";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   name: string;
   /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
   declaredName?: string;
@@ -472,6 +494,8 @@ export interface StructDefinition extends ASTNode {
  */
 export interface EnumMember extends ASTNode {
   kind: "EnumMember";
+  /** CODESYS attribute pragmas written right before the declaration. */
+  attributes?: Attribute[];
   name: string;
   /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
   declaredName?: string;
@@ -552,6 +576,7 @@ export interface TypeReference extends ASTNode {
   maxLength?: number | string; // For STRING(n) / WSTRING(n) parameterized length; string for constant names
   arrayDimensions?: Array<{ start: number; end: number }>; // For __INLINE_ARRAY_* types
   elementTypeName?: string; // Element type for inline arrays (e.g. "BYTE" for ARRAY[0..7] OF BYTE)
+
   /**
    * Declared length of the ELEMENT of an inline array —
    * `ARRAY [0..3] OF STRING(23)`. Separate from `maxLength`, which belongs to

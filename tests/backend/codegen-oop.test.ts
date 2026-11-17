@@ -122,7 +122,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
     it("should generate interface as abstract class with pure virtual methods", () => {
       const result = compileAndCheck(`
         INTERFACE IMovable
-          METHOD Move
+          METHOD Drive
             VAR_INPUT distance : REAL; END_VAR
           END_METHOD
           METHOD Stop
@@ -294,13 +294,13 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
     it("should generate inheritance with base class first, then interfaces", () => {
       const result = compileAndCheck(`
         INTERFACE IMovable
-          METHOD Move END_METHOD
+          METHOD Drive END_METHOD
         END_INTERFACE
         FUNCTION_BLOCK Base
           VAR x : INT; END_VAR
         END_FUNCTION_BLOCK
         FUNCTION_BLOCK SmartMotor EXTENDS Base IMPLEMENTS IMovable
-          METHOD PUBLIC Move
+          METHOD PUBLIC Drive
           END_METHOD
         END_FUNCTION_BLOCK
         PROGRAM Main END_PROGRAM
@@ -923,9 +923,9 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
     it("should generate method call with arguments in assignment", () => {
       const result = compileAndCheck(`
         FUNCTION_BLOCK Calculator
-          METHOD PUBLIC Add : INT
+          METHOD PUBLIC Sum : INT
             VAR_INPUT a, b : INT; END_VAR
-            Add := a + b;
+            Sum := a + b;
           END_METHOD
         END_FUNCTION_BLOCK
         PROGRAM Main
@@ -933,11 +933,11 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
             calc : Calculator;
             result : INT;
           END_VAR
-          result := calc.Add(3, 7);
+          result := calc.Sum(3, 7);
         END_PROGRAM
       `);
 
-      expect(result.cppCode).toContain("CALC.ADD(3, 7)");
+      expect(result.cppCode).toContain("CALC.SUM(3, 7)");
     });
 
     it("should generate method call on instance within method body", () => {

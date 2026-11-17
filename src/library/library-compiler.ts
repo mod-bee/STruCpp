@@ -12,7 +12,7 @@ import type {
   StlibCompileResult,
   StlibArchive,
 } from "./library-manifest.js";
-import { STRUCPP_ABI_VERSION } from "./library-manifest.js";
+import { HEADER_NAME_RE, STRUCPP_ABI_VERSION } from "./library-manifest.js";
 import { compile } from "../index.js";
 import { buildChunks } from "./library-chunks.js";
 import type { MemberManglingContext } from "../backend/member-mangling.js";
@@ -28,6 +28,7 @@ import {
   projectNativeHeaderToSt,
 } from "./native-sources.js";
 import type {
+  LibraryAttribute,
   LibraryFBEntry,
   LibraryInterfaceEntry,
   LibraryManifest,
@@ -162,6 +163,7 @@ function serializeLocal(
   const entry = {
     ...serializeVarType(name, decl.type),
     ...declaredNameOf(name, decl.declaredNames?.[decl.names.indexOf(name)]),
+    ...attributesOf(decl),
   };
   const cppName = mangledMemberName(name, decl.type.name, ctx);
   if (cppName !== name) entry.cppName = cppName;
@@ -176,6 +178,22 @@ function serializeLocal(
  * does not (see `LibraryVarType.declaredName`), so an all-caps library adds
  * nothing to its manifest.
  */
+/** The attribute pragmas of a declaration, as the manifest records them. */
+function attributesOf(node: {
+  attributes?: ReadonlyArray<{ name: string; value?: string }>;
+}): { attributes?: LibraryAttribute[] } {
+  const list = node.attributes ?? [];
+  return list.length > 0
+    ? {
+        attributes: list.map((a) =>
+          a.value !== undefined
+            ? { name: a.name, value: a.value }
+            : { name: a.name },
+        ),
+      }
+    : {};
+}
+
 function declaredNameOf(
   name: string,
   declared: string | undefined,
@@ -367,6 +385,7 @@ function buildDerivedFBEntry(
   return {
     name: fb.name,
     ...declaredNameOf(fb.name, fb.declaredName),
+    ...attributesOf(fb),
     inputs: parts.flatMap((p) => p.inputs),
     outputs: parts.flatMap((p) => p.outputs),
     inouts,
@@ -417,6 +436,7 @@ function buildMethodEntry(method: MethodDeclaration): LibraryMethodEntry {
             const entry: LibraryVarType = {
               ...serializeVarType(n, d.type),
               ...declaredNameOf(n, d.declaredNames?.[i]),
+              ...attributesOf(d),
             };
             if (blockType === "VAR_INPUT" && d.initialValue !== undefined) {
               const initial = serializeInitialValue(d.initialValue);
@@ -429,6 +449,7 @@ function buildMethodEntry(method: MethodDeclaration): LibraryMethodEntry {
   return {
     name: method.name,
     ...declaredNameOf(method.name, method.declaredName),
+    ...attributesOf(method),
     ...(method.returnType !== undefined
       ? { returnType: method.returnType.name }
       : {}),
@@ -449,6 +470,7 @@ function buildInterfaceEntry(
   return {
     name: iface.name,
     ...declaredNameOf(iface.name, iface.declaredName),
+    ...attributesOf(iface),
     ...(iface.extends !== undefined && iface.extends.length > 0
       ? { extends: [...iface.extends] }
       : {}),
@@ -476,6 +498,7 @@ function buildFBEntry(
   fb: {
     name: string;
     declaredName?: string;
+    attributes?: ReadonlyArray<{ name: string; value?: string }>;
     varBlocks: Array<{
       blockType: string;
       isRetain?: boolean;
@@ -483,6 +506,7 @@ function buildFBEntry(
       declarations: Array<{
         names: string[];
         declaredNames?: string[];
+        attributes?: ReadonlyArray<{ name: string; value?: string }>;
         type: TypeReference;
         initialValue?: Expression;
         edge?: "R_EDGE" | "F_EDGE";
@@ -500,6 +524,7 @@ function buildFBEntry(
             const entry: LibraryVarType = {
               ...serializeVarType(n, d.type),
               ...declaredNameOf(n, d.declaredNames?.[i]),
+              ...attributesOf(d),
             };
             // The C++ member, when the library's codegen mangled it (a pin
             // named like a method of the block) — see serializeLocal().
@@ -529,6 +554,7 @@ function buildFBEntry(
   return {
     name: fb.name,
     ...declaredNameOf(fb.name, fb.declaredName),
+    ...attributesOf(fb),
     inputs: varsOfBlock("VAR_INPUT"),
     outputs: varsOfBlock("VAR_OUTPUT"),
     inouts,
@@ -791,6 +817,7 @@ export function compileLibrary(
   if (options.globalConstants) {
     compileOpts.globalConstants = options.globalConstants;
   }
+  compileOpts.fileName = primarySource.fileName;
   const result = compile(primarySource.source, compileOpts);
 
   if (!result.success) {
@@ -861,6 +888,7 @@ export function compileLibrary(
           {
             name: fn.name,
             ...declaredNameOf(fn.name, fn.declaredName),
+            ...attributesOf(fn),
             returnType: fn.returnType.name,
             ...(typeof fn.returnType.maxLength === "number"
               ? { returnMaxLength: fn.returnType.maxLength }
@@ -878,6 +906,7 @@ export function compileLibrary(
                   return decl.names.map((name, i) => ({
                     ...serializeVarType(name, decl.type),
                     ...declaredNameOf(name, decl.declaredNames?.[i]),
+                    ...attributesOf(decl),
                     direction:
                       block.blockType === "VAR_OUTPUT"
                         ? "output"
@@ -1003,6 +1032,7 @@ export function compileLibrary(
             return {
               ...serializeVarType(name, decl.type),
               ...declaredNameOf(name, decl.declaredNames?.[i]),
+              ...attributesOf(decl),
             };
           }),
         );
@@ -1031,6 +1061,7 @@ export function compileLibrary(
             {
               name,
               ...declaredNameOf(name, decl.declaredNames?.[i]),
+              ...attributesOf(decl),
               type: decl.type.name,
               ...(block.isConstant ? { constant: true } : {}),
             },
@@ -1130,12 +1161,25 @@ export function compileStlib(
     noSource?: boolean;
     /** Mark this library as a built-in runtime library */
     builtin?: boolean;
+    /**
+     * Headers the library's `{external}` code needs, such as a C API it calls. They are recorded in the manifest, so
+     * every program using the library includes them; the consumer supplies the files on its include path.
+     */
+    headers?: string[];
     /** Library archives this library depends on */
     dependencies?: StlibArchive[];
     /** Global constants available during compilation (e.g., STRING_LENGTH) */
     globalConstants?: Record<string, number>;
   },
 ): StlibCompileResult {
+  for (const header of options.headers ?? []) {
+    if (!HEADER_NAME_RE.test(header)) {
+      throw new TypeError(
+        `headers entry ${JSON.stringify(header)} is not a valid include filename: use a relative name without '.' ` +
+          `or '..' segments (allowed characters: alphanumerics, '.', '/', '-', '_', '+').`,
+      );
+    }
+  }
   const libResult = compileLibrary(sources, options);
   if (options.builtin) {
     libResult.manifest.isBuiltin = true;
@@ -1154,10 +1198,13 @@ export function compileStlib(
     };
   }
 
-  // Clear manifest.headers — the .stlib archive inlines its C++ code
-  // directly into the consumer's output via addLibraryChunks(), so
-  // there are no external .hpp files to #include.
-  const manifest = { ...libResult.manifest, headers: [] as string[] };
+  // The library's own header is not listed: its C++ is inlined into the
+  // consumer's output through addLibraryChunks(). Only the headers its
+  // {external} code needs are.
+  const manifest = {
+    ...libResult.manifest,
+    headers: [...(options.headers ?? [])],
+  };
 
   // Chunks own each declared symbol's emit slices, so the dep-preamble
   // strip that used to operate on the library-wide blob is no longer

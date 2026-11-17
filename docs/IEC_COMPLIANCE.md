@@ -10,7 +10,7 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | BYTE, WORD, DWORD, LWORD | Supported | |
 | SINT, INT, DINT, LINT | Supported | |
 | USINT, UINT, UDINT, ULINT | Supported | |
-| REAL, LREAL | Supported | |
+| REAL, LREAL | Supported | REAL arithmetic and REAL functions (SQRT, SIN, COS, ...) compute in single precision; an untyped real literal (`1.5`) takes the type of its context, so it is a float next to a REAL and a double next to an LREAL |
 | TIME | Supported | Nanosecond precision, int64_t storage |
 | DATE | Supported | |
 | TIME_OF_DAY | Supported | |
@@ -34,7 +34,7 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | ARRAY (1D) | Supported | Arbitrary bounds: ARRAY[1..10] OF INT |
 | ARRAY (2D) | Supported | ARRAY[1..3, 1..4] OF REAL |
 | ARRAY (3D) | Supported | ARRAY[1..3, 1..4, 1..5] OF INT |
-| ARRAY OF function block | Supported | Declaration, member access, and element invocation (`units[i](step := 1.0)`). A *method* call on an element (`units[0].M()`) is not yet parsed |
+| ARRAY OF function block | Supported | Declaration, member access, element invocation (`units[i](step := 1.0)`) and method calls on elements (`units[0].M()`) |
 | ARRAY[*] (VLA) | Supported | Variable-length array parameters |
 | Subranges | Supported | Runtime validation |
 | REF_TO | Supported | IEC reference type (explicit dereference) |
@@ -113,7 +113,7 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 
 | Category | Operators | Status |
 |----------|-----------|--------|
-| Arithmetic | `+`, `-`, `*`, `/`, `MOD`, `**` | Supported |
+| Arithmetic | `+`, `-`, `*`, `/`, `MOD`, `**` | Supported; REAL `**` computes like `EXPT`, in single precision |
 | Comparison | `=`, `<>`, `<`, `>`, `<=`, `>=` | Supported |
 | Logical | `AND`, `OR`, `XOR`, `NOT` | Supported |
 | Bitwise | `AND`, `OR`, `XOR`, `NOT` (on bit types) | Supported |
@@ -264,7 +264,7 @@ edges on `CU` and `CD` leave `CV` unchanged. CODESYS does not document that case
 | Inline function calls | Supported | Via `{call ...}` pragma |
 | Global constants (`-D`) | Supported | CLI `-D NAME=VALUE`, emits `constexpr` |
 | Dynamic memory | Supported | `__NEW(type)`, `__DELETE(ptr)` |
-| POINTER TO | Supported | Full pointer type with dereference |
+| POINTER TO | Supported | Full pointer type with dereference; `POINTER TO <FB>` from `ADR()` dispatches methods virtually |
 | Typed literals | Supported | `INT#5`, `DINT#42`, `REAL#3.14` |
 | STRUCT EXTENDS (CODESYS) | Supported | `TYPE D EXTENDS B : STRUCT ... END_STRUCT END_TYPE`: D holds B's members first, then its own; both sets of initial values apply; an initializer names either. A `REFERENCE TO` / `REF_TO` B may refer to a D variable. A D value is not assigned to a B variable (the CODESYS help defines no such conversion). A library carries it (manifest `extends`, inherited members first in `fields`) |
 | `__ISVALIDREF` | Supported | CODESYS: TRUE when a `REFERENCE TO` variable is bound. Other operands are refused (compare a `REF_TO` or `POINTER` with `NULL` / 0) |

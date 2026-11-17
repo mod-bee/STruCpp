@@ -18,6 +18,7 @@ import type {
 } from "./library-manifest.js";
 import type { SymbolTables, VariableSymbol } from "../semantic/symbol-table.js";
 import { DuplicateSymbolError } from "../semantic/symbol-table.js";
+import { HEADER_NAME_RE } from "./library-manifest.js";
 import type {
   ElementaryType,
   EnumType,
@@ -166,6 +167,28 @@ function makeVarSymbol(
     // prefers it over re-deriving the rule against the wrong unit.
     ...(v.cppName !== undefined ? { cppName: v.cppName } : {}),
   };
+}
+
+/**
+ * The manifest's `headers`, each emitted as `#include "<name>"` into every
+ * program using the library: refused unless every entry is a plain relative
+ * file name, so an archive cannot splice code into the consumer's build.
+ */
+function validateHeaders(headers: unknown): string[] {
+  if (headers === undefined) return [];
+  if (!Array.isArray(headers)) {
+    throw new LibraryManifestError(
+      "Invalid library manifest: headers must be an array",
+    );
+  }
+  return headers.map((h: unknown, i) => {
+    if (typeof h !== "string" || !HEADER_NAME_RE.test(h)) {
+      throw new LibraryManifestError(
+        `Invalid library manifest: headers[${i}] must be a relative file name without '.' or '..' segments (letters, digits, '.', '/', '-', '_', '+')`,
+      );
+    }
+    return h;
+  });
 }
 
 /**
@@ -352,7 +375,7 @@ export function loadLibraryManifest(json: unknown): LibraryManifest {
     functions,
     functionBlocks,
     types,
-    headers: Array.isArray(obj.headers) ? (obj.headers as string[]) : [],
+    headers: validateHeaders(obj.headers),
     isBuiltin: Boolean(obj.isBuiltin),
   };
   if (Array.isArray(obj.interfaces)) {
@@ -449,21 +472,17 @@ export function libraryInterfaceDeclaration(
       ? { extends: [...entry.extends] }
       : {}),
     methods: entry.methods.map(makeMethodDeclaration),
-    ...((entry.properties ?? []).length > 0
-      ? {
-          properties: (entry.properties ?? []).map(
-            (p): PropertyDeclaration => ({
-              kind: "PropertyDeclaration",
-              sourceSpan: createDefaultSourceSpan(),
-              name: p.type.name,
-              type: makeSizedTypeRef(p.type),
-              visibility: "PUBLIC",
-              ...(p.get ? { getter: [] } : {}),
-              ...(p.set ? { setter: [] } : {}),
-            }),
-          ),
-        }
-      : {}),
+    properties: (entry.properties ?? []).map(
+      (p): PropertyDeclaration => ({
+        kind: "PropertyDeclaration",
+        sourceSpan: createDefaultSourceSpan(),
+        name: p.type.name,
+        type: makeSizedTypeRef(p.type),
+        visibility: "PUBLIC",
+        ...(p.get ? { getter: [] } : {}),
+        ...(p.set ? { setter: [] } : {}),
+      }),
+    ),
   };
 }
 
