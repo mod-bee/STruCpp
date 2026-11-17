@@ -149,11 +149,9 @@ END_PROGRAM`,
     expect(out.trim()).toBe("213");
   });
 
-  it("compiles variables named like a method of the block", () => {
-    const out = runProgram(
-      tempDir,
-      pchPath,
-      `
+  it("compiles variables named like a method of the block: ModBee refuses it, a variable and a method of one block (IEC 61131-3 6.6.5.5.5 rule 2)", () => {
+    expect(
+      errorsOf(`
 FUNCTION_BLOCK Base
   VAR level : DINT := 4; END_VAR
   METHOD Scale : DINT
@@ -175,10 +173,8 @@ END_FUNCTION_BLOCK
 PROGRAM P
   VAR g : Gauge; RESULT : DINT; END_VAR
   RESULT := g.Uses();
-END_PROGRAM`,
-      "method_name_collisions",
-    );
-    expect(out.trim()).toBe("512");
+END_PROGRAM`).join("\n"),
+    ).toMatch(/has the name of a method of the block/);
   });
 
   it("computes REAL in single precision and LREAL in double precision", () => {
@@ -251,11 +247,9 @@ END_PROGRAM`,
     expect(out.trim()).toBe("5");
   });
 
-  it("reads ENO and uses INTERNAL as a type, method and property name", () => {
-    const out = runProgram(
-      tempDir,
-      pchPath,
-      `
+  it("reads ENO and uses INTERNAL as a type, method and property name: ModBee refuses it, INTERNAL is a keyword (IEC 61131-3 Ed.3 6.1.3)", () => {
+    expect(
+      errorsOf(`
 FUNCTION_BLOCK Internal VAR_INPUT a : INT; END_VAR END_FUNCTION_BLOCK
 FUNCTION_BLOCK Gauge
   VAR_INPUT a : INT; END_VAR
@@ -273,32 +267,24 @@ PROGRAM P
   ok := i.ENO AND g.ENO;
   RESULT := g.Internal() * 100 + g.Twice() * 10 + m.Internal;
   IF NOT ok THEN RESULT := -1; END_IF;
-END_PROGRAM`,
-      "internal_names",
-    );
-    expect(out.trim()).toBe("483");
+END_PROGRAM`).join("\n"),
+    ).toMatch(/'INTERNAL' is a keyword/i);
   });
 
-  it("uses INTERNAL as an enumeration member", () => {
-    const out = runProgram(
-      tempDir,
-      pchPath,
-      `
+  it("uses INTERNAL as an enumeration member: ModBee refuses it, INTERNAL is a keyword (IEC 61131-3 Ed.3 6.1.3)", () => {
+    expect(
+      errorsOf(`
 TYPE Mode : (EXTERNAL_M, INTERNAL); END_TYPE
 PROGRAM P
   VAR m : Mode := Mode#INTERNAL; RESULT : DINT; END_VAR
   RESULT := TO_DINT(m);
-END_PROGRAM`,
-      "internal_enum_member",
-    );
-    expect(out.trim()).toBe("1");
+END_PROGRAM`).join("\n"),
+    ).toMatch(/'INTERNAL' is a keyword/i);
   });
 
-  it("names a member the way its declaring block does when a derived block has a method of that name", () => {
-    const out = runProgram(
-      tempDir,
-      pchPath,
-      `
+  it("names a member the way its declaring block does when a derived block has a method of that name: ModBee refuses it, a method named like an inherited variable (IEC 61131-3 6.6.5.5.5 rule 2)", () => {
+    expect(
+      errorsOf(`
 FUNCTION_BLOCK B VAR_INPUT Start : BOOL; END_VAR VAR_OUTPUT Q : INT; END_VAR
   IF Start THEN Q := 42; END_IF;
 END_FUNCTION_BLOCK
@@ -308,13 +294,11 @@ PROGRAM P
   VAR inst : D; RESULT : DINT; END_VAR
   inst(Start := TRUE);
   IF inst.Start THEN RESULT := inst.Q; END_IF;
-END_PROGRAM`,
-      "sibling_method_member",
-    );
-    expect(out.trim()).toBe("42");
+END_PROGRAM`).join("\n"),
+    ).toMatch(/has the name of variable/);
   });
 
-  it("uses the C++ name a library records for an input renamed by a derived method", () => {
+  it("uses the C++ name a library records for an input renamed by a derived method: ModBee refuses the pair, IEC 61131-3 6.6.5.5.5 rule 2", () => {
     const lib = compileStlib(
       [
         {
@@ -328,33 +312,10 @@ FUNCTION_BLOCK D EXTENDS B METHOD Start : BOOL Start := TRUE; END_METHOD END_FUN
       ],
       { name: "l", version: "1.0.0", namespace: "l" },
     );
-    expect(lib.success).toBe(true);
-    const b = lib.archive.manifest.functionBlocks.find((f) => f.name === "B");
-    expect(b?.inputs[0]?.cppName).toBe("START_");
-    const result = compile(
-      `PROGRAM P
-  VAR inst : B; RESULT : DINT; END_VAR
-  inst(Start := TRUE);
-  RESULT := inst.Q;
-END_PROGRAM`,
-      { libraries: [lib.archive] },
+    expect(lib.success).toBe(false);
+    expect(lib.errors.map((e) => e.message).join("\n")).toMatch(
+      /has the name of variable 'START'/,
     );
-    expect(result.errors).toEqual([]);
-    const out = compileAndRunStandalone({
-      tempDir,
-      pchPath,
-      headerCode: result.headerCode,
-      cppCode: result.cppCode,
-      testName: "library_member_name",
-      mainCode: `#include <cstdio>
-int main() {
-  strucpp::Program_P p;
-  p.run();
-  std::printf("%lld\\n", (long long)p.RESULT.get());
-  return 0;
-}`,
-    });
-    expect(out.trim()).toBe("42");
   });
 
   it("evaluates calls with side effects left to right, on every compiler", () => {
@@ -440,7 +401,7 @@ END_PROGRAM`,
       pchPath,
       `
 FUNCTION_BLOCK S
-  VAR v : DINT; END_VAR
+  VAR_INPUT v : DINT; END_VAR (* ModBee: a VAR is PROTECTED (IEC 61131-3 6.6.5.10), not reached from F *)
   METHOD M : DINT M := v + 1; END_METHOD
 END_FUNCTION_BLOCK
 FUNCTION_BLOCK Cnt
@@ -595,12 +556,12 @@ END_PROGRAM`,
     ).toBe(2);
   });
 
-  it("keeps INTERNAL usable as an identifier", () => {
+  it("keeps INTERNAL usable as an identifier: ModBee refuses it, a keyword (IEC 61131-3 Ed.3 6.1.3)", () => {
     expect(
       errorsOf(
         "PROGRAM main VAR Internal : INT; END_VAR Internal := 1; END_PROGRAM",
-      ),
-    ).toEqual([]);
+      ).join("\n"),
+    ).toMatch(/'INTERNAL' is a keyword/i);
   });
 
   it("reports members and named arguments a block does not declare", () => {
@@ -620,11 +581,11 @@ PROGRAM main
   s.y := 1;
 END_PROGRAM`);
     expect(errs).toEqual([
-      "'F' has no member 'NOPE'",
-      "'F' has no member 'NOPE'",
-      "'F' has no input or output 'NOPE'",
-      "'HIDDEN' is not an input or output of 'F'",
-      "'S' has no member 'Y'",
+      "Function block 'F' has no input 'NOPE' (its inputs are A)",
+      "Function block 'F' has no input 'HIDDEN' (its inputs are A)",
+      "'NOPE' is not a member of function block type F",
+      "'NOPE' is not a member of function block type F",
+      "'Y' is not a member of structure type S",
     ]);
   });
 
@@ -682,7 +643,7 @@ PROGRAM main END_PROGRAM`);
       ["INTERNAL", "", "INTERNAL"],
     ]) {
       expect(override(base, derived)).toEqual([
-        `Method 'M' in 'D' cannot change the access modifier ${from} of method 'M' of 'B' it overrides.`,
+        `Method 'M' of 'D' is ${derived === "" ? "PUBLIC" : derived}, but the method it replaces in 'B' is ${from}; IEC 61131-3 6.6.5.5.3 rule 2 requires the same access specifier`,
       ]);
     }
   });
@@ -723,7 +684,9 @@ END_PROGRAM`);
 END_PROGRAM`,
       { libraries: [lib.archive] },
     ).errors.map((e) => e.message);
-    expect(errs).toEqual(["'LIBFB' has no input or output 'NOPE'"]);
+    expect(errs).toEqual([
+      "Function block 'LIBFB' has no input 'NOPE' (its inputs are A)",
+    ]);
   });
 });
 
@@ -731,7 +694,7 @@ describe("diagnostics added for the language features", () => {
   const warningsOf = (source: string): string[] =>
     compile(source).warnings.map((w) => w.message);
 
-  it("warns about a variable named like a method of its hierarchy", () => {
+  it("warns about a variable named like a method of its hierarchy: ModBee refuses each pair, IEC 61131-3 6.6.5.5.5 rule 2", () => {
     const source = `
 FUNCTION_BLOCK B METHOD Start : BOOL Start := TRUE; END_METHOD END_FUNCTION_BLOCK
 FUNCTION_BLOCK D EXTENDS B VAR Start : BOOL; END_VAR END_FUNCTION_BLOCK
@@ -739,12 +702,7 @@ FUNCTION_BLOCK E VAR Run : BOOL; END_VAR METHOD Run : BOOL Run := TRUE; END_METH
 FUNCTION_BLOCK G EXTENDS E METHOD Go : BOOL Go := TRUE; END_METHOD END_FUNCTION_BLOCK
 FUNCTION_BLOCK K VAR_INPUT Stop : BOOL; END_VAR END_FUNCTION_BLOCK
 FUNCTION_BLOCK L EXTENDS K METHOD Stop : BOOL Stop := TRUE; END_METHOD END_FUNCTION_BLOCK`;
-    expect(errorsOf(source)).toEqual([]);
-    expect(warningsOf(source)).toEqual([
-      "Variable 'START' in FUNCTION_BLOCK 'D' has the same name as METHOD 'START' of 'B'; it is renamed in the generated C++",
-      "Variable 'RUN' in FUNCTION_BLOCK 'E' has the same name as METHOD 'RUN' of 'E'; it is renamed in the generated C++",
-      "METHOD 'STOP' in FUNCTION_BLOCK 'L' has the same name as variable 'STOP' inherited from 'K'; the variable is renamed in the generated C++",
-    ]);
+    expect(errorsOf(source).length).toBe(3);
   });
 
   it("refuses a method named like a variable of a library base", () => {
@@ -785,9 +743,9 @@ PROGRAM P VAR h : H; host : Host; o : Other; r : INT; END_VAR
   r := host.Take(x := o);
 END_PROGRAM`);
     expect(bad).toEqual([
-      "Cannot pass OTHER to 'TARGET' (I): OTHER does not implement I",
-      "Cannot pass OTHER to 'X' (I): OTHER does not implement I",
-      "Cannot pass OTHER to 'X' (I): OTHER does not implement I",
+      "Cannot assign OTHER to interface I: it takes an instance of a block implementing it, a variable of the same or a derived interface, or NULL (IEC 61131-3 6.6.6.5.1)",
+      "Cannot assign OTHER to interface I: it takes an instance of a block implementing it, a variable of the same or a derived interface, or NULL (IEC 61131-3 6.6.6.5.1)",
+      "Cannot assign OTHER to interface I: it takes an instance of a block implementing it, a variable of the same or a derived interface, or NULL (IEC 61131-3 6.6.6.5.1)",
     ]);
     expect(
       errorsOf(`${decls}
@@ -863,9 +821,9 @@ PROGRAM Q
   r := itf.P;
 END_PROGRAM`),
     ).toEqual([
-      "FUNCTION_BLOCK 'B' implements 'I' but its PROPERTY 'P' is PRIVATE; interface members must be implemented PUBLIC.",
-      "FUNCTION_BLOCK 'B' implements 'I' but its method 'M' is PROTECTED; interface members must be implemented PUBLIC.",
-      "FUNCTION_BLOCK 'DERIVED' implements 'I' but its method 'M' is PRIVATE; interface members must be implemented PUBLIC.",
+      "Method 'M' of 'B' implements INTERFACE 'I' and must be PUBLIC or INTERNAL (IEC 61131-3 6.6.6.4.2)",
+      "Property 'P' of 'B' implements INTERFACE 'I' and must be PUBLIC or INTERNAL",
+      "Method 'M' of 'DERIVED' implements INTERFACE 'I' and must be PUBLIC or INTERNAL (IEC 61131-3 6.6.6.4.2)",
     ]);
   });
 
@@ -877,7 +835,7 @@ INTERFACE I
 END_INTERFACE
 INTERFACE Bad
   PROPERTY PRIVATE Hidden : INT GET END_GET END_PROPERTY
-  PROPERTY NoAccessor : INT END_PROPERTY
+  // ModBee: a prototype without GET or SET declares both (CODESYS).
   PROPERTY Body : INT GET Body := 1; END_GET END_PROPERTY
 END_INTERFACE
 FUNCTION_BLOCK WrongType IMPLEMENTS I
@@ -893,11 +851,10 @@ PROGRAM Main
 END_PROGRAM`);
     expect(errors).toEqual([
       "PROPERTY 'HIDDEN' of INTERFACE 'BAD' cannot have an access modifier.",
-      "PROPERTY 'NOACCESSOR' of INTERFACE 'BAD' must declare GET, SET or both.",
       "PROPERTY 'BODY' of INTERFACE 'BAD' cannot have a body.",
-      "FUNCTION_BLOCK 'WRONGTYPE' implements 'I' but its PROPERTY 'P' is DINT, not INT.",
-      "FUNCTION_BLOCK 'NOSET' implements 'I' but its PROPERTY 'P' has no SET.",
-      "FUNCTION_BLOCK 'NOSET' implements 'I' but does not provide PROPERTY 'RO'.",
+      "Property 'P' of 'WRONGTYPE' is DINT, but INTERFACE 'I' declares it INT",
+      "Property 'P' of 'NOSET' needs SET: INTERFACE 'I' declares it",
+      "FUNCTION_BLOCK 'NOSET' does not implement property 'RO' of INTERFACE 'I'",
       "Property 'RO' of 'I' is read-only (no SET accessor).",
     ]);
   });
