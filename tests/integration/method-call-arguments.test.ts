@@ -51,7 +51,8 @@ describe("method call arguments", () => {
     const calls = result.cppCode.match(/K\.(BUMP|SPLIT)\([^;]*\)/g) ?? [];
     expect(calls).toContain("K.BUMP(5, 0)");
     expect(calls).toContain("K.BUMP(5, 1)");
-    expect(calls).toContain("K.SPLIT(8, H)");
+    // ModBee: an output goes as a pointer (omitted ones as nullptr).
+    expect(calls).toContain("K.SPLIT(8, strucpp::out_ptr<IEC_DINT>(H))");
     expect(result.cppCode).toContain("I->BUMP(1, 0)");
   });
 

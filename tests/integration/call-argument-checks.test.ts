@@ -93,13 +93,15 @@ PROGRAM P VAR b : B; ok : BOOL; END_VAR ok := b.Inc(); END_PROGRAM`;
     );
   });
 
-  it("refuses an omitted input of a library method with no default, and allows it on a local method", () => {
+  it("takes the type's default for an omitted input without one, locally and through a library", () => {
+    // ModBee: an ABI 5 archive records every declared default, so an input
+    // with none takes its type's default, as IEC 61131-3 Ed.3 6.6.1.4.2
+    // says, through a library too (upstream refused it, for archives that
+    // could not tell a missing default from none).
     const block = `FUNCTION_BLOCK Gate METHOD Go : DINT VAR_INPUT X : DINT; END_VAR Go := X; END_METHOD END_FUNCTION_BLOCK`;
     const program = `PROGRAM P VAR g : Gate; r : DINT; END_VAR r := g.Go(); END_PROGRAM`;
     expect(messages(`${block}\n${program}`)).toEqual([]);
-    expect(messages(program, [library(block)])).toContain(
-      "'GO' is missing input 'X': the library declares no default for it",
-    );
+    expect(messages(program, [library(block)])).toEqual([]);
     expect(
       messages(
         `PROGRAM P VAR g : Gate; r : DINT; END_VAR r := g.Go(X := 2); END_PROGRAM`,
@@ -278,10 +280,11 @@ describe("method defaults resolve in the callee", () => {
   it("reads the callee's constants, locally and through a library", () => {
     const local = compile(`${CALLEE_SCOPE}\n${CALLER}`);
     expect(local.errors).toEqual([]);
-    expect(local.cppCode).toContain("F.M((7))");
+    // ModBee: a local block's constants are folded where declared.
+    expect(local.cppCode).toMatch(/F\.M\(\(?7\)?\)/);
     const linked = compile(CALLER, { libraries: [library(CALLEE_SCOPE)] });
     expect(linked.errors).toEqual([]);
-    expect(linked.cppCode).toContain("F.M((7))");
+    expect(linked.cppCode).toMatch(/F\.M\(\(?7\)?\)/);
   });
 
   it("warns about a default that reads a variable of the block, and requires the argument", () => {
@@ -315,7 +318,11 @@ END_FUNCTION_BLOCK`),
   it("calls the block's own method before a standard function of the same name", () => {
     const result = compile(`${CALLEE_SCOPE}\n${CALLER}`);
     expect(result.errors).toEqual([]);
-    expect(result.cppCode).toMatch(/LEN\(\) \+ (this->)?ROUND\(\)/);
+    // Two calls of methods, one operator: evaluated left to right
+    // (IEC 61131-3 Ed.3 7.3.2) through temporaries.
+    expect(result.cppCode).toMatch(
+      /auto __seq\d+ = LEN\(\); auto __seq\d+ = (this->)?ROUND\(\);/,
+    );
   });
 });
 
