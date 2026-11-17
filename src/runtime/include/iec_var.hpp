@@ -781,12 +781,40 @@ inline P* out_ptr(P& actual) {
 }
 
 /**
- * A method's own storage for a VAR_OUTPUT its call omits: built only when the
- * caller passed no variable (NULL), destroyed with the method's frame. Its
- * code is in the method once, not at every call site.
+ * Builds a default T in `buf`: out of line, so the construction code exists
+ * once per output type in the program, not inline at each output of each
+ * method (OutSlot's slow path, taken only for an omitted output).
  */
 template <typename T>
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+T* out_slot_make(void* buf) {
+    return ::new (buf) T();
+}
+
+/**
+ * A method's or function's own storage for a VAR_OUTPUT its call omits: built
+ * only when the caller passed no variable (NULL), by out_slot_make. A type
+ * with a destructor is destroyed with the frame; the IEC types have none, so
+ * their slot is bare storage with no bookkeeping.
+ */
+template <typename T, bool Trivial = std::is_trivially_destructible<T>::value>
 class OutSlot {
+public:
+    OutSlot() noexcept {}
+    OutSlot(const OutSlot&) = delete;
+    OutSlot& operator=(const OutSlot&) = delete;
+    T& bind(T* actual) {
+        return actual != nullptr ? *actual : *out_slot_make<T>(buf_);
+    }
+
+private:
+    alignas(T) unsigned char buf_[sizeof(T)];
+};
+
+template <typename T>
+class OutSlot<T, false> {
 public:
     OutSlot() noexcept {}
     OutSlot(const OutSlot&) = delete;
@@ -797,7 +825,7 @@ public:
     T& bind(T* actual) {
         if (actual != nullptr) return *actual;
         made_ = true;
-        return *::new (static_cast<void*>(buf_)) T();
+        return *out_slot_make<T>(buf_);
     }
 
 private:

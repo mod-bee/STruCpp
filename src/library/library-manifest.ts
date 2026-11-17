@@ -539,8 +539,10 @@ export interface LibraryCompileResult {
  * "Library ABI version"):
  *   1  (unstamped) before 0.7.0-modbee.4
  *   2  a method's and a function's VAR_OUTPUT by pointer (f295701, fd86039)
+ *   3  a method's elementary, STRING and ANY inputs passed lighter
+ *      (payload by value, const char*, const IEC_ANY&)
  */
-export const STRUCPP_ABI_VERSION = 2;
+export const STRUCPP_ABI_VERSION = 3;
 
 export interface StlibArchive {
   /** Format version for forward compatibility */

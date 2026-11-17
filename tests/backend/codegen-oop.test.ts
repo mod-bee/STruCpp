@@ -139,7 +139,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
         "virtual ~IMOVABLE__IFACE() = default;",
       );
       expect(result.headerCode).toContain(
-        "virtual void MOVE(IEC_REAL DISTANCE) = 0;",
+        "virtual void MOVE(REAL_t DISTANCE__in) = 0;",
       );
       expect(result.headerCode).toContain("virtual void STOP() = 0;");
     });
@@ -485,9 +485,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       // block nothing can override (isSealedFb)
       expect(result.headerCode).not.toContain("virtual IEC_INT get_SPEED");
       expect(result.headerCode).toContain("    IEC_INT get_SPEED();");
-      expect(result.headerCode).toContain(
-        "    void set_SPEED(IEC_INT SPEED);",
-      );
+      expect(result.headerCode).toContain("    void set_SPEED(IEC_INT SPEED);");
 
       // Implementation: getter body
       expect(result.cppCode).toContain("IEC_INT MOTOR::get_SPEED() {");
@@ -663,7 +661,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
 
       // Header: pure virtual declaration
       expect(result.headerCode).toContain(
-        "virtual IEC_REAL CALCULATE(IEC_REAL INPUT) = 0;",
+        "virtual IEC_REAL CALCULATE(REAL_t INPUT__in) = 0;",
       );
 
       // Implementation: no body for abstract methods
@@ -892,7 +890,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       expect(result.headerCode).toContain("virtual IEC_INT GETVALUE() = 0;");
       // Derived interface only declares its own new methods
       expect(result.headerCode).toContain(
-        "virtual void SETVALUE(IEC_INT V) = 0;",
+        "virtual void SETVALUE(INT_t V__in) = 0;",
       );
     });
   });
@@ -1036,9 +1034,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       `);
 
       // Property
-      expect(result.headerCode).toContain(
-        "    IEC_REAL get_VALUE();",
-      );
+      expect(result.headerCode).toContain("    IEC_REAL get_VALUE();");
 
       // VAR_INST mangled
       expect(result.headerCode).toContain(
@@ -1064,7 +1060,7 @@ describe("Codegen - OOP Features (Phase 5.2)", () => {
       `);
 
       expect(result.headerCode).toContain(
-        "    IEC_STRING FORMAT(IEC_STRING NAME, IEC_REAL VALUE, IEC_INT PRECISION);",
+        "    IEC_STRING FORMAT(const char* NAME__in, REAL_t VALUE__in, INT_t PRECISION__in);",
       );
     });
 

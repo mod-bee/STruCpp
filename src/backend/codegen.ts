@@ -144,6 +144,10 @@ const VLA_TYPE_NAME = /^__VLA_(\d+)D_(.+)$/;
  *  method binds `<name>` itself (methodOutputBindings). */
 const METHOD_OUTPUT_SUFFIX = "__out";
 
+/** A method's VAR_INPUT passed in a lighter form than its IEC wrapper
+ *  (methodInputPassing) is `<name>` + this; the method binds `<name>`. */
+const METHOD_INPUT_SUFFIX = "__in";
+
 /** The parts of a type reference that decide its C++ type. */
 interface TypeShape {
   name: string;
@@ -3746,6 +3750,43 @@ export class CodeGenerator {
     return params;
   }
 
+  /**
+   * How a method's VAR_INPUT crosses the call, when lighter than its IEC
+   * wrapper by value (which C++ builds as a temporary at every call site): an
+   * elementary value as its payload (`INT_t`), a STRING as `const char*`
+   * (the method copies it into its STRING(n), truncating as an assignment
+   * does), a generic (ANY) descriptor by const reference. Undefined for any
+   * other input (passed as before). An omitted input is still given its
+   * declared initial value at the call (IEC 61131-3 Ed.3 6.6.1.4.2), now in
+   * this lighter form.
+   */
+  /** Inputs of every method but the lifecycle ones (FB_Init, FB_Reinit,
+   *  FB_Exit: called once per instance by construction, never at a call
+   *  site worth shrinking) take the lighter forms. */
+  private lightInputs(methodName: string): boolean {
+    const upper = methodName.toUpperCase();
+    return upper !== FB_INIT && upper !== FB_EXIT && upper !== "FB_REINIT";
+  }
+
+  private methodInputPassing(type: {
+    name: string;
+    arrayDimensions?: unknown;
+    referenceKind?: string;
+  }): { kind: "payload" | "string" | "any"; param: string } | undefined {
+    if (type.arrayDimensions !== undefined) return undefined;
+    if (type.referenceKind !== undefined && type.referenceKind !== "none") {
+      return undefined;
+    }
+    const upper = type.name.toUpperCase();
+    if (isDeclarableGenericType(type.name) || isAnyDescriptorType(type.name)) {
+      return { kind: "any", param: "const strucpp::IEC_ANY&" };
+    }
+    if (upper === "STRING") return { kind: "string", param: "const char*" };
+    if (upper === "WSTRING") return undefined;
+    if (TYPE_CLASS_BY_IEC_TYPE[upper] === undefined) return undefined;
+    return { kind: "payload", param: this.typeCodeGen.mapTypeToCpp(upper) };
+  }
+
   /** The opening lines of a function body: each VAR_OUTPUT bound by its own
    *  name to the caller's variable, or to a slot built only when omitted. */
   private functionOutputBindings(
@@ -3979,9 +4020,19 @@ export class CodeGenerator {
     const params: string[] = [];
     for (const block of method.varBlocks) {
       if (block.blockType === "VAR_INPUT") {
+        // How each input crosses the call (methodInputPassing): its payload
+        // by value, a STRING as `const char*`, an ANY descriptor by const
+        // reference; the method binds its own copy by name.
         for (const decl of block.declarations) {
           for (const name of decl.names) {
-            params.push(`${this.mapTypeRefToCpp(decl.type)} ${name}`);
+            const passing = this.lightInputs(method.name)
+              ? this.methodInputPassing(decl.type)
+              : undefined;
+            params.push(
+              passing === undefined
+                ? `${this.mapTypeRefToCpp(decl.type)} ${name}`
+                : `${passing.param} ${name}${METHOD_INPUT_SUFFIX}`,
+            );
           }
         }
       } else if (block.blockType === "VAR_IN_OUT") {
@@ -4019,6 +4070,23 @@ export class CodeGenerator {
    */
   private methodOutputBindings(method: MethodDeclaration): string[] {
     const lines: string[] = [];
+    // Each input passed in a lighter form: the method's own copy, by name.
+    for (const block of method.varBlocks) {
+      if (block.blockType !== "VAR_INPUT") continue;
+      for (const decl of block.declarations) {
+        for (const name of decl.names) {
+          if (
+            !this.lightInputs(method.name) ||
+            this.methodInputPassing(decl.type) === undefined
+          ) {
+            continue;
+          }
+          lines.push(
+            `    ${this.mapTypeRefToCpp(decl.type)} ${name}(${name}${METHOD_INPUT_SUFFIX});`,
+          );
+        }
+      }
+    }
     for (const block of method.varBlocks) {
       if (block.blockType !== "VAR_OUTPUT") continue;
       for (const decl of block.declarations) {
@@ -7007,6 +7075,13 @@ export class CodeGenerator {
           this.generateExpression(arg.value),
         ),
       );
+      if (param?.kind === "VAR_INPUT" && this.lightInputs(methodName)) {
+        // A STRING goes as its text; an elementary value converts to the
+        // payload parameter by itself (IECVar's conversion to its value).
+        const passing = this.methodInputPassing(param.type);
+        if (passing?.kind === "string") return `strucpp::str_arg(${code})`;
+        return code;
+      }
       if (param?.kind === "VAR_OUTPUT") {
         const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(param.type));
         return `strucpp::out_ptr<${cppType}>(${code})`;
@@ -7149,12 +7224,23 @@ export class CodeGenerator {
           if (arg) {
             plan.push({ arg });
           } else if (kind === "VAR_INPUT") {
-            const cppType = this.mapTypeRefToCpp(d.type);
-            plan.push({
-              code: d.initialValue
-                ? this.generateInitializer(d.initialValue, cppType, d.type.name)
-                : `${cppType}{}`,
-            });
+            const passing = this.lightInputs(methodName)
+              ? this.methodInputPassing(d.type)
+              : undefined;
+            const cppType =
+              passing?.kind === "payload"
+                ? passing.param
+                : this.mapTypeRefToCpp(d.type);
+            let code = d.initialValue
+              ? this.generateInitializer(d.initialValue, cppType, d.type.name)
+              : `${cppType}{}`;
+            if (passing?.kind === "string") {
+              // the declared initial value as the text the method copies
+              code = d.initialValue
+                ? `strucpp::str_arg(${this.generateInitializer(d.initialValue, this.mapTypeRefToCpp(d.type), d.type.name)})`
+                : `""`;
+            }
+            plan.push({ code });
           } else if (kind === "VAR_OUTPUT") {
             // An omitted output: NULL, the method writes a slot of its own.
             plan.push({ code: "nullptr" });

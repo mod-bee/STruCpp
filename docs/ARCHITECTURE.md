@@ -162,7 +162,7 @@ All program/function variables are wrapped in `IECVar<T>` which provides transpa
 
 - **Functions**: C++ free functions with INPUT params by value, IN_OUT by reference, OUTPUT by pointer as a method's (below): `nullptr` for an omitted output, bound to its name at the top of the body
 - **Function Blocks**: C++ classes with member variables, `operator()()` method for the FB body, and generated methods/properties. Supports ABSTRACT (pure virtual), FINAL, EXTENDS (inheritance), and IMPLEMENTS (interfaces).
-- **Methods**: INPUT params by value, IN_OUT by reference, OUTPUT by pointer (`<NAME>__out`, `nullptr` for an output the call omits). The method opens by binding each output to its own name: the caller's variable, or a slot of the method (`strucpp::OutSlot`) built only for an omitted one, so a call site builds no temporary. The body, `{external}` C++ included, uses the name as before.
+- **Methods**: INPUT params by value (an elementary input as its payload, `INT_t`, a STRING as `const char*`, an ANY descriptor as `const IEC_ANY&`, each bound at the top of the body to a copy of its IEC type by its own name; lifecycle methods take their IEC types), IN_OUT by reference, OUTPUT by pointer (`<NAME>__out`, `nullptr` for an output the call omits). The method opens by binding each output to its own name: the caller's variable, or a slot of the method (`strucpp::OutSlot`) built only for an omitted one, so a call site builds no temporary. The body, `{external}` C++ included, uses the name as before.
 - **Programs**: C++ classes with global instances, connected to CONFIGURATION/RESOURCE/TASK structure
 
 ### PLC Data Block (`plcDataBlock`, `--plc-data-block`)
@@ -230,6 +230,7 @@ null, or a change confined to a consumer's own code, needs no bump.
 
 - 1: before 0.7.0-modbee.4 (no stamp)
 - 2: a method's and a function's VAR_OUTPUT passed by pointer (f295701, fd86039)
+- 3: a method's elementary inputs passed as their payload, STRING inputs as `const char*`, ANY inputs as `const IEC_ANY&`
 
 ### Bundled Libraries
 

@@ -2,7 +2,8 @@
  * Code size of a method call that omits its outputs: the same at every call
  * site as a call to a method with no outputs, however big the outputs are
  * (a STRING(64), a STRING(16), a TIME). The omitted outputs are built once,
- * inside the method, not at each call. Measured with g++ -Os on the run() of
+ * inside the method, not at each call. Omitted inputs cost a few bytes each:
+ * their initial value in payload form, no IEC wrapper built per call. Measured with g++ -Os on the run() of
  * a program with one call and one with nine.
  */
 
@@ -51,11 +52,26 @@ FUNCTION_BLOCK Eng
     nCalls := nCalls + 1;
     Plain := nId;
   END_METHOD
+  METHOD PUBLIC Ins : DINT
+    VAR_INPUT
+      nId : DINT;
+      sPrefix : STRING(16);
+      bCommand : BOOL;
+      tPulse : TIME := T#1s;
+      tSettle : TIME;
+      nDepth : USINT := 4;
+    END_VAR
+    nCalls := nCalls + 1;
+    IF bCommand THEN nCalls := nCalls + 1; END_IF;
+    Ins := nId + LEN(sPrefix) + TIME_TO_DINT(tPulse + tSettle) + nDepth;
+  END_METHOD
 END_FUNCTION_BLOCK
 ${program("P_OUTS_1", "Outs", 1)}
 ${program("P_OUTS_9", "Outs", 9)}
 ${program("P_PLAIN_1", "Plain", 1)}
-${program("P_PLAIN_9", "Plain", 9)}`;
+${program("P_PLAIN_9", "Plain", 9)}
+${program("P_INS_1", "Ins", 1)}
+${program("P_INS_9", "Ins", 9)}`;
 
 describeIfGpp("the code size of a call that omits outputs", () => {
   let tempDir: string;
@@ -90,5 +106,10 @@ describeIfGpp("the code size of a call that omits outputs", () => {
     const perPlain = (size("P_PLAIN_9") - size("P_PLAIN_1")) / 8;
     // Four null pointers more per call, a few instructions at most.
     expect(perOuts - perPlain).toBeLessThanOrEqual(16);
+    // Five omitted inputs (a STRING(16), two TIMEs, a BOOL, a USINT) go as
+    // their declared initial values in their payload form: an immediate or
+    // a pointer each, not an IEC wrapper built at the call site.
+    const perIns = (size("P_INS_9") - size("P_INS_1")) / 8;
+    expect(perIns - perPlain).toBeLessThanOrEqual(5 * 8);
   });
 });

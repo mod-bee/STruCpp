@@ -466,7 +466,7 @@ END_PROGRAM`;
 
   it("declares the parameter as the descriptor type", () => {
     expect(compileSource(SRC("n := s.Describe(r);")).headerCode).toContain(
-      "DESCRIBE(IEC_ANY SAMPLE)",
+      "DESCRIBE(const strucpp::IEC_ANY& SAMPLE__in)",
     );
   });
 

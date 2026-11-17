@@ -123,7 +123,7 @@ describeIfGpp("a method's outputs by pointer", () => {
     expect(result.cppCode).not.toContain("as_lvalue");
     expect(result.cppCode).toMatch(/A\.SERVE\(1, nullptr, nullptr\)/);
     expect(result.headerCode).toMatch(
-      /SERVE\(IEC_DINT NID, IECStringVar<64>\* STEXT__out, IEC_DINT\* NCOUNT__out\)/,
+      /SERVE\(DINT_t NID__in, IECStringVar<64>\* STEXT__out, IEC_DINT\* NCOUNT__out\)/,
     );
     fs.writeFileSync(path.join(tempDir, "generated.hpp"), result.headerCode);
     fs.writeFileSync(path.join(tempDir, "generated.cpp"), result.cppCode);

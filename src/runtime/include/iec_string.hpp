@@ -1364,6 +1364,20 @@ inline auto MUX(IEC_INT k, const A& in0, const B& in1, const Rest&... rest) noex
 #undef STRUCPP_STRING_COMPARE_EXTENSIBLE
 
 // =============================================================================
+// A STRING input as it crosses a method call: its text, which the method
+// copies into its own STRING(n). A temporary (a CONCAT result) lives until
+// the end of the full expression holding the call; a variable's text is its
+// own storage.
+// =============================================================================
+inline const char* str_arg(const char* s) noexcept { return s != nullptr ? s : ""; }
+
+template<size_t N>
+inline const char* str_arg(const IECString<N>& s) noexcept { return s.c_str(); }
+
+template<size_t N>
+inline const char* str_arg(const IECStringVar<N>& s) noexcept { return s.c_str(); }
+
+// =============================================================================
 // TO_STRING Conversions
 // =============================================================================
 
