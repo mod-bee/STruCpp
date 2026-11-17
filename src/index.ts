@@ -33,6 +33,7 @@ import type {
   InterfaceDeclaration,
   TypeReference,
   ASTNode,
+  VarBlock,
 } from "./frontend/ast.js";
 import { mergeCompilationUnits } from "./merge.js";
 import { lowerInlineTypes } from "./frontend/lower-inline-types.js";
@@ -105,6 +106,89 @@ function validateCompileOptions(options: CompileOptions): void {
  * declared reachable so the test harness sees the full symbol set
  * regardless of what the source AST happens to reference.
  */
+/** The names a VarBlock list declares (VAR_EXTERNAL excluded: it names a
+ *  global declared elsewhere, perhaps a library's), upper case. */
+function declaredVariableNames(
+  blocks: readonly VarBlock[] | undefined,
+  into: Set<string>,
+): Set<string> {
+  for (const block of blocks ?? []) {
+    if (block.blockType === "VAR_EXTERNAL") continue;
+    for (const decl of block.declarations) {
+      for (const name of decl.names) into.add(name.toUpperCase());
+    }
+  }
+  return into;
+}
+
+/**
+ * Of the variable names the AST reads, those that may name a library symbol
+ * (an inline global, a function the codegen reaches through it). A variable
+ * a POU declares hides a library symbol of the same name in that POU (IEC
+ * 61131-3 Ed.3 6.5.2.2: a POU's declarations are local to it), so a read of
+ * it pulls in nothing. A name the project never declares is kept as
+ * before; a declared one only where some read of it is outside every scope
+ * that declares it.
+ */
+function libraryReadsOf(
+  ast: CompilationUnit,
+  variableNames: ReadonlySet<string>,
+): Set<string> {
+  const globals = declaredVariableNames(ast.globalVarBlocks, new Set());
+  for (const cfg of ast.configurations ?? []) {
+    declaredVariableNames(cfg.varBlocks, globals);
+  }
+  const declaredAnywhere = new Set(globals);
+  const free = new Set<string>();
+  const readsIn = (node: unknown, scope: ReadonlySet<string>): void => {
+    if (node === undefined) return;
+    walkAST(node as ASTNode, (n: ASTNode): void => {
+      if (n.kind !== "VariableExpression") return;
+      const name = (n as unknown as { name: string }).name.toUpperCase();
+      if (!scope.has(name)) free.add(name);
+    });
+  };
+  const withVars = (
+    base: ReadonlySet<string>,
+    blocks: readonly VarBlock[] | undefined,
+  ): Set<string> => {
+    const own = declaredVariableNames(blocks, new Set());
+    for (const name of own) declaredAnywhere.add(name);
+    return new Set([...base, ...own]);
+  };
+  for (const prog of ast.programs) {
+    readsIn(prog, withVars(globals, prog.varBlocks));
+  }
+  for (const fn of ast.functions) {
+    readsIn(fn, withVars(globals, fn.varBlocks));
+  }
+  for (const fb of ast.functionBlocks) {
+    const fbScope = withVars(globals, fb.varBlocks);
+    for (const block of fb.varBlocks) readsIn(block, fbScope);
+    for (const stmt of fb.body) readsIn(stmt, fbScope);
+    for (const method of fb.methods) {
+      readsIn(method, withVars(fbScope, method.varBlocks));
+    }
+    for (const prop of fb.properties) {
+      for (const stmt of prop.getter ?? []) readsIn(stmt, fbScope);
+      for (const stmt of prop.setter ?? []) readsIn(stmt, fbScope);
+    }
+  }
+  for (const node of [
+    ...ast.types,
+    ...ast.interfaces,
+    ...ast.globalVarBlocks,
+    ...(ast.configurations ?? []),
+  ]) {
+    readsIn(node, globals);
+  }
+  const out = new Set<string>();
+  for (const name of variableNames) {
+    if (!declaredAnywhere.has(name) || free.has(name)) out.add(name);
+  }
+  return out;
+}
+
 function collectUsedSymbols(
   ast: CompilationUnit,
   archives: StlibArchive[],
@@ -143,6 +227,7 @@ function collectUsedSymbols(
 
   // Seed the reachable set from names the user AST references.
   const referencedNames = new Set<string>();
+  const variableNames = new Set<string>();
   walkAST(ast, (node: ASTNode): void => {
     switch (node.kind) {
       case "FunctionCallExpression": {
@@ -152,9 +237,10 @@ function collectUsedSymbols(
       }
       case "VariableExpression": {
         // Inline-global reads (e.g. `MATH.PI2`) show up as
-        // VariableExpression with name="MATH".
+        // VariableExpression with name="MATH". Sorted out below: a name the
+        // project declares as a variable may be one of its own.
         const ve = node as unknown as { name: string };
-        referencedNames.add(ve.name.toUpperCase());
+        variableNames.add(ve.name.toUpperCase());
         break;
       }
       case "TypeReference": {
@@ -189,6 +275,10 @@ function collectUsedSymbols(
       }
     }
   });
+
+  for (const name of libraryReadsOf(ast, variableNames)) {
+    referencedNames.add(name);
+  }
 
   // BFS through the chunk dep graph.
   const reachable = new Set<string>(); // keys: "<library>:<chunk>"
