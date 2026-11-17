@@ -541,8 +541,11 @@ export interface LibraryCompileResult {
  *   2  a method's and a function's VAR_OUTPUT by pointer (f295701, fd86039)
  *   3  a method's elementary, STRING and ANY inputs passed lighter
  *      (payload by value, const char*, const IEC_ANY&)
+ *   4  a function's inputs alike
+ * 2 to 4 were never released (the first stamped release is 0.7.0-modbee.4);
+ * each still marks archives built by the development compilers between.
  */
-export const STRUCPP_ABI_VERSION = 3;
+export const STRUCPP_ABI_VERSION = 4;
 
 export interface StlibArchive {
   /** Format version for forward compatibility */

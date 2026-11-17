@@ -12,7 +12,9 @@
  * - an ANY input describes the caller's variable; enumeration, structure and
  *   REAL inputs (an INT widened to one) arrive as given;
  * - interfaces and overrides pass inputs alike; a C++ ({external}) body
- *   reads an input by name and by address.
+ *   reads an input by name and by address;
+ * - a FUNCTION's inputs alike, whether the call is formal, positional,
+ *   nested or with EN/ENO; an INT widens to a DINT, LINT or REAL input.
  * Each failed check adds its own power of two; the test wants 0.
  */
 
@@ -97,6 +99,100 @@ FUNCTION F_Mix : DINT
   n := 99;
 END_FUNCTION
 
+FUNCTION F_Mix2 : DINT
+  VAR_INPUT
+    n : INT := 5;
+    s : STRING(4) := 'ab';
+    b : BOOL := TRUE;
+    t : TIME := T#2s;
+    f : REAL := 1.5;
+    e : E_Mode := E_Mode.Run;
+    p : S_Pair := (a := 0, b := 0);
+    w : WSTRING(4) := "wz";
+  END_VAR
+  VAR_OUTPUT sOut : STRING(4); nLen : INT; END_VAR
+  sOut := s;
+  nLen := LEN(s);
+  F_Mix2 := n;
+  IF b THEN F_Mix2 := F_Mix2 + 100; END_IF;
+  IF t = T#2s THEN F_Mix2 := F_Mix2 + 1000; END_IF;
+  IF f > 1.4 AND f < 1.6 THEN F_Mix2 := F_Mix2 + 10000; END_IF;
+  IF e = E_Mode.Run THEN F_Mix2 := F_Mix2 + 100000; END_IF;
+  F_Mix2 := F_Mix2 + p.a * 1000000 + p.b * 10000000;
+  IF LEN(w) <> 2 THEN F_Mix2 := -F_Mix2; END_IF;
+  n := 99;
+  s := 'zzzz';
+  p.a := 7;
+END_FUNCTION
+
+FUNCTION F_Real2 : REAL
+  VAR_INPUT f : REAL; END_VAR
+  F_Real2 := f * 2.0;
+END_FUNCTION
+
+FUNCTION F_Wide : LINT
+  VAR_INPUT d : DINT; l : LINT := 7; END_VAR
+  F_Wide := d + l;
+END_FUNCTION
+
+FUNCTION F_AnySize : DINT
+  VAR_INPUT x : ANY; END_VAR
+  {external
+    F_ANYSIZE_result = X.DISIZE;
+  }
+END_FUNCTION
+
+FUNCTION F_Native : DINT
+  VAR_INPUT n : INT := 4; m : DINT; END_VAR
+  {external
+    const strucpp::IEC_DINT* pm = &M;
+    F_NATIVE_result = N + *pm;
+    N = 77;
+  }
+END_FUNCTION
+
+FUNCTION F_Check2 : DINT
+  VAR
+    k : INT := 3;
+    r : DINT;
+    so : STRING(4);
+    sl : STRING(10) := 'longer';
+    nl : INT;
+    i : INT := 4;
+    pair : S_Pair := (a := 1, b := 2);
+    big : ARRAY[1..5] OF DINT;
+    fault : DINT;
+    ok : BOOL;
+  END_VAR
+  (* a function's omitted inputs: the declared initial values *)
+  r := F_Mix2();
+  IF r <> 111105 THEN fault := fault + 1; END_IF;
+  r := F_Mix2(n := k, s := 'x', b := FALSE, t := T#1s, f := 2.5, e := E_Mode.Stop, p := pair, sOut => so);
+  IF r <> 21000003 OR so <> 'x' THEN fault := fault + 2; END_IF;
+  r := F_Mix2(sOut => so, nLen => nl);
+  IF r <> 111105 OR so <> 'ab' OR nl <> 2 THEN fault := fault + 4; END_IF;
+  IF k <> 3 OR pair.a <> 1 THEN fault := fault + 8; END_IF;
+  (* a STRING input holds its declared length *)
+  r := F_Mix2(s := 'abcdefgh', sOut => so, nLen => nl);
+  IF so <> 'abcd' OR nl <> 4 THEN fault := fault + 16; END_IF;
+  r := F_Mix2(s := sl, nLen => nl);
+  IF nl <> 4 THEN fault := fault + 32; END_IF;
+  r := F_Mix2(s := CONCAT('a', 'b'), nLen => nl);
+  IF nl <> 2 THEN fault := fault + 64; END_IF;
+  (* widened: an INT to a REAL input, an INT to DINT and LINT inputs *)
+  IF F_Real2(f := i) <> 8.0 OR F_Real2(i) <> 8.0 THEN fault := fault + 128; END_IF;
+  IF F_Wide(d := i) <> 11 OR F_Wide(i, k) <> 7 OR F_Wide(d := 2) <> 9 THEN fault := fault + 256; END_IF;
+  (* ANY: the caller's variable *)
+  IF F_AnySize(x := big) <> 20 OR F_AnySize(big) <> 20 THEN fault := fault + 512; END_IF;
+  (* a C++ body: by name and by address; writing its copy changes nothing *)
+  IF F_Native(m := 10) <> 14 OR F_Native(n := k, m := 1) <> 4 OR F_Native(k, 2) <> 5 OR k <> 3 THEN fault := fault + 1024; END_IF;
+  (* positional, nested, and with EN/ENO *)
+  IF F_Mix(k, 'abc') <> 303 OR F_Mix(n := TO_INT(F_Mix(k, 'a')), s := '') <> 103 THEN fault := fault + 2048; END_IF;
+  r := F_Mix(EN := TRUE, n := 2, s := 'a', ENO => ok);
+  IF r <> 102 OR NOT ok THEN fault := fault + 4096; END_IF;
+  F_Check2 := fault;
+END_FUNCTION
+
 FUNCTION F_Check : DINT
   VAR
     c : FB_Calc;
@@ -157,6 +253,7 @@ describeIfGpp("how a call passes its inputs", () => {
       testST: `
 TEST 'call inputs'
   ASSERT_EQ(F_Check(), 0);
+  ASSERT_EQ(F_Check2(), 0);
 END_TEST
 `,
       testFileName: "test_call_inputs.st",

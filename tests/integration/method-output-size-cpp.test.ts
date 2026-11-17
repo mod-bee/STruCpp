@@ -3,8 +3,9 @@
  * site as a call to a method with no outputs, however big the outputs are
  * (a STRING(64), a STRING(16), a TIME). The omitted outputs are built once,
  * inside the method, not at each call. Omitted inputs cost a few bytes each:
- * their initial value in payload form, no IEC wrapper built per call. Measured with g++ -Os on the run() of
- * a program with one call and one with nine.
+ * their initial value in payload form, no IEC wrapper built per call; a
+ * FUNCTION's alike. Measured with g++ -Os on the run() of a program with
+ * one call and one with nine.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -25,7 +26,8 @@ const describeIfGpp = hasGpp ? describe : describe.skip;
 const calls = (method: string, n: number): string =>
   Array.from(
     { length: n },
-    (_, i) => `  r := e.${method}(nId := ${i + 1});`,
+    (_, i) =>
+      `  r := ${method.startsWith("F_") ? "" : "e."}${method}(nId := ${i + 1});`,
   ).join("\n");
 
 const program = (name: string, method: string, n: number): string => `
@@ -66,12 +68,32 @@ FUNCTION_BLOCK Eng
     Ins := nId + LEN(sPrefix) + TIME_TO_DINT(tPulse + tSettle) + nDepth;
   END_METHOD
 END_FUNCTION_BLOCK
+FUNCTION F_Plain : DINT
+  VAR_INPUT nId : DINT; END_VAR
+  F_Plain := nId + 1;
+END_FUNCTION
+FUNCTION F_Ins : DINT
+  VAR_INPUT
+    nId : DINT;
+    sPrefix : STRING(16) := 'p';
+    bCommand : BOOL := FALSE;
+    tPulse : TIME := T#1s;
+    tSettle : TIME := T#0s;
+    nDepth : USINT := 4;
+  END_VAR
+  F_Ins := nId + LEN(sPrefix) + TIME_TO_DINT(tPulse + tSettle) + nDepth;
+  IF bCommand THEN F_Ins := F_Ins + 1; END_IF;
+END_FUNCTION
 ${program("P_OUTS_1", "Outs", 1)}
 ${program("P_OUTS_9", "Outs", 9)}
 ${program("P_PLAIN_1", "Plain", 1)}
 ${program("P_PLAIN_9", "Plain", 9)}
 ${program("P_INS_1", "Ins", 1)}
-${program("P_INS_9", "Ins", 9)}`;
+${program("P_INS_9", "Ins", 9)}
+${program("P_FPLAIN_1", "F_Plain", 1)}
+${program("P_FPLAIN_9", "F_Plain", 9)}
+${program("P_FINS_1", "F_Ins", 1)}
+${program("P_FINS_9", "F_Ins", 9)}`;
 
 describeIfGpp("the code size of a call that omits outputs", () => {
   let tempDir: string;
@@ -111,5 +133,9 @@ describeIfGpp("the code size of a call that omits outputs", () => {
     // a pointer each, not an IEC wrapper built at the call site.
     const perIns = (size("P_INS_9") - size("P_INS_1")) / 8;
     expect(perIns - perPlain).toBeLessThanOrEqual(5 * 8);
+    // A function's omitted inputs alike.
+    const perFIns = (size("P_FINS_9") - size("P_FINS_1")) / 8;
+    const perFPlain = (size("P_FPLAIN_9") - size("P_FPLAIN_1")) / 8;
+    expect(perFIns - perFPlain).toBeLessThanOrEqual(5 * 8);
   });
 });

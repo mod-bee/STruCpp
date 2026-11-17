@@ -79,7 +79,7 @@ describeIfGpp("a function's outputs by pointer", () => {
     expect(result.cppCode).not.toContain("__output_tmp_");
     expect(result.cppCode).toContain("F_DIV(17, 5, nullptr, nullptr)");
     expect(result.headerCode).toMatch(
-      /F_DIV\(IEC_DINT A, IEC_DINT B, IEC_DINT\* NREM__out, IECStringVar<16>\* STEXT__out\)/,
+      /F_DIV\(DINT_t A__in, DINT_t B__in, IEC_DINT\* NREM__out, IECStringVar<16>\* STEXT__out\)/,
     );
   });
 

@@ -3709,10 +3709,17 @@ export class CodeGenerator {
     const params: string[] = [];
     for (const block of func.varBlocks) {
       if (block.blockType === "VAR_INPUT") {
+        // How each input crosses the call (methodInputPassing), as a
+        // method's: its payload, its text or its descriptor, the function
+        // binding its own IEC variable of that name (functionParamBindings).
         for (const decl of block.declarations) {
           for (const name of decl.names) {
+            const cppName = this.functionVarName(name, decl.type.name);
+            const passing = this.methodInputPassing(decl.type);
             params.push(
-              `${this.mapTypeRefToCpp(decl.type)} ${this.functionVarName(name, decl.type.name)}`,
+              passing === undefined
+                ? `${this.mapTypeRefToCpp(decl.type)} ${cppName}`
+                : `${passing.param} ${cppName}${METHOD_INPUT_SUFFIX}`,
             );
           }
         }
@@ -3736,7 +3743,7 @@ export class CodeGenerator {
         }
       } else if (block.blockType === "VAR_OUTPUT") {
         // By pointer, NULL for an output the call omits: the function binds
-        // its own slot then (functionOutputBindings), so a call site builds
+        // its own slot then (functionParamBindings), so a call site builds
         // no temporary for it — as a method's outputs.
         for (const decl of block.declarations) {
           for (const name of decl.names) {
@@ -3787,12 +3794,26 @@ export class CodeGenerator {
     return { kind: "payload", param: this.typeCodeGen.mapTypeToCpp(upper) };
   }
 
-  /** The opening lines of a function body: each VAR_OUTPUT bound by its own
-   *  name to the caller's variable, or to a slot built only when omitted. */
-  private functionOutputBindings(
+  /** The opening lines of a function body: each input passed in a lighter
+   *  form bound as its own IEC variable (the function's copy, as before), and
+   *  each VAR_OUTPUT bound by its own name to the caller's variable, or to a
+   *  slot built only when omitted. */
+  private functionParamBindings(
     func: CompilationUnit["functions"][0],
   ): string[] {
     const lines: string[] = [];
+    for (const block of func.varBlocks) {
+      if (block.blockType !== "VAR_INPUT") continue;
+      for (const decl of block.declarations) {
+        if (this.methodInputPassing(decl.type) === undefined) continue;
+        for (const name of decl.names) {
+          const cppName = this.functionVarName(name, decl.type.name);
+          lines.push(
+            `    ${this.mapTypeRefToCpp(decl.type)} ${cppName}(${cppName}${METHOD_INPUT_SUFFIX});`,
+          );
+        }
+      }
+    }
     for (const block of func.varBlocks) {
       if (block.blockType !== "VAR_OUTPUT") continue;
       for (const decl of block.declarations) {
@@ -4556,7 +4577,7 @@ export class CodeGenerator {
 
     // Helper to emit local variable declarations (VAR/VAR_TEMP) and body
     const emitFunctionBody = (funcName: string) => {
-      for (const line of this.functionOutputBindings(func)) this.emit(line);
+      for (const line of this.functionParamBindings(func)) this.emit(line);
       this.emit(`    ${retType} ${funcName}_result;`);
       this.currentFunctionName = func.name;
       this.enterScope(func.varBlocks);
@@ -4655,9 +4676,14 @@ export class CodeGenerator {
         block.blockType === "VAR_IN_OUT" ||
         block.blockType === "VAR_OUTPUT"
       ) {
-        const suffix =
-          block.blockType === "VAR_OUTPUT" ? METHOD_OUTPUT_SUFFIX : "";
         for (const decl of block.declarations) {
+          const suffix =
+            block.blockType === "VAR_OUTPUT"
+              ? METHOD_OUTPUT_SUFFIX
+              : block.blockType === "VAR_INPUT" &&
+                  this.methodInputPassing(decl.type) !== undefined
+                ? METHOD_INPUT_SUFFIX
+                : "";
           for (const name of decl.names) {
             names.push(
               `${this.functionVarName(name, decl.type.name)}${suffix}`,
@@ -7096,8 +7122,16 @@ export class CodeGenerator {
    * its type is the parameter's, else a copy assigned back after the call.
    */
   /** A function's VAR_OUTPUT argument: the bound variable's address (the
-   *  parameter is a pointer, NULL when omitted). Anything else as it is. */
+   *  parameter is a pointer, NULL when omitted); a VAR_INPUT's in the form
+   *  it crosses the call. Anything else as it is. */
   private outputArgument(param: CallParam | undefined, code: string): string {
+    if (param?.kind === "VAR_INPUT") {
+      // A function's STRING input goes as its text (methodInputPassing); an
+      // elementary value converts to the payload parameter by itself.
+      return this.methodInputPassing(param.type)?.kind === "string"
+        ? `strucpp::str_arg(${code})`
+        : code;
+    }
     if (param?.kind !== "VAR_OUTPUT") return code;
     const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(param.type));
     return `strucpp::out_ptr<${cppType}>(${code})`;
@@ -7467,6 +7501,7 @@ export class CodeGenerator {
     args: string[],
     argExprs: FunctionCallExpression["arguments"],
     paramTypes: string[],
+    passings?: ReadonlyArray<{ kind: string; param: string } | undefined>,
   ): void {
     const exprCount = argExprs.length;
     for (let i = 0; i < args.length && i < paramTypes.length; i++) {
@@ -7486,7 +7521,11 @@ export class CodeGenerator {
         this.isBareLiteral(expr) ||
         this.canImplicitWiden(argType, paramType)
       ) {
-        args[i] = `static_cast<IEC_${paramType}>(${args[i]})`;
+        const passing = passings?.[i];
+        if (passing?.kind === "string") continue;
+        const target =
+          passing?.kind === "payload" ? passing.param : `IEC_${paramType}`;
+        args[i] = `static_cast<${target}>(${args[i]})`;
       }
     }
   }
@@ -8125,10 +8164,18 @@ export class CodeGenerator {
       }
     }
 
-    // Apply implicit widening casts for user-defined function args
+    // Apply implicit widening casts for user-defined function args, to the
+    // payload an input crosses the call as (methodInputPassing).
     const paramTypes = this.getParamTypes(nameUpper);
     if (paramTypes) {
-      this.coerceUserFuncArgs(args, expr.arguments, paramTypes);
+      this.coerceUserFuncArgs(
+        args,
+        expr.arguments,
+        paramTypes,
+        callParams?.map((p) =>
+          p.kind === "VAR_INPUT" ? this.methodInputPassing(p.type) : undefined,
+        ),
+      );
     }
 
     return `${expr.functionName}(${args.join(", ")})`;
@@ -8284,6 +8331,26 @@ export class CodeGenerator {
   }
 
   /**
+   * The declared initial value of a function parameter a call omits, in the
+   * form its input crosses the call (methodInputPassing): the payload, or the
+   * text of a STRING.
+   */
+  private functionInputDefault(
+    blockType: string,
+    type: TypeReference,
+    initial: Expression,
+  ): string {
+    const passing =
+      blockType === "VAR_INPUT" ? this.methodInputPassing(type) : undefined;
+    const cppType = this.mapTypeRefToCpp(type);
+    if (passing?.kind === "payload") {
+      return this.generateInitializer(initial, passing.param, type.name);
+    }
+    const value = this.generateInitializer(initial, cppType, type.name);
+    return passing?.kind === "string" ? `strucpp::str_arg(${value})` : value;
+  }
+
+  /**
    * Reorder named arguments to match function declaration parameter order.
    * Positional args are placed first (in declaration order, skipping named slots),
    * then named args fill their declared slots. Unfilled parameters get default values.
@@ -8330,10 +8397,10 @@ export class CodeGenerator {
           ? parseInitialValueText(p.initialValue)
           : undefined;
       if (initial) {
-        entry.defaultExpr = this.generateInitializer(
+        entry.defaultExpr = this.functionInputDefault(
+          entry.blockType,
+          typeRef,
           initial,
-          this.mapTypeRefToCpp(typeRef),
-          p.type,
         );
       }
       params.push(entry);
@@ -8353,10 +8420,10 @@ export class CodeGenerator {
               typeRef: decl.type,
             };
             if (decl.initialValue) {
-              entry.defaultExpr = this.generateInitializer(
+              entry.defaultExpr = this.functionInputDefault(
+                block.blockType,
+                decl.type,
                 decl.initialValue,
-                this.mapTypeRefToCpp(decl.type),
-                decl.type.name,
               );
             }
             params.push(entry);
@@ -8442,7 +8509,8 @@ export class CodeGenerator {
           )
         : undefined) ??
       this.outputArgument(
-        param.typeRef && param.blockType === "VAR_OUTPUT"
+        param.typeRef &&
+          (param.blockType === "VAR_OUTPUT" || param.blockType === "VAR_INPUT")
           ? { name: param.name, kind: param.blockType, type: param.typeRef }
           : undefined,
         this.byRefStringArg(
