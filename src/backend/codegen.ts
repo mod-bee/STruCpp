@@ -1775,6 +1775,17 @@ export class CodeGenerator {
       );
     }
 
+    // A linked library's block properties, read through its getter
+    // (`w1.Size` → `W1.get_SIZE()`), inherited ones too.
+    for (const fb of ast.libraryFunctionBlocks ?? []) {
+      for (const prop of fb.properties) {
+        const key = `${fb.name.toUpperCase()}.${prop.name.toUpperCase()}`;
+        if (!this.propertyNameMap.has(key)) {
+          this.propertyNameMap.set(key, prop.name);
+        }
+      }
+    }
+
     // Build method name map, property name map, and interface method names for FBs
     for (const fb of ast.functionBlocks) {
       for (const method of fb.methods) {

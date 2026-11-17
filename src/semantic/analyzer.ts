@@ -38,7 +38,7 @@ import { hasAttribute } from "../frontend/ast.js";
 import type { CompileError, SourceSpan } from "../types.js";
 import { describeInlineType } from "../frontend/lower-inline-types.js";
 import { StdFunctionRegistry } from "./std-function-registry.js";
-import { Scope, SymbolTables } from "./symbol-table.js";
+import { Scope, SymbolTables, libraryBlockMember } from "./symbol-table.js";
 import type {
   FunctionBlockSymbol,
   FunctionSymbol,
@@ -3406,6 +3406,13 @@ export class SemanticAnalyzer {
     for (const fb of ast.functionBlocks) {
       fbMap.set(fb.name.toUpperCase(), fb);
     }
+    // A linked library's blocks, as bases: their methods (every visibility)
+    // and FINAL / ABSTRACT, from the manifest.
+    for (const fb of ast.libraryFunctionBlocks ?? []) {
+      if (!fbMap.has(fb.name.toUpperCase())) {
+        fbMap.set(fb.name.toUpperCase(), fb);
+      }
+    }
 
     // Build interface lookup map: each interface's own prototypes and those
     // it inherits through EXTENDS (6.6.6.6.1 rules 1 and 4).
@@ -5655,6 +5662,9 @@ export class SemanticAnalyzer {
           if (parentScope?.lookupLocal(upper)) return;
           const parentSym = this.symbolTables.globalScope.lookup(parentUpper);
           if (parentSym?.kind !== "functionBlock") break;
+          // A library base carries its variables as lists, inherited ones
+          // included (IEC 61131-3 6.6.5.5.2 rule 2).
+          if (libraryBlockMember(parentSym, upper) !== undefined) return;
           parentName = parentSym.declaration.extends;
         }
       }

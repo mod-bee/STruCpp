@@ -40,6 +40,7 @@ import type {
   Scope,
   VariableSymbol,
 } from "./symbol-table.js";
+import { libraryBlockMember } from "./symbol-table.js";
 import type { StdFunctionRegistry } from "./std-function-registry.js";
 import type { CompileError } from "../types.js";
 import {
@@ -1974,7 +1975,13 @@ export class TypeChecker {
       seen.add(base.toUpperCase());
       const hit = this.symbolTables.getFBScope(base)?.lookupLocal(name);
       if (hit?.kind === "variable" || hit?.kind === "constant") return hit;
-      base = this.symbolTables.lookupFunctionBlock(base)?.declaration.extends;
+      const baseSym = this.symbolTables.lookupFunctionBlock(base);
+      const member =
+        baseSym !== undefined
+          ? libraryBlockMember(baseSym, name.toUpperCase())
+          : undefined;
+      if (member !== undefined) return member;
+      base = baseSym?.declaration.extends;
     }
     return undefined;
   }

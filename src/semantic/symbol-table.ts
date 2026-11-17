@@ -487,3 +487,20 @@ export class SymbolTables {
     return undefined;
   }
 }
+
+/**
+ * A variable of a library function block by upper-case name: its inputs,
+ * outputs, in-outs and VAR members (inherited ones included), or undefined.
+ * A block of the unit has a scope instead.
+ */
+export function libraryBlockMember(
+  fb: FunctionBlockSymbol,
+  upper: string,
+): VariableSymbol | undefined {
+  if (fb.libraryName === undefined) return undefined;
+  for (const list of [fb.inputs, fb.outputs, fb.inouts, fb.locals]) {
+    const hit = (list ?? []).find((v) => v.name.toUpperCase() === upper);
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
