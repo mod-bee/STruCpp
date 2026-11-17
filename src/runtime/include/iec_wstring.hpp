@@ -398,6 +398,20 @@ public:
         set(other.forced_ ? other.forced_value_ : other.value_);
         return *this;
     }
+
+    // Cross-size converting constructors, as IECStringVar's (IEC 61131-3:
+    // WSTRING(n) types are interoperable; a longer value is truncated).
+    template<size_t OtherLen, std::enable_if_t<OtherLen != MaxLen, int> = 0>
+    IECWStringVar(const IECWStringVar<OtherLen>& other) noexcept
+        : value_(other.get().c_str()), forced_{false}, forced_value_{} {}
+
+    template<size_t OtherLen, std::enable_if_t<OtherLen != MaxLen, int> = 0>
+    IECWStringVar(const IECWString<OtherLen>& other) noexcept
+        : value_(other.c_str()), forced_{false}, forced_value_{} {}
+
+    template<size_t OtherLen>
+    IECWStringVar(const IECVar<IECWString<OtherLen>>& other) noexcept
+        : value_(static_cast<IECWString<OtherLen>>(other).c_str()), forced_{false}, forced_value_{} {}
     IECWStringVar& operator=(IECWStringVar&& other) noexcept {
         set(other.forced_ ? other.forced_value_ : other.value_);
         return *this;
@@ -407,6 +421,20 @@ public:
     template<size_t OtherLen>
     IECWStringVar& operator=(const IECWStringVar<OtherLen>& other) noexcept {
         set(IECWString<MaxLen>(other.get().c_str()));
+        return *this;
+    }
+
+    // Assignment from IECVar<IECWString<N>> and from an IECWString of another
+    // size, as IECStringVar's.
+    template<size_t OtherLen>
+    IECWStringVar& operator=(const IECVar<IECWString<OtherLen>>& other) noexcept {
+        set(IECWString<MaxLen>(static_cast<IECWString<OtherLen>>(other).c_str()));
+        return *this;
+    }
+
+    template<size_t OtherLen, std::enable_if_t<OtherLen != MaxLen, int> = 0>
+    IECWStringVar& operator=(const IECWString<OtherLen>& other) noexcept {
+        set(IECWString<MaxLen>(other.c_str()));
         return *this;
     }
 
@@ -725,6 +753,10 @@ template<size_t K> struct iec_wstring_arg<char16_t[K]> {
     static constexpr size_t length = K - 1 > 254 ? K - 1 : 254;
     static IECWString<length> get(const char16_t (&s)[K]) noexcept { return IECWString<length>(s); }
 };
+template<size_t N> struct iec_wstring_arg<IECVar<IECWString<N>>> {
+    static constexpr bool value = true;
+    static IECWString<N> get(const IECVar<IECWString<N>>& s) noexcept { return s.get(); }
+};
 template<> struct iec_wstring_arg<const char16_t*> {
     static constexpr bool value = true;
     static IECWString<254> get(const char16_t* s) noexcept { return IECWString<254>(s); }
@@ -867,7 +899,151 @@ template<typename A, typename B, typename C, enable_if_wstring_args<A, B, C> = 0
 inline auto LIMIT(const A& mn, const B& in, const C& mx) noexcept {
     return MIN(MAX(in, mn), mx);
 }
+
+// SEL and MUX on WSTRINGs of different lengths, as on STRINGs (IEC 61131-3
+// 6.6.2.5.10, Table 32): the result is as long as the longest input.
+// Variables and values only; the general templates handle one type, and
+// literals.
+template<typename T> struct iec_sized_wstring : std::false_type {};
+template<size_t N> struct iec_sized_wstring<IECWString<N>> : std::true_type {};
+template<size_t N> struct iec_sized_wstring<IECWStringVar<N>> : std::true_type {};
+template<size_t N> struct iec_sized_wstring<IECVar<IECWString<N>>> : std::true_type {};
+
+/** Two or more wide string variables or values, not all of one type. */
+template<typename... Ts> struct iec_mixed_sized_wstrings : std::false_type {};
+template<typename A, typename B, typename... Rest>
+struct iec_mixed_sized_wstrings<A, B, Rest...>
+    : std::integral_constant<bool,
+          iec_sized_wstring<std::decay_t<A>>::value && iec_sized_wstring<std::decay_t<B>>::value &&
+              (iec_sized_wstring<std::decay_t<Rest>>::value && ...) &&
+              !(std::is_same<std::decay_t<A>, std::decay_t<B>>::value &&
+                (std::is_same<std::decay_t<A>, std::decay_t<Rest>>::value && ...))> {};
+
+/** The longest of the wide strings' lengths. */
+template<typename... Ts>
+constexpr size_t iec_longest_wstring_length() noexcept {
+    size_t n = 0;
+    ((n = std::decay_t<decltype(iec_as_wstring(std::declval<const Ts&>()))>::max_length > n
+              ? std::decay_t<decltype(iec_as_wstring(std::declval<const Ts&>()))>::max_length
+              : n),
+     ...);
+    return n;
+}
+
+template<typename A, typename B, std::enable_if_t<iec_mixed_sized_wstrings<A, B>::value, int> = 0>
+inline auto SEL(IEC_BOOL g, const A& in0, const B& in1) noexcept {
+    using R = IECWString<iec_longest_wstring_length<A, B>()>;
+    return iec_unwrap(g) ? R(iec_as_wstring(in1)) : R(iec_as_wstring(in0));
+}
+
+/** MUX, as the general one: input K, the last when K is out of range. */
+template<typename A, typename B, typename... Rest,
+         std::enable_if_t<iec_mixed_sized_wstrings<A, B, Rest...>::value, int> = 0>
+inline auto MUX(IEC_INT k, const A& in0, const B& in1, const Rest&... rest) noexcept {
+    using R = IECWString<iec_longest_wstring_length<A, B, Rest...>()>;
+    const R in[] = {R(iec_as_wstring(in0)), R(iec_as_wstring(in1)), R(iec_as_wstring(rest))...};
+    const auto n = static_cast<decltype(iec_unwrap(k))>(sizeof...(Rest) + 2);
+    const auto i = iec_unwrap(k);
+    return (i >= 0 && i < n) ? in[i] : in[n - 1];
+}
 #undef STRUCPP_WSTRING_COMPARE_EXTENSIBLE
+
+// Equality and ordering of a WSTRING variable, as of a STRING one (IEC
+// 61131-3 Ed.3 Table 33 on character strings, 6.6.2.5.11: by character code,
+// a shorter string sorting first), against a value, another variable or a
+// literal of any length (template deduction does not use the conversion to
+// IECWString). <= and >= go through iec_compare_wtext, as for STRING.
+template<size_t Len1, size_t Len2>
+inline bool operator==(const IECWString<Len1>& a, const IECWStringVar<Len2>& b) noexcept {
+    return a == b.get();
+}
+template<size_t Len1, size_t Len2>
+inline bool operator==(const IECWStringVar<Len1>& a, const IECWString<Len2>& b) noexcept {
+    return a.get() == b;
+}
+template<size_t Len1, size_t Len2>
+inline bool operator==(const IECWStringVar<Len1>& a, const IECWStringVar<Len2>& b) noexcept {
+    return a.get() == b.get();
+}
+template<size_t Len1, size_t Len2>
+inline bool operator!=(const IECWString<Len1>& a, const IECWStringVar<Len2>& b) noexcept {
+    return !(a == b);
+}
+template<size_t Len1, size_t Len2>
+inline bool operator!=(const IECWStringVar<Len1>& a, const IECWString<Len2>& b) noexcept {
+    return !(a == b);
+}
+template<size_t Len1, size_t Len2>
+inline bool operator!=(const IECWStringVar<Len1>& a, const IECWStringVar<Len2>& b) noexcept {
+    return !(a == b);
+}
+
+template<size_t Len1, size_t Len2>
+inline bool operator==(const IECVar<IECWString<Len1>>& a, const IECWStringVar<Len2>& b) noexcept {
+    return static_cast<IECWString<Len1>>(a) == b.get();
+}
+template<size_t Len1, size_t Len2>
+inline bool operator==(const IECWStringVar<Len1>& a, const IECVar<IECWString<Len2>>& b) noexcept {
+    return a.get() == static_cast<IECWString<Len2>>(b);
+}
+template<size_t Len1, size_t Len2>
+inline bool operator!=(const IECVar<IECWString<Len1>>& a, const IECWStringVar<Len2>& b) noexcept {
+    return !(a == b);
+}
+template<size_t Len1, size_t Len2>
+inline bool operator!=(const IECWStringVar<Len1>& a, const IECVar<IECWString<Len2>>& b) noexcept {
+    return !(a == b);
+}
+
+template<size_t MaxLen>
+inline bool operator==(const IECWStringVar<MaxLen>& a, const char16_t* b) noexcept {
+    return a.get() == b;
+}
+template<size_t MaxLen>
+inline bool operator==(const char16_t* a, const IECWStringVar<MaxLen>& b) noexcept {
+    return b.get() == a;
+}
+template<size_t MaxLen>
+inline bool operator!=(const IECWStringVar<MaxLen>& a, const char16_t* b) noexcept {
+    return !(a == b);
+}
+template<size_t MaxLen>
+inline bool operator!=(const char16_t* a, const IECWStringVar<MaxLen>& b) noexcept {
+    return !(a == b);
+}
+template<size_t MaxLen>
+inline bool operator==(const char16_t* a, const IECWString<MaxLen>& b) noexcept {
+    return b == a;
+}
+template<size_t MaxLen>
+inline bool operator!=(const char16_t* a, const IECWString<MaxLen>& b) noexcept {
+    return !(b == a);
+}
+
+template<size_t Len1, size_t Len2>
+inline bool operator<(const IECWStringVar<Len1>& a, const IECWStringVar<Len2>& b) noexcept {
+    return a.get() < b.get();
+}
+template<size_t Len1, size_t Len2>
+inline bool operator<(const IECWString<Len1>& a, const IECWStringVar<Len2>& b) noexcept {
+    return a < b.get();
+}
+template<size_t Len1, size_t Len2>
+inline bool operator<(const IECWStringVar<Len1>& a, const IECWString<Len2>& b) noexcept {
+    return a.get() < b;
+}
+template<size_t Len1, size_t Len2>
+inline bool operator>(const IECWStringVar<Len1>& a, const IECWStringVar<Len2>& b) noexcept {
+    return b < a;
+}
+template<size_t Len1, size_t Len2>
+inline bool operator>(const IECWString<Len1>& a, const IECWStringVar<Len2>& b) noexcept {
+    return b < a;
+}
+template<size_t Len1, size_t Len2>
+inline bool operator>(const IECWStringVar<Len1>& a, const IECWString<Len2>& b) noexcept {
+    return b < a;
+}
 
 // Ordering of wide strings: see iec_compare_text in iec_string.hpp.
 inline const char16_t* iec_wtext(const char16_t* s) noexcept { return s ? s : u""; }

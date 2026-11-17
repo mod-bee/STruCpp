@@ -119,7 +119,7 @@ FUNCTION F_Mix2 : DINT
   IF f > 1.4 AND f < 1.6 THEN F_Mix2 := F_Mix2 + 10000; END_IF;
   IF e = E_Mode.Run THEN F_Mix2 := F_Mix2 + 100000; END_IF;
   F_Mix2 := F_Mix2 + p.a * 1000000 + p.b * 10000000;
-  IF LEN(w) <> 2 THEN F_Mix2 := -F_Mix2; END_IF;
+  IF w <> "wz" THEN F_Mix2 := -F_Mix2; END_IF;
   n := 99;
   s := 'zzzz';
   p.a := 7;

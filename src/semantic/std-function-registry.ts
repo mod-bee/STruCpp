@@ -627,6 +627,8 @@ export class StdFunctionRegistry {
       "TOD",
       "DT",
       "STRING",
+      // IEC 61131-3 Ed.3 Table 22 1b: TO_** for every output type.
+      "WSTRING",
       "BYTE",
       "WORD",
       "DWORD",

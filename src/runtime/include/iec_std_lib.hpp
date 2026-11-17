@@ -467,7 +467,8 @@ inline auto LIMIT(T1 mn, T2 in, T3 mx) noexcept
 
 template<typename T, typename U,
     std::enable_if_t<!std::is_same<std::decay_t<T>, std::decay_t<U>>::value &&
-                     !is_same_iec_enum_v<T, U> && !iec_mixed_sized_strings<T, U>::value, int> = 0>
+                     !is_same_iec_enum_v<T, U> && !iec_mixed_sized_strings<T, U>::value &&
+                     !iec_mixed_sized_wstrings<T, U>::value, int> = 0>
 inline auto SEL(IEC_BOOL g, T in0, U in1) noexcept {
     using CT = std::common_type_t<decltype(iec_unwrap(in0)), decltype(iec_unwrap(in1))>;
     return iec_unwrap(g) ? static_cast<CT>(iec_unwrap(in1)) : static_cast<CT>(iec_unwrap(in0));
@@ -502,7 +503,8 @@ inline T MUX([[maybe_unused]] IEC_INT k, T in0) noexcept {
 }
 
 template<typename T, typename... Args,
-         std::enable_if_t<!iec_mixed_sized_strings<T, T, Args...>::value, int> = 0>
+         std::enable_if_t<!iec_mixed_sized_strings<T, T, Args...>::value &&
+                              !iec_mixed_sized_wstrings<T, T, Args...>::value, int> = 0>
 inline T MUX(IEC_INT k, T in0, T in1, Args... rest) noexcept {
     if (iec_unwrap(k) == 0) return in0;
     return MUX(IEC_INT(iec_unwrap(k) - 1), in1, rest...);
@@ -1173,6 +1175,26 @@ inline IECString<SrcLen> WSTRING_TO_STRING(const IECWStringVar<SrcLen>& src) noe
 template<typename T>
 inline auto TO_WSTRING(const T& src) noexcept -> decltype(STRING_TO_WSTRING(src)) {
     return STRING_TO_WSTRING(src);
+}
+
+/** WSTRING -> WSTRING: the value itself, as TO_STRING of a STRING. */
+template<typename T, std::enable_if_t<iec_wstring_arg_t<T>::value, int> = 0>
+inline auto TO_WSTRING(const T& src) noexcept -> decltype(iec_as_wstring(src)) {
+    return iec_as_wstring(src);
+}
+
+/** Whether `STRING_TO_WSTRING` takes a T: a STRING variable or value. */
+template<typename T, typename = void> struct iec_narrow_string_source : std::false_type {};
+template<typename T>
+struct iec_narrow_string_source<T, decltype(void(STRING_TO_WSTRING(std::declval<const T&>())))>
+    : std::true_type {};
+
+/** Number, BOOL or enumeration -> WSTRING: the text TO_STRING gives it, as
+ *  wide characters (IEC 61131-3 Table 22, *_TO_WSTRING, as *_TO_STRING). */
+template<typename T,
+         std::enable_if_t<!iec_narrow_string_source<T>::value && !iec_wstring_arg_t<T>::value, int> = 0>
+inline auto TO_WSTRING(const T& src) noexcept -> decltype(STRING_TO_WSTRING(TO_STRING(src))) {
+    return STRING_TO_WSTRING(TO_STRING(src));
 }
 
 template<typename T>
