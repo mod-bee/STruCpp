@@ -13,7 +13,10 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve } from "path";
-import { discoverStlibs, loadStlibFromFile } from "../../src/node/library-loader.js";
+import {
+  discoverStlibs,
+  loadStlibFromFile,
+} from "../../src/node/library-loader.js";
 import { compile } from "../../src/index.js";
 import { hasGpp, runE2ETestPipeline } from "../integration/test-helpers.js";
 
@@ -96,13 +99,22 @@ describe("PLCopen SoftMotion (SM3) Library", () => {
       );
       expect(fb).toBeDefined();
       expect(fb!.inouts.map((p) => p.name)).toContain("AXIS");
-      expect(fb!.inouts.find((p) => p.name === "AXIS")!.type).toBe("AXIS_REF_SM3");
+      expect(fb!.inouts.find((p) => p.name === "AXIS")!.type).toBe(
+        "AXIS_REF_SM3",
+      );
       const ins = Object.fromEntries(fb!.inputs.map((p) => [p.name, p.type]));
       expect(ins.POSITION).toBe("LREAL");
       expect(ins.VELOCITY).toBe("LREAL");
       expect(ins.ACCELERATION).toBe("LREAL");
       const outs = fb!.outputs.map((p) => p.name);
-      for (const o of ["DONE", "BUSY", "ACTIVE", "COMMANDABORTED", "ERROR", "ERRORID"]) {
+      for (const o of [
+        "DONE",
+        "BUSY",
+        "ACTIVE",
+        "COMMANDABORTED",
+        "ERROR",
+        "ERRORID",
+      ]) {
         expect(outs, o).toContain(o);
       }
     });

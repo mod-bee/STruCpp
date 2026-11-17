@@ -231,7 +231,8 @@ null, or a change confined to a consumer's own code, needs no bump.
 - 1: before 0.7.0-modbee.4 (no stamp)
 - 2: a method's and a function's VAR_OUTPUT passed by pointer (f295701, fd86039)
 - 3: a method's elementary inputs passed as their payload, STRING inputs as `const char*`, ANY inputs as `const IEC_ANY&`
-- 4: a function's inputs alike (2 to 4 unreleased; 0.7.0-modbee.4 is the first stamped release)
+- 4: a function's inputs alike (2 and 3 unreleased; 0.7.0-modbee.4 is the first stamped release)
+- 5: the manifest shapes of upstream STruC++ 0.8.0 (`displayName`, enumeration `members` as objects, methods with `visibility` and a `returnType` type reference, a block's own methods of every visibility and its `properties`, interface `properties` as property entries)
 
 ### Bundled Libraries
 

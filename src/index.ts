@@ -212,8 +212,7 @@ export function libraryAbiErrors(
         abi < STRUCPP_ABI_VERSION
           ? `${lib} was built for an older compiler (calling convention ${abi}; ` +
             `this one needs ${STRUCPP_ABI_VERSION}): reinstall it from a release ` +
-            `built with STruC++ ${STRUCPP_VERSION_BUILD} or later (toolchain ` +
-            `v0.7.0-modbee.4 or later), or rebuild it`
+            `built with STruC++ ${STRUCPP_VERSION_BUILD} or later, or rebuild it`
           : `${lib} was built for a newer compiler (calling convention ${abi}; ` +
             `this one has ${STRUCPP_ABI_VERSION}): update the toolchain, or ` +
             `install a release of the library built for this one`,

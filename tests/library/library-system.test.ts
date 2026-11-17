@@ -90,9 +90,9 @@ describe("Library System", () => {
 
       expect(result.success).toBe(true);
       const entry = result.manifest.types.find((t) => t.name === "S_PLANT");
-      expect(entry?.declaredName).toBe("S_Plant");
+      expect(entry?.displayName).toBe("S_Plant");
       expect(entry?.fields).toEqual([
-        { name: "SPPRESSUREALT", type: "REAL", declaredName: "spPressureAlt" },
+        { name: "SPPRESSUREALT", type: "REAL", displayName: "spPressureAlt" },
         // Already upper case, so nothing to record — an all-caps library adds
         // nothing to its manifest.
         { name: "ALARM", type: "BOOL" },
@@ -144,49 +144,53 @@ describe("Library System", () => {
       expect(result.success).toBe(true);
       const m = result.manifest;
       const fb = m.functionBlocks.find((f) => f.name === "FB_PUMP");
-      expect(fb?.declaredName).toBe("FB_Pump");
-      expect(fb?.inputs.map((v) => [v.name, v.declaredName])).toEqual([
+      expect(fb?.displayName).toBe("FB_Pump");
+      expect(fb?.inputs.map((v) => [v.name, v.displayName])).toEqual([
         ["MYPIN", "myPin"],
         ["RUN", undefined],
       ]);
       expect(fb?.outputs[0]).toMatchObject({
         name: "NOTOFF",
-        declaredName: "NotOff",
+        displayName: "NotOff",
       });
       expect(fb?.locals?.[0]).toMatchObject({
         name: "STEPCOUNT",
-        declaredName: "stepCount",
+        displayName: "stepCount",
       });
       const setSpeed = fb?.methods?.find((x) => x.name === "SETSPEED");
-      expect(setSpeed?.declaredName).toBe("SetSpeed");
+      expect(setSpeed?.displayName).toBe("SetSpeed");
       expect(setSpeed?.inputs[0]).toMatchObject({
         name: "NEWSPEED",
-        declaredName: "newSpeed",
+        displayName: "newSpeed",
       });
 
       const iface = m.interfaces?.find((i) => i.name === "I_PUMP");
-      expect(iface?.declaredName).toBe("I_Pump");
-      expect(iface?.methods[0]?.declaredName).toBe("IsReady");
+      expect(iface?.displayName).toBe("I_Pump");
+      expect(iface?.methods[0]?.displayName).toBe("IsReady");
 
       const fn = m.functions.find((f) => f.name === "SCALE_VALUE");
-      expect(fn?.declaredName).toBe("Scale_Value");
+      expect(fn?.displayName).toBe("Scale_Value");
       expect(fn?.parameters[0]).toMatchObject({
         name: "RAWVALUE",
-        declaredName: "rawValue",
+        displayName: "rawValue",
       });
 
       expect(m.globals?.[0]).toMatchObject({
         name: "PLANTSPEED",
-        declaredName: "plantSpeed",
+        displayName: "plantSpeed",
       });
 
       const mode = m.types.find((t) => t.name === "E_MODE");
-      expect(mode?.members).toEqual(["MODEOFF", "AUTO"]);
-      expect(mode?.declaredMembers).toEqual(["modeOff", "AUTO"]);
+      expect(mode?.members).toEqual([
+        { name: "MODEOFF", displayName: "modeOff" },
+        { name: "AUTO" },
+      ]);
       // All caps: nothing to record.
       expect(
-        m.types.find((t) => t.name === "E_CAPS")?.declaredMembers,
-      ).toBeUndefined();
+        m.types
+          .find((t) => t.name === "E_CAPS")
+          ?.members?.some((x) => x.displayName !== undefined),
+      ).toBe(false);
 
       // Display only: the C++ is the folded names, as before.
       const cpp = result.headerCode + result.cppCode;

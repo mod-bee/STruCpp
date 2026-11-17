@@ -62,7 +62,7 @@ describe("the library calling-convention stamp", () => {
     expect(result.cppCode).toBe("");
     expect(result.errors.map((e) => e.message)).toEqual([
       expect.stringMatching(
-        /^library split-lib 2\.1\.0 was built for an older compiler \(calling convention 1; this one needs \d+\): reinstall it from a release built with STruC\+\+ .* or later .*, or rebuild it$/,
+        /^library split-lib 2\.1\.0 was built for an older compiler \(calling convention 1; this one needs \d+\): reinstall it from a release built with STruC\+\+ .* or later, or rebuild it$/,
       ),
     ]);
   });

@@ -40,8 +40,7 @@ describe("library global-variable export", () => {
     const archive = lib("g", [
       {
         fileName: "vars.gvl.st",
-        source:
-          "VAR_GLOBAL\n\tCOUNTER : INT := 7;\n\tENABLED : BOOL;\nEND_VAR",
+        source: "VAR_GLOBAL\n\tCOUNTER : INT := 7;\n\tENABLED : BOOL;\nEND_VAR",
       },
     ]);
     expect(archive.manifest.globals).toEqual([
@@ -78,10 +77,16 @@ describe("library global-variable export", () => {
 
   it("combines globals additively from multiple imported libraries", () => {
     const libA = lib("lib-a", [
-      { fileName: "a.gvl.st", source: "VAR_GLOBAL\n\tAAA : INT := 1;\nEND_VAR" },
+      {
+        fileName: "a.gvl.st",
+        source: "VAR_GLOBAL\n\tAAA : INT := 1;\nEND_VAR",
+      },
     ]);
     const libB = lib("lib-b", [
-      { fileName: "b.gvl.st", source: "VAR_GLOBAL\n\tBBB : INT := 2;\nEND_VAR" },
+      {
+        fileName: "b.gvl.st",
+        source: "VAR_GLOBAL\n\tBBB : INT := 2;\nEND_VAR",
+      },
     ]);
     // A program importing BOTH can reference each library's global in one place.
     const consumer = compileStlib(
@@ -115,7 +120,8 @@ describe("library global-variable export", () => {
       [
         {
           fileName: "U.st",
-          source: "FUNCTION_BLOCK U\nVAR x : REAL; END_VAR\nx := MATH.PI;\nEND_FUNCTION_BLOCK",
+          source:
+            "FUNCTION_BLOCK U\nVAR x : REAL; END_VAR\nx := MATH.PI;\nEND_FUNCTION_BLOCK",
         },
       ],
       {
@@ -161,10 +167,15 @@ describe("library global-variable export", () => {
             "FUNCTION_BLOCK Bad\nIF MATH.PI THEN ; END_IF;\nEND_FUNCTION_BLOCK",
         },
       ],
-      { name: "bad", version: "1.0.0", namespace: "bad", dependencies: [oscat] },
+      {
+        name: "bad",
+        version: "1.0.0",
+        namespace: "bad",
+        dependencies: [oscat],
+      },
     );
-    expect(
-      (bad.errors ?? []).some((e) => /got REAL/.test(e.message)),
-    ).toBe(true);
+    expect((bad.errors ?? []).some((e) => /got REAL/.test(e.message))).toBe(
+      true,
+    );
   });
 });

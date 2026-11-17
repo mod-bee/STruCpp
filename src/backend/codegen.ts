@@ -1258,7 +1258,7 @@ export class CodeGenerator {
     types: Array<{
       name: string;
       kind: string;
-      members?: string[];
+      members?: Array<{ name: string }>;
       attributes?: Array<{ name: string }>;
     }>,
   ): void {
@@ -1269,7 +1269,7 @@ export class CodeGenerator {
         // The name alone is enough for `::` emission in
         // generateVariableExpression; the members, when the archive carries
         // them, are what lets a bare enumerator be qualified.
-        const members = t.members ?? [];
+        const members = (t.members ?? []).map((m) => m.name);
         if (!this.enumTypeMembers.has(nameUpper)) {
           this.enumTypeMembers.set(
             nameUpper,
@@ -1447,7 +1447,7 @@ export class CodeGenerator {
     const declaredNames = new Map(
       (archive.manifest.types ?? []).map((t) => [
         t.name.toUpperCase(),
-        t.declaredName,
+        t.displayName,
       ]),
     );
     for (const chunk of archive.chunks ?? []) {

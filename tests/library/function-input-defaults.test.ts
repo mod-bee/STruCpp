@@ -70,7 +70,7 @@ describe("library manifest: VAR_INPUT initial values", () => {
     // Manifest normalizes parameter names to upper case.
     expect(byName.A!.initialValue).toBe("-1");
     expect(byName.B!.initialValue).toBe("TRUE");
-    expect(byName.C!.initialValue).toBe("T#100MS"); // time literals normalize upper-case
+    expect(byName.C!.initialValue).toBe("T#100ms"); // as written in the source
     expect(byName.D!.initialValue).toBe("3.14");
   });
 
@@ -150,7 +150,9 @@ describe("library manifest: function-block VAR_INPUT initial values", () => {
       { name: "test-lib", version: "1.0.0", namespace: "test" },
     );
     expect(result.success).toBe(true);
-    const fb = result.archive!.manifest.functionBlocks.find((f) => f.name === "LINK_DEMO");
+    const fb = result.archive!.manifest.functionBlocks.find(
+      (f) => f.name === "LINK_DEMO",
+    );
     expect(fb).toBeDefined();
     const byName = Object.fromEntries(fb!.inputs.map((p) => [p.name, p]));
     expect(byName.CONNECT!.initialValue).toBe("TRUE");

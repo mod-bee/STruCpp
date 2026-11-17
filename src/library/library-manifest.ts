@@ -29,7 +29,7 @@ export interface LibraryFunctionEntry {
    *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
    *  a consumer matches, links and generates code with `name`. Optional: an
    *  older archive, or an all-caps declaration, has only `name`. */
-  declaredName?: string;
+  displayName?: string;
   /** Return type name (concrete IEC type or generic — see above) */
   returnType: string;
   /** Declared length of a `STRING(n)` / `WSTRING(n)` return type. */
@@ -80,11 +80,13 @@ export interface LibraryFunctionEntry {
 export interface LibraryVarType {
   /** Type name */
   name: string;
+  /** CODESYS attribute pragmas written before the variable's declaration. */
+  attributes?: LibraryAttribute[];
   /** `name` as its declaration spelled it, when that differs from the folded
    *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
    *  a consumer matches, links and generates code with `name`. Optional: an
    *  older archive, or an all-caps declaration, has only `name`. */
-  declaredName?: string;
+  displayName?: string;
   /** Type kind for the variable itself */
   type: string;
   /** Array dimensions for inline array types (e.g., ARRAY[0..255] OF BYTE) */
@@ -149,33 +151,36 @@ export interface LibraryVarType {
 export interface LibraryMethodEntry {
   /** Method name. */
   name: string;
-  /** `name` as its declaration spelled it, when that differs from the folded
-   *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
-   *  a consumer matches, links and generates code with `name`. Optional: an
-   *  older archive, or an all-caps declaration, has only `name`. */
-  declaredName?: string;
+  /** CODESYS attribute pragmas written before the declaration. */
+  attributes?: LibraryAttribute[];
+  /** The name as written, when it differs from `name` (the compiler upper-cases identifiers). */
+  displayName?: string;
+  visibility: LibraryVisibility;
   /** Result type; absent for a method that returns nothing. */
-  returnType?: string;
-  /** Declared length of a `STRING(n)` result. */
-  returnMaxLength?: number;
+  returnType?: LibraryTypeRef;
+  /** An ABSTRACT method: a prototype only (6.6.5.8.2). */
+  isAbstract?: true;
+  isFinal?: true;
+  isOverride?: true;
   /** `VAR_INPUT` parameters, in declaration order. */
   inputs: LibraryVarType[];
   /** `VAR_OUTPUT` parameters, in declaration order. */
   outputs: LibraryVarType[];
   /** `VAR_IN_OUT` parameters, in declaration order. */
   inouts: LibraryVarType[];
-  /** An ABSTRACT method: a prototype only (6.6.5.8.2). */
-  isAbstract?: true;
 }
 
-/** A property prototype of a library INTERFACE. */
-export interface LibraryInterfacePropertyEntry {
-  /** The property's name and type (`type`, lengths, reference levels). */
-  type: LibraryVarType;
-  /** The interface declares GET. */
-  get: boolean;
-  /** The interface declares SET. */
-  set: boolean;
+/** A property of an exported function block or interface, with the accessors it has. */
+export interface LibraryPropertyEntry {
+  name: string;
+  /** CODESYS attribute pragmas written before the declaration. */
+  attributes?: LibraryAttribute[];
+  /** The name as written, when it differs from `name` (the compiler upper-cases identifiers). */
+  displayName?: string;
+  type: LibraryTypeRef;
+  visibility: LibraryVisibility;
+  getter?: true;
+  setter?: true;
 }
 
 /**
@@ -190,17 +195,16 @@ export interface LibraryInterfaceEntry {
    *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
    *  a consumer matches, links and generates code with `name`. Optional: an
    *  older archive, or an all-caps declaration, has only `name`. */
-  declaredName?: string;
+  displayName?: string;
   /** Interfaces it EXTENDS, as declared. */
   extends?: string[];
   /** Its own method prototypes (not the inherited ones). */
   methods: LibraryMethodEntry[];
   /**
    * Its own property prototypes (CODESYS "Object: Property"): the type and
-   * the accessors a block implementing it provides. Optional: an older
-   * archive declares none.
+   * the accessors a block implementing it provides.
    */
-  properties?: LibraryInterfacePropertyEntry[];
+  properties: LibraryPropertyEntry[];
   /** Help text, as for blocks. */
   documentation?: string;
   /** Folder path within the library — see `LibraryFunctionEntry.category`. */
@@ -217,7 +221,7 @@ export interface LibraryFBEntry {
    *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
    *  a consumer matches, links and generates code with `name`. Optional: an
    *  older archive, or an all-caps declaration, has only `name`. */
-  declaredName?: string;
+  displayName?: string;
   /**
    * Body language, when the block is NOT compiled by STruC++.
    *
@@ -252,8 +256,13 @@ export interface LibraryFBEntry {
    * Those of the blocks it EXTENDS are theirs: a consumer walks `extends`.
    */
   implements?: string[];
-  /** Its PUBLIC methods, own and inherited — see {@link LibraryMethodEntry}. */
+  /**
+   * The block's own methods and properties, every visibility, so a consumer
+   * can call, override and check access to them; inherited ones are its
+   * bases' (walk `extends`). Absent when it declares none.
+   */
   methods?: LibraryMethodEntry[];
+  properties?: LibraryPropertyEntry[];
   /**
    * The FB_Init it runs (its own or the nearest base's, CODESYS "Method:
    * FB_Init"), whatever its access: a consumer's declaration sets the inputs
@@ -321,6 +330,22 @@ export interface LibraryFBEntry {
  *  so a consumer lays it out as the library declared it. */
 export type LibraryStructField = LibraryVarType;
 
+/** A type as the manifest records it: a {@link LibraryVarType} without the member-only fields. */
+export type LibraryTypeRef = Omit<
+  LibraryVarType,
+  | "name"
+  | "cppName"
+  | "readOnly"
+  | "retain"
+  | "nonRetain"
+  | "edge"
+  | "attributes"
+  | "displayName"
+  | "initialValue"
+>;
+
+export type LibraryVisibility = "PUBLIC" | "PRIVATE" | "PROTECTED" | "INTERNAL";
+
 /** A CODESYS attribute pragma, `{attribute 'name' [:= 'value']}`, as written. */
 export interface LibraryAttribute {
   name: string;
@@ -334,7 +359,7 @@ export interface LibraryTypeEntry {
    *  the folded `name` — so a consumer's descriptors emit `S_Plant`, not
    *  `S_PLANT`. See `MemberDesc::NAME`. Optional: an older archive has only
    *  the folded name. */
-  declaredName?: string;
+  displayName?: string;
   /** Type kind (struct, enum, alias) */
   kind: "struct" | "enum" | "alias";
   /** Base type (for alias/enum) */
@@ -343,20 +368,16 @@ export interface LibraryTypeEntry {
    *  can type member access on a dependency struct (e.g. `MATH.PI`). Only set
    *  for `kind: "struct"`; optional for backward compatibility. */
   fields?: LibraryStructField[];
-  /** Enumerator names in declaration order, so a consumer can resolve a bare
-   *  member to this type and qualify it. Only for `kind: "enum"`. Without it
-   *  the consumer knows the type is an enum but not what may be written into
-   *  one, so every enumerator reads as undeclared. Optional. */
-  members?: string[];
-  /** `members` as the type declared them, parallel to `members`; present only
-   *  when one differs from its folded form. For display, as `declaredName`. */
-  declaredMembers?: string[];
-  /** The explicit value of each enumerator, as ST text, parallel to
-   *  `members` (`null` where none was written): `USINT (A := 5, B := 7)`
-   *  keeps 5 and 7, so a consumer evaluates the members as the library does
-   *  (IEC 61131-3 6.4.4.3). Only for `kind: "enum"` with an explicit value.
-   *  Optional: an older archive numbers the members from zero. */
-  values?: Array<string | null>;
+  /** Members of an enumeration, in declaration order, with their explicit
+   *  values as written (ST text, IEC 61131-3 6.4.4.3: `USINT (A := 5)` keeps
+   *  5), so a consumer can name, evaluate and display them. Only for
+   *  `kind: "enum"`. */
+  members?: Array<{
+    name: string;
+    displayName?: string;
+    value?: string;
+    attributes?: LibraryAttribute[];
+  }>;
   /** The type's own initial value as ST text (`TYPE E : (A, B) := B`), for
    *  `kind: "enum"`. A consumer's variables of the type start from it, or
    *  from the first member when absent (6.4.4.2.2, 6.4.4.3.2). Optional. */
@@ -398,7 +419,7 @@ export interface LibraryGlobalEntry {
    *  `name` (IEC 61131-3 6.1.2: case is not significant). For display only:
    *  a consumer matches, links and generates code with `name`. Optional: an
    *  older archive, or an all-caps declaration, has only `name`. */
-  declaredName?: string;
+  displayName?: string;
   /** CODESYS attribute pragmas written before the declaration. */
   attributes?: LibraryAttribute[];
   /** Declared type name (elementary or a library type, e.g. CONSTANTS_MATH). */
@@ -553,10 +574,14 @@ export interface LibraryCompileResult {
  *   3  a method's elementary, STRING and ANY inputs passed lighter
  *      (payload by value, const char*, const IEC_ANY&)
  *   4  a function's inputs alike
- * 2 to 4 were never released (the first stamped release is 0.7.0-modbee.4);
- * each still marks archives built by the development compilers between.
+ *   5  manifest shapes of upstream 0.8.0: `displayName`, enumeration
+ *      `members` as objects, methods with `visibility` and a `returnType`
+ *      type reference, block methods own (every visibility) with
+ *      `properties`, interface `properties` as property entries
+ * 2 and 3 were never released (the first stamped release, 0.7.0-modbee.4,
+ * is 4); each still marks archives built by the development compilers between.
  */
-export const STRUCPP_ABI_VERSION = 4;
+export const STRUCPP_ABI_VERSION = 5;
 
 export interface StlibArchive {
   /** Format version for forward compatibility */

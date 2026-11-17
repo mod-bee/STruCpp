@@ -57,10 +57,9 @@ describe("iec-std-functions.stlib synthesis", () => {
     // pin exact counts here so a registry add doesn't ripple into
     // brittle test maintenance.
     for (const f of fns) {
-      expect(
-        f.category,
-        `${f.name} is missing a category`,
-      ).toBeTypeOf("string");
+      expect(f.category, `${f.name} is missing a category`).toBeTypeOf(
+        "string",
+      );
     }
     const buckets = new Set(fns.map((f) => f.category!));
     expect(buckets).toContain("Numerical");

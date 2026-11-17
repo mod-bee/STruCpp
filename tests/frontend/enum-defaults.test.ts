@@ -86,14 +86,16 @@ END_FUNCTION_BLOCK`,
   it("keeps the explicit values and the type's initial value in the manifest", () => {
     const types = lib().manifest.types;
     const nv = types.find((t) => t.name === "NV")!;
-    expect(nv.members).toEqual(["NV_A", "NV_B"]);
-    expect(nv.values).toEqual(["5", "7"]);
+    expect(nv.members).toEqual([
+      { name: "NV_A", value: "5" },
+      { name: "NV_B", value: "7" },
+    ]);
     expect(nv.defaultValue).toBeUndefined();
     const nvd = types.find((t) => t.name === "NVD")!;
-    expect(nvd.values).toEqual(["3", "9"]);
+    expect(nvd.members?.map((m) => m.value)).toEqual(["3", "9"]);
     expect(nvd.defaultValue).toBe("NVD_D");
     const en = types.find((t) => t.name === "EN")!;
-    expect(en.values).toBeUndefined();
+    expect(en.members?.some((m) => m.value !== undefined)).toBe(false);
     expect(en.defaultValue).toBe("EN_DOWN");
   });
 

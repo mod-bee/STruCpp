@@ -54,7 +54,10 @@ const headerFor = (member: string) => {
       END_RESOURCE
     END_CONFIGURATION
   `;
-  const result = compile(source, { programName: "main", libraries: [buildLibrary()] });
+  const result = compile(source, {
+    programName: "main",
+    libraries: [buildLibrary()],
+  });
   expect(result.success, JSON.stringify(result.errors)).toBe(true);
   return result.headerCode ?? "";
 };
@@ -114,7 +117,9 @@ describe("a global list holding a library-declared type", () => {
 
   it("still follows the class when it holds a library function block", () => {
     const header = headerFor("b : LibBlock;");
-    expect(structFollows(header, /class LIBBLOCK\s*(final)?\s*[:{]/)).toBe(true);
+    expect(structFollows(header, /class LIBBLOCK\s*(final)?\s*[:{]/)).toBe(
+      true,
+    );
   });
 
   it("follows it through a nested structure too", () => {
@@ -134,12 +139,17 @@ describe("a global list holding a library-declared type", () => {
         END_RESOURCE
       END_CONFIGURATION
     `;
-    const result = compile(source, { programName: "main", libraries: [buildLibrary()] });
+    const result = compile(source, {
+      programName: "main",
+      libraries: [buildLibrary()],
+    });
     expect(result.success, JSON.stringify(result.errors)).toBe(true);
     const header = result.headerCode ?? "";
     expect(structFollows(header, /enum class LIBMODE/)).toBe(true);
     // The inner structure has to clear the library section as well.
-    expect(header.indexOf("struct INNER")).toBeGreaterThan(header.search(/enum class LIBMODE/));
+    expect(header.indexOf("struct INNER")).toBeGreaterThan(
+      header.search(/enum class LIBMODE/),
+    );
   });
 
   it("puts the list's file-scope storage after the structure", () => {
@@ -171,11 +181,16 @@ describe("a global list holding a library-declared type", () => {
         END_RESOURCE
       END_CONFIGURATION
     `;
-    const result = compile(source, { programName: "main", libraries: [buildLibrary()] });
+    const result = compile(source, {
+      programName: "main",
+      libraries: [buildLibrary()],
+    });
     expect(result.success, JSON.stringify(result.errors)).toBe(true);
     const header = result.headerCode ?? "";
     expect(header).toContain("// Library: order-lib");
-    expect(header.indexOf("struct GVL_TYPE")).toBeLessThan(header.indexOf("// Library: order-lib"));
+    expect(header.indexOf("struct GVL_TYPE")).toBeLessThan(
+      header.indexOf("// Library: order-lib"),
+    );
   });
 });
 
@@ -209,14 +224,18 @@ describe("a type declaration that is not a structure", () => {
     const header = headerForTypes(
       "TYPE Arr : ARRAY[0..2] OF LibMode; END_TYPE TYPE GVL_TYPE : STRUCT a : Arr; END_STRUCT END_TYPE",
     );
-    expect(follows(header, /enum class LIBMODE/, /using ARR\b|struct ARR\b/)).toBe(true);
+    expect(
+      follows(header, /enum class LIBMODE/, /using ARR\b|struct ARR\b/),
+    ).toBe(true);
   });
 
   it("holds back a top-level array of a library structure", () => {
     const header = headerForTypes(
       "TYPE Arr : ARRAY[0..2] OF LibPoint; END_TYPE TYPE GVL_TYPE : STRUCT a : Arr; END_STRUCT END_TYPE",
     );
-    expect(follows(header, /struct LIBPOINT/, /using ARR\b|struct ARR\b/)).toBe(true);
+    expect(follows(header, /struct LIBPOINT/, /using ARR\b|struct ARR\b/)).toBe(
+      true,
+    );
   });
 
   it("leaves an alias of a plain type ahead of the library section", () => {

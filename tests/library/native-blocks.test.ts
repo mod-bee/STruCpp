@@ -591,17 +591,24 @@ describe("an enum a library exports", () => {
   const ENUM_ST = `TYPE PROBE_SPACE : (PROBE_FIRST, PROBE_SECOND, PROBE_THIRD); END_TYPE`;
 
   const archive = () =>
-    compileStlib([{ source: ENUM_ST, fileName: "_types.st", category: "data-type" }], {
-      name: "probe",
-      version: "1.0.0",
-      namespace: "probe",
-    }).archive;
+    compileStlib(
+      [{ source: ENUM_ST, fileName: "_types.st", category: "data-type" }],
+      {
+        name: "probe",
+        version: "1.0.0",
+        namespace: "probe",
+      },
+    ).archive;
 
   it("carries the enumerators on the manifest entry", () => {
     const type = archive().manifest.types.find((t) => t.name === "PROBE_SPACE");
 
     expect(type?.kind).toBe("enum");
-    expect(type?.members).toEqual(["PROBE_FIRST", "PROBE_SECOND", "PROBE_THIRD"]);
+    expect(type?.members?.map((m) => m.name)).toEqual([
+      "PROBE_FIRST",
+      "PROBE_SECOND",
+      "PROBE_THIRD",
+    ]);
   });
 
   it("leaves a struct's entry without members", () => {
@@ -616,7 +623,9 @@ describe("an enum a library exports", () => {
       { name: "probe", version: "1.0.0", namespace: "probe" },
     ).archive;
 
-    const type = structArchive.manifest.types.find((t) => t.name === "PROBE_CFG");
+    const type = structArchive.manifest.types.find(
+      (t) => t.name === "PROBE_CFG",
+    );
     expect(type?.kind).toBe("struct");
     expect(type?.members).toBeUndefined();
   });
@@ -679,11 +688,14 @@ END_STRUCT END_TYPE
 `;
 
   const archive = () =>
-    compileStlib([{ source: TYPES_ST, fileName: "_types.st", category: "data-type" }], {
-      name: "probe",
-      version: "1.0.0",
-      namespace: "probe",
-    }).archive;
+    compileStlib(
+      [{ source: TYPES_ST, fileName: "_types.st", category: "data-type" }],
+      {
+        name: "probe",
+        version: "1.0.0",
+        namespace: "probe",
+      },
+    ).archive;
 
   it("exports all three kinds", () => {
     const byName = new Map(archive().manifest.types.map((t) => [t.name, t]));
@@ -696,7 +708,10 @@ END_STRUCT END_TYPE
   it("carries what each kind needs to be used — members, fields", () => {
     const byName = new Map(archive().manifest.types.map((t) => [t.name, t]));
 
-    expect(byName.get("PROBE_SPACE")?.members).toEqual(["PROBE_FIRST", "PROBE_SECOND"]);
+    expect(byName.get("PROBE_SPACE")?.members?.map((m) => m.name)).toEqual([
+      "PROBE_FIRST",
+      "PROBE_SECOND",
+    ]);
     expect(byName.get("PROBE_CFG")?.fields).toEqual([
       { name: "ADDRESS", type: "UINT" },
       { name: "KIND", type: "PROBE_SPACE" },
@@ -791,7 +806,8 @@ describe("a native block that declares methods", () => {
     expect(out.st.trimEnd().endsWith("END_FUNCTION_BLOCK")).toBe(true);
   });
 
-  // A METHOD without an access specifier is PROTECTED (IEC 61131-3 6.6.5.4).
+  // A METHOD without an access specifier is PUBLIC (CODESYS; IEC 61131-3
+  // 6.6.5.4 says PROTECTED).
   it("puts its public methods on the manifest entry", () => {
     const result = compileLibrary(
       [{ fileName: "CPP_ENGINE.cpp", source: CPP_ENGINE }],
@@ -802,17 +818,24 @@ describe("a native block that declares methods", () => {
     expect(fb.implementation).toBe("cpp");
     expect(fb.inputs.map((v) => v.name)).toEqual(["ENABLE"]);
     expect(fb.outputs.map((v) => v.name)).toEqual(["COUNT"]);
-    expect(fb.methods?.map((m) => m.name)).toEqual(["RECORD", "RESET"]);
+    // Its own methods, every visibility, each with its access; one without a
+    // specifier is PUBLIC.
+    expect(fb.methods?.map((m) => [m.name, m.visibility])).toEqual([
+      ["RECORD", "PUBLIC"],
+      ["HELPER", "PRIVATE"],
+      ["HIDDEN", "PUBLIC"],
+      ["RESET", "PUBLIC"],
+    ]);
     const record = fb.methods![0]!;
-    expect(record.declaredName).toBe("Record");
-    expect(record.returnType).toBe("BOOL");
+    expect(record.displayName).toBe("Record");
+    expect(record.returnType).toEqual({ type: "BOOL" });
     expect(record.inputs.map((v) => [v.name, v.type])).toEqual([
       ["DATA", "ANY"],
       ["NAME", "STRING"],
     ]);
     expect(record.inouts.map((v) => v.name)).toEqual(["TOTAL"]);
     expect(record.outputs.map((v) => v.name)).toEqual(["SEEN"]);
-    expect(fb.methods![1]!.returnType).toBeUndefined();
+    expect(fb.methods![3]!.returnType).toBeUndefined();
   });
 
   it("leaves a block without methods exactly as before", () => {

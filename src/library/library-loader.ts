@@ -12,6 +12,7 @@ import type {
   LibraryInterfaceEntry,
   LibraryManifest,
   LibraryMethodEntry,
+  LibraryPropertyEntry,
   LibraryTypeEntry,
   LibraryVarType,
   StlibArchive,
@@ -19,6 +20,8 @@ import type {
 import type { SymbolTables, VariableSymbol } from "../semantic/symbol-table.js";
 import { DuplicateSymbolError } from "../semantic/symbol-table.js";
 import { HEADER_NAME_RE } from "./library-manifest.js";
+import { parse as parseSource } from "../frontend/parser.js";
+import { buildAST } from "../frontend/ast-builder.js";
 import type {
   ElementaryType,
   EnumType,
@@ -108,7 +111,7 @@ function buildLibraryTypeDefinition(
         kind: "VarDeclaration" as const,
         sourceSpan: createDefaultSourceSpan(),
         names: [f.name],
-        declaredNames: [f.declaredName ?? f.name],
+        declaredNames: [f.displayName ?? f.name],
         type: makeSizedTypeRef(f),
       })),
     };
@@ -194,14 +197,14 @@ function validateHeaders(headers: unknown): string[] {
 /**
  * Refuses malformed descriptive fields along every exported declaration of a
  * raw manifest: `attributes` must be a list of named attribute pragmas, and
- * `declaredName` and `initialValue` strings.
+ * `displayName`, `initialValue` and `value` strings.
  */
 function validateDescriptions(obj: Record<string, unknown>): void {
   const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === "object" && v !== null && !Array.isArray(v);
   const one = (owner: unknown, where: string): void => {
     if (!isRecord(owner)) return;
-    for (const key of ["declaredName", "initialValue"] as const) {
+    for (const key of ["displayName", "initialValue", "value"] as const) {
       if (owner[key] !== undefined && typeof owner[key] !== "string") {
         throw new LibraryManifestError(
           `Invalid library manifest: ${where}.${key} must be a string`,
@@ -262,6 +265,7 @@ function validateDescriptions(obj: Record<string, unknown>): void {
   each("types", (t, where) => {
     one(t, where);
     list(t, "fields", where);
+    list(t, "members", where);
   });
   each("globals", (g, where) => one(g, where));
   each("interfaces", (iface, where) => {
@@ -276,6 +280,95 @@ function validateDescriptions(obj: Record<string, unknown>): void {
         one(p, `${where}.properties[${j}]`);
         if (isRecord(p)) one(p.type, `${where}.properties[${j}].type`);
       });
+    }
+  });
+}
+
+/**
+ * Whether each default value text is exactly one ST expression, in one
+ * parse; undefined when any is not (a text that closes the generated
+ * declaration and adds its own is refused).
+ */
+function parsesAsInitialValues(texts: readonly string[]): boolean {
+  if (texts.length === 0) return true;
+  const lines = texts.map((t, i) => `  __D${i} : DINT := ${t};`);
+  const parsed = parseSource(
+    `PROGRAM __DEFAULTS\nVAR\n${lines.join("\n")}\nEND_VAR\nEND_PROGRAM\n`,
+  );
+  if (parsed.cst === null || parsed.errors.length > 0) return false;
+  const ast = buildAST(parsed.cst);
+  const others =
+    ast.functions.length +
+    ast.functionBlocks.length +
+    ast.interfaces.length +
+    ast.types.length +
+    ast.configurations.length +
+    ast.globalVarBlocks.length;
+  const program = ast.programs[0];
+  if (ast.programs.length !== 1 || others > 0 || program === undefined) {
+    return false;
+  }
+  if (program.varBlocks.length !== 1 || program.body.length > 0) return false;
+  const decls = program.varBlocks[0]?.declarations ?? [];
+  return (
+    decls.length === texts.length &&
+    decls.every(
+      (d, i) =>
+        d.names.length === 1 &&
+        d.names[0]?.toUpperCase() === `__D${i}` &&
+        d.initialValue !== undefined,
+    )
+  );
+}
+
+/**
+ * Refuses a parameter default that is not exactly one ST expression: a
+ * consumer fills an omitted input with it, so it must not be able to splice
+ * declarations of its own into the consumer's code.
+ */
+function validateDefaults(obj: Record<string, unknown>): void {
+  const isRecord = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v);
+  const check = (params: unknown, where: string): void => {
+    if (!Array.isArray(params)) return;
+    const withDefault = params.filter(
+      (p): p is Record<string, unknown> =>
+        isRecord(p) && typeof p.initialValue === "string",
+    );
+    if (parsesAsInitialValues(withDefault.map((p) => String(p.initialValue))))
+      return;
+    const bad = withDefault.find(
+      (p) => !parsesAsInitialValues([String(p.initialValue)]),
+    );
+    throw new LibraryManifestError(
+      `Invalid library manifest: ${where}: the default value '${String(bad?.initialValue ?? "")}' of parameter '${String(bad?.name ?? "")}' is not an ST expression`,
+    );
+  };
+  const method = (m: unknown, where: string): void => {
+    if (isRecord(m)) check(m.inputs, `${where}.inputs`);
+  };
+  const each = (key: string, fn: (e: unknown, where: string) => void): void => {
+    if (!Array.isArray(obj[key])) return;
+    (obj[key] as unknown[]).forEach((e, i) => fn(e, `${key}[${i}]`));
+  };
+  each("functions", (fn, where) => {
+    if (isRecord(fn)) check(fn.parameters, `${where}.parameters`);
+  });
+  each("functionBlocks", (fb, where) => {
+    if (!isRecord(fb)) return;
+    check(fb.inputs, `${where}.inputs`);
+    if (Array.isArray(fb.methods)) {
+      fb.methods.forEach((m: unknown, j) =>
+        method(m, `${where}.methods[${j}]`),
+      );
+    }
+    if (fb.fbInit !== undefined) method(fb.fbInit, `${where}.fbInit`);
+  });
+  each("interfaces", (iface, where) => {
+    if (isRecord(iface) && Array.isArray(iface.methods)) {
+      iface.methods.forEach((m: unknown, j) =>
+        method(m, `${where}.methods[${j}]`),
+      );
     }
   });
 }
@@ -296,6 +389,7 @@ export function loadLibraryManifest(json: unknown): LibraryManifest {
 
   const obj = json as Record<string, unknown>;
   validateDescriptions(obj);
+  validateDefaults(obj);
 
   // Validate required top-level fields
   const name = obj.name;
@@ -401,12 +495,17 @@ export function loadLibraryManifest(json: unknown): LibraryManifest {
         );
       }
       if (
-        t.values !== undefined &&
-        (!Array.isArray(t.values) ||
-          t.values.some((v) => v !== null && typeof v !== "string"))
+        Array.isArray(t.members) &&
+        t.members.some(
+          (m) =>
+            typeof m !== "object" ||
+            m === null ||
+            typeof (m as { name?: unknown }).name !== "string" ||
+            (m as { name: string }).name === "",
+        )
       ) {
         throw new LibraryManifestError(
-          `Invalid library manifest: types[${i}].values must be an array of strings or nulls`,
+          `Invalid library manifest: types[${i}].members must be objects with a non-empty name`,
         );
       }
       if (t.defaultValue !== undefined && typeof t.defaultValue !== "string") {
@@ -527,26 +626,28 @@ function makeMethodDeclaration(m: LibraryMethodEntry): MethodDeclaration {
     kind: "MethodDeclaration",
     sourceSpan: createDefaultSourceSpan(),
     name: m.name,
-    visibility: "PUBLIC",
+    visibility: m.visibility ?? "PUBLIC",
     isAbstract: m.isAbstract === true,
-    isFinal: false,
-    isOverride: false,
+    isFinal: m.isFinal === true,
+    isOverride: m.isOverride === true,
     ...(m.returnType !== undefined
-      ? {
-          returnType: {
-            kind: "TypeReference",
-            sourceSpan: createDefaultSourceSpan(),
-            name: m.returnType,
-            isReference: false,
-            referenceKind: "none",
-            ...(typeof m.returnMaxLength === "number"
-              ? { maxLength: m.returnMaxLength }
-              : {}),
-          } as TypeReference,
-        }
+      ? { returnType: makeSizedTypeRef({ name: "", ...m.returnType }) }
       : {}),
     varBlocks,
     body: [],
+  };
+}
+
+/** The synthetic declaration of a library property (accessors without bodies). */
+function makePropertyDeclaration(p: LibraryPropertyEntry): PropertyDeclaration {
+  return {
+    kind: "PropertyDeclaration",
+    sourceSpan: createDefaultSourceSpan(),
+    name: p.name,
+    type: makeSizedTypeRef({ name: p.name, ...p.type }),
+    visibility: p.visibility ?? "PUBLIC",
+    ...(p.getter === true ? { getter: [] } : {}),
+    ...(p.setter === true ? { setter: [] } : {}),
   };
 }
 
@@ -562,17 +663,7 @@ export function libraryInterfaceDeclaration(
       ? { extends: [...entry.extends] }
       : {}),
     methods: entry.methods.map(makeMethodDeclaration),
-    properties: (entry.properties ?? []).map(
-      (p): PropertyDeclaration => ({
-        kind: "PropertyDeclaration",
-        sourceSpan: createDefaultSourceSpan(),
-        name: p.type.name,
-        type: makeSizedTypeRef(p.type),
-        visibility: "PUBLIC",
-        ...(p.get ? { getter: [] } : {}),
-        ...(p.set ? { setter: [] } : {}),
-      }),
-    ),
+    properties: (entry.properties ?? []).map(makePropertyDeclaration),
   };
 }
 
@@ -603,7 +694,7 @@ export function libraryFunctionBlockDeclaration(
       ...(fb.methods ?? []).map(makeMethodDeclaration),
       ...lifecyclePrototypes(fb),
     ],
-    properties: [],
+    properties: (fb.properties ?? []).map(makePropertyDeclaration),
 
     body: [],
     ...(Object.keys(cppNames).length > 0 ? { libraryCppNames: cppNames } : {}),
@@ -629,7 +720,8 @@ function lifecyclePrototypes(fb: LibraryFBEntry): MethodDeclaration[] {
     out.push({
       ...makeMethodDeclaration({
         name: "FB_EXIT",
-        returnType: "BOOL",
+        visibility: "PROTECTED",
+        returnType: { type: "BOOL" },
         inputs: [{ name: "BINCOPYCODE", type: "BOOL" }],
         outputs: [],
         inouts: [],
@@ -741,7 +833,7 @@ export function registerLibrarySymbols(
     return {
       typeKind: "enum",
       name: t.name,
-      values: [...(t.members ?? [])],
+      values: (t.members ?? []).map((m) => m.name),
       ...(t.baseType !== undefined ? { baseType: t.baseType } : {}),
     } as EnumType;
   };
@@ -825,16 +917,18 @@ export function registerLibrarySymbols(
             definition: {
               kind: "EnumDefinition",
               sourceSpan: createDefaultSourceSpan(),
-              members: (t.members ?? []).map((member, index) => {
+              members: (t.members ?? []).map((member) => {
                 // The explicit value the library declared (6.4.4.3).
-                const text = t.values?.[index];
                 const value =
-                  typeof text === "string"
-                    ? parseInitialValueText(text)
+                  member.value !== undefined
+                    ? parseInitialValueText(member.value)
                     : undefined;
                 return {
                   kind: "EnumMember" as const,
-                  name: member,
+                  name: member.name,
+                  ...(member.displayName !== undefined
+                    ? { declaredName: member.displayName }
+                    : {}),
                   sourceSpan: createDefaultSourceSpan(),
                   ...(value !== undefined ? { value } : {}),
                 };
@@ -856,7 +950,7 @@ export function registerLibrarySymbols(
           resolvedType: {
             typeKind: "enum",
             name: t.name,
-            values: [...(t.members ?? [])],
+            values: (t.members ?? []).map((m) => m.name),
             ...(t.baseType !== undefined ? { baseType: t.baseType } : {}),
             ...(libraryTypeHasAttribute(t, "strict") ? { strict: true } : {}),
           } as EnumType,
@@ -867,12 +961,12 @@ export function registerLibrarySymbols(
         // qualified_only enumeration's values have no bare name.
         const bare = !libraryTypeHasAttribute(t, "qualified_only");
         (bare ? (t.members ?? []) : []).forEach((member, index) => {
-          if (symbolTables.globalScope.hasLocal(member)) return;
+          if (symbolTables.globalScope.hasLocal(member.name)) return;
           symbolTables.globalScope.define({
-            name: member,
+            name: member.name,
             kind: "enumValue",
             enumType: t.name,
-            value: explicitEnumValue(t.values?.[index]) ?? index,
+            value: explicitEnumValue(member.value) ?? index,
             fromLibrary: true,
           });
         });
@@ -914,7 +1008,7 @@ export function registerLibrarySymbols(
           kind: "TypeDeclaration",
           sourceSpan: createDefaultSourceSpan(),
           name: t.name,
-          declaredName: t.declaredName ?? t.name,
+          declaredName: t.displayName ?? t.name,
           // A struct with exported fields gets a REAL StructDefinition, not the
           // self-referential alias the other kinds fall back to.
           //
@@ -1216,8 +1310,8 @@ export function libraryTypeDefaults(
           const value = parseInitialValueText(t.defaultValue);
           if (value !== undefined) out.set(key, value);
         }
-      } else if (typeof t.values?.[0] === "string" && t.members?.[0]) {
-        out.set(key, qualifiedEnumValue(t.name, t.members[0], span));
+      } else if (t.members?.[0]?.value !== undefined) {
+        out.set(key, qualifiedEnumValue(t.name, t.members[0].name, span));
       }
     }
   }

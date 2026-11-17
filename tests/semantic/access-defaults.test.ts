@@ -69,7 +69,7 @@ END_FUNCTION_BLOCK`);
     expect(errors.join("\n")).toMatch(/must be PUBLIC/);
   });
 
-  it("publishes only the PUBLIC methods of a library block", () => {
+  it("publishes every method of a library block with its access", () => {
     const lib = compileStlib([{ source: BLOCK, fileName: "b.st" }], {
       name: "acc",
       version: "1.0.0",
@@ -77,6 +77,10 @@ END_FUNCTION_BLOCK`);
     });
     expect(lib.errors).toEqual([]);
     const b = lib.archive.manifest.functionBlocks.find((f) => f.name === "B")!;
-    expect((b.methods ?? []).map((m) => m.name)).toEqual(["PLAIN", "OPEN"]);
+    expect((b.methods ?? []).map((m) => [m.name, m.visibility])).toEqual([
+      ["PLAIN", "PUBLIC"],
+      ["INNER", "PROTECTED"],
+      ["OPEN", "PUBLIC"],
+    ]);
   });
 });

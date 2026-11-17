@@ -157,7 +157,7 @@ describe("library interfaces in the manifest", () => {
       ["LI_MOTOR", ["LI_STATUS"], ["ISRUNNING", "REQUEST"]],
     ]);
     const request = m.interfaces![1]!.methods[1]!;
-    expect(request.returnType).toBe("BOOL");
+    expect(request.returnType).toEqual({ type: "BOOL" });
     expect(request.inputs.map((p) => [p.name, p.type])).toEqual([
       ["ON", "BOOL"],
     ]);
@@ -167,25 +167,28 @@ describe("library interfaces in the manifest", () => {
     const fbs = buildLib().manifest.functionBlocks;
     const motor = fbs.find((f) => f.name === "LM_MOTOR")!;
     expect(motor.implements).toEqual(["LI_MOTOR"]);
-    expect((motor.methods ?? []).map((x) => x.name)).toEqual([
-      "CODE",
-      "ISRUNNING",
-      "REQUEST",
+    // Its own methods, every visibility, each with its access.
+    expect((motor.methods ?? []).map((x) => [x.name, x.visibility])).toEqual([
+      ["CODE", "PUBLIC"],
+      ["ISRUNNING", "PUBLIC"],
+      ["REQUEST", "PUBLIC"],
+      ["HIDDEN", "PRIVATE"],
     ]);
     expect(motor.inputs.find((p) => p.name === "START")?.edge).toBe("R_EDGE");
     const vsd = fbs.find((f) => f.name === "LM_VSD")!;
     expect(vsd.extends).toBe("LM_MOTOR");
     expect(vsd.implements).toBeUndefined();
-    expect((vsd.methods ?? []).map((x) => x.name)).toEqual([
-      "CODE",
-      "ISRUNNING",
-      "REQUEST",
+    // Its own: the inherited ones are LM_MOTOR's (walk `extends`).
+    expect((vsd.methods ?? []).map((x) => [x.name, x.isOverride])).toEqual([
+      ["CODE", true],
     ]);
     expect(fbs.find((f) => f.name === "LM_BASE")?.isAbstract).toBe(true);
     // A pin cannot be named like a method of its block (IEC 61131-3
     // 6.6.5.5.5 rule 2), so none needs a C++ name of its own.
     const pump = fbs.find((f) => f.name === "LP_PUMP")!;
-    expect(pump.inputs.find((p) => p.name === "SPEED")?.cppName).toBeUndefined();
+    expect(
+      pump.inputs.find((p) => p.name === "SPEED")?.cppName,
+    ).toBeUndefined();
     expect(pump.inputs.find((p) => p.name === "MOTOR")?.type).toBe("LI_MOTOR");
   });
 });
@@ -284,9 +287,12 @@ END_FUNCTION_BLOCK
 
   it("refuses IMPLEMENTS of a library block that is not an interface", () => {
     const result = compile(
-      `FUNCTION_BLOCK NOT_IFACE IMPLEMENTS LM_MOTOR\nEND_FUNCTION_BLOCK\n` + project("  c1 := 0;"),
+      `FUNCTION_BLOCK NOT_IFACE IMPLEMENTS LM_MOTOR\nEND_FUNCTION_BLOCK\n` +
+        project("  c1 := 0;"),
       { headerFileName: "generated.hpp", libraries: [buildLib()] },
     );
-    expect(result.errors.map((e) => e.message).join("\n")).toMatch(/not an interface/);
+    expect(result.errors.map((e) => e.message).join("\n")).toMatch(
+      /not an interface/,
+    );
   });
 });

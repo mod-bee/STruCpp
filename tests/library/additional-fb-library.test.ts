@@ -68,10 +68,19 @@ describe("Additional Function Blocks Library", () => {
       const fbsByName = Object.fromEntries(
         stlibArchive.manifest.functionBlocks.map((fb) => [fb.name, fb]),
       );
-      for (const name of ["RTC", "INTEGRAL", "DERIVATIVE", "PID", "RAMP", "HYSTERESIS"]) {
+      for (const name of [
+        "RTC",
+        "INTEGRAL",
+        "DERIVATIVE",
+        "PID",
+        "RAMP",
+        "HYSTERESIS",
+      ]) {
         const fb = fbsByName[name];
         expect(fb, `${name} should be in the manifest`).toBeDefined();
-        expect(fb!.documentation, `${name} should have documentation`).toMatch(/\S/);
+        expect(fb!.documentation, `${name} should have documentation`).toMatch(
+          /\S/,
+        );
       }
     });
 
@@ -80,7 +89,9 @@ describe("Additional Function Blocks Library", () => {
       // users see the same hover text they get today from the editor's
       // hardcoded library catalog. Update this assertion intentionally
       // when the prose is revised — drift is the bug we want to catch.
-      const rtc = stlibArchive.manifest.functionBlocks.find((fb) => fb.name === "RTC");
+      const rtc = stlibArchive.manifest.functionBlocks.find(
+        (fb) => fb.name === "RTC",
+      );
       expect(rtc?.documentation).toBe(
         "Real time clock. CDT starts from the system date and time; on targets without one, it starts from DT#1970-01-01-00:00:00. While SET is TRUE, CDT equals PDT. When SET is FALSE, CDT keeps counting from the last value set. Q is a copy of SET.",
       );
@@ -281,7 +292,9 @@ describe("Additional Function Blocks Library", () => {
     it("RTC starts from CURRENT_DT() on its first scan", () => {
       const rtcSource = getSource("rtc.st");
       const stripComments = (s: string) => s.replace(/\(\*[\s\S]*?\*\)/g, "");
-      expect(stripComments(rtcSource)).toMatch(/preset\s*:=\s*CURRENT_DT\s*\(\s*\)/);
+      expect(stripComments(rtcSource)).toMatch(
+        /preset\s*:=\s*CURRENT_DT\s*\(\s*\)/,
+      );
     });
   });
 });

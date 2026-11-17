@@ -289,6 +289,8 @@ export interface PropertyDeclaration extends ASTNode {
   /** CODESYS attribute pragmas written right before the declaration. */
   attributes?: Attribute[];
   name: string;
+  /** `name` as the engineer spelled it — see `VarDeclaration.declaredNames`. */
+  declaredName?: string;
   type: TypeReference;
   visibility: Visibility;
   getter?: Statement[];

@@ -33,7 +33,10 @@ import type {
   LibraryInterfaceEntry,
   LibraryManifest,
   LibraryMethodEntry,
+  LibraryPropertyEntry,
   LibraryStructField,
+  LibraryTypeEntry,
+  LibraryTypeRef,
   LibraryVarType,
 } from "./library-manifest.js";
 import type {
@@ -41,6 +44,7 @@ import type {
   FunctionBlockDeclaration,
   InterfaceDeclaration,
   MethodDeclaration,
+  PropertyDeclaration,
   TypeReference,
   VarBlock,
   VarDeclaration,
@@ -54,6 +58,44 @@ import type {
  * caller omits the field rather than emit a wrong default.
  */
 function serializeInitialValue(expr: Expression): string | undefined {
+  // As written in the library's source when it is at hand (a manifest
+  // describes names as the engineer spelled them), else rendered.
+  const written = writtenText?.(expr);
+  if (written !== undefined) return written;
+  return renderInitialValue(expr);
+}
+
+/** The source text of an expression in the library being compiled, set by compileLibrary. */
+let writtenText: ((expr: Expression) => string | undefined) | undefined;
+
+/** A lookup of an expression's text in `sources` by its source span. */
+function sourceTextLookup(
+  sources: ReadonlyArray<{ fileName: string; source: string }>,
+  primaryFile: string,
+): (expr: Expression) => string | undefined {
+  const lines = new Map(
+    sources.map((src) => [src.fileName, src.source.split(/\r\n|\r|\n/)]),
+  );
+  return (expr) => {
+    const span = expr.sourceSpan;
+    const file = lines.get(span.file ?? primaryFile);
+    if (file === undefined || span.startLine <= 0) return undefined;
+    if (span.startLine === span.endLine) {
+      const text = file[span.startLine - 1]
+        ?.slice(span.startCol - 1, span.endCol)
+        .trim();
+      return text !== undefined && text.length > 0 ? text : undefined;
+    }
+    const parts = file.slice(span.startLine - 1, span.endLine);
+    if (parts.length === 0) return undefined;
+    parts[0] = parts[0]!.slice(span.startCol - 1);
+    parts[parts.length - 1] = parts[parts.length - 1]!.slice(0, span.endCol);
+    const text = parts.join(" ").replace(/\s+/g, " ").trim();
+    return text.length > 0 ? text : undefined;
+  };
+}
+
+function renderInitialValue(expr: Expression): string | undefined {
   switch (expr.kind) {
     case "LiteralExpression":
       return expr.rawValue;
@@ -137,6 +179,25 @@ function serializeVarType(
   return entry;
 }
 
+/** A type reference as the manifest records it (a result or property type). */
+function serializeTypeRef(typeRef: TypeReference): LibraryTypeRef {
+  const { name: _name, ...ref } = serializeVarType("", typeRef);
+  return ref;
+}
+
+/** The manifest entry of one property (CODESYS "Object: Property"). */
+function buildPropertyEntry(prop: PropertyDeclaration): LibraryPropertyEntry {
+  return {
+    name: prop.name,
+    ...declaredNameOf(prop.name, prop.declaredName),
+    ...attributesOf(prop),
+    type: serializeTypeRef(prop.type),
+    visibility: prop.visibility,
+    ...(prop.getter !== undefined ? { getter: true as const } : {}),
+    ...(prop.setter !== undefined ? { setter: true as const } : {}),
+  };
+}
+
 /**
  * Serialize one `VAR` member of a function block for the manifest.
  *
@@ -205,9 +266,9 @@ function attributesOf(node: {
 function declaredNameOf(
   name: string,
   declared: string | undefined,
-): { declaredName?: string } {
+): { displayName?: string } {
   return declared !== undefined && declared !== "" && declared !== name
-    ? { declaredName: declared }
+    ? { displayName: declared }
     : {};
 }
 
@@ -380,7 +441,10 @@ function buildDerivedFBEntry(
     buildFBEntry(owner, manglingOf?.(owner)),
   );
   const inouts = parts.flatMap((p) => p.inouts);
-  const methods = publicMethodsOf(lineage);
+  // Its own methods and properties, every visibility; the inherited ones
+  // are its bases' entries (a consumer walks `extends`).
+  const methods = fb.methods.map(buildMethodEntry);
+  const properties = fb.properties.map(buildPropertyEntry);
   // FB_Init / FB_Exit (CODESYS): the FB_Init a consumer's declaration sets
   // the inputs of (the nearest in the lineage), whatever its access.
   const ownOf = (owner: FunctionBlockDeclaration, name: string) =>
@@ -405,32 +469,10 @@ function buildDerivedFBEntry(
       ? { implements: [...fb.implements] }
       : {}),
     ...(methods.length > 0 ? { methods } : {}),
+    ...(properties.length > 0 ? { properties } : {}),
     ...(fbInit !== undefined ? { fbInit: buildMethodEntry(fbInit) } : {}),
     ...(fbExit ? { fbExit: true as const } : {}),
   };
-}
-
-/**
- * The PUBLIC methods a block offers to its callers (IEC 61131-3 6.6.5.4.4):
-
- * those of its lineage, base first, a method of a derived block replacing the
- * base's of the same name (OVERRIDE, 6.6.5.5.5).
- */
-function publicMethodsOf(
-  lineage: readonly FunctionBlockDeclaration[],
-): LibraryMethodEntry[] {
-  const byName = new Map<string, LibraryMethodEntry>();
-  for (const owner of lineage) {
-    for (const method of owner.methods) {
-      const key = method.name.toUpperCase();
-      if (method.visibility !== "PUBLIC") {
-        byName.delete(key);
-        continue;
-      }
-      byName.set(key, buildMethodEntry(method));
-    }
-  }
-  return [...byName.values()];
 }
 
 /** The manifest entry of one method prototype. */
@@ -458,16 +500,16 @@ function buildMethodEntry(method: MethodDeclaration): LibraryMethodEntry {
     name: method.name,
     ...declaredNameOf(method.name, method.declaredName),
     ...attributesOf(method),
+    visibility: method.visibility,
     ...(method.returnType !== undefined
-      ? { returnType: method.returnType.name }
+      ? { returnType: serializeTypeRef(method.returnType) }
       : {}),
-    ...(typeof method.returnType?.maxLength === "number"
-      ? { returnMaxLength: method.returnType.maxLength }
-      : {}),
+    ...(method.isAbstract ? { isAbstract: true as const } : {}),
+    ...(method.isFinal ? { isFinal: true as const } : {}),
+    ...(method.isOverride ? { isOverride: true as const } : {}),
     inputs: params("VAR_INPUT"),
     outputs: params("VAR_OUTPUT"),
     inouts: params("VAR_IN_OUT"),
-    ...(method.isAbstract ? { isAbstract: true } : {}),
   };
 }
 
@@ -482,16 +524,16 @@ function buildInterfaceEntry(
     ...(iface.extends !== undefined && iface.extends.length > 0
       ? { extends: [...iface.extends] }
       : {}),
-    methods: iface.methods.map(buildMethodEntry),
-    ...((iface.properties ?? []).length > 0
-      ? {
-          properties: (iface.properties ?? []).map((p) => ({
-            type: serializeVarType(p.name, p.type),
-            get: p.getter !== undefined,
-            set: p.setter !== undefined,
-          })),
-        }
-      : {}),
+    methods: iface.methods.map((m) => ({
+      ...buildMethodEntry(m),
+      // An interface's prototypes are PUBLIC (6.6.6.4.2) and abstract.
+      visibility: "PUBLIC" as const,
+      isAbstract: true as const,
+    })),
+    properties: iface.properties.map((p) => ({
+      ...buildPropertyEntry(p),
+      visibility: "PUBLIC" as const,
+    })),
   };
 }
 
@@ -665,7 +707,8 @@ function compileNativeEntries(
     functionBlocks: result.ast.functionBlocks.map((fb) => {
       // A native block's methods are declared in its header, like an ST
       // block's; their bodies are native too.
-      const methods = publicMethodsOf([fb]);
+      const methods = fb.methods.map(buildMethodEntry);
+      const properties = fb.properties.map(buildPropertyEntry);
       const ctx: MemberManglingContext = {
         isUserDefinedType: (n) => userTypes.has(n.toUpperCase()),
         interfaceMethods: ifaceMethods.get(fb.name.toUpperCase()),
@@ -681,6 +724,7 @@ function compileNativeEntries(
       return tagNative({
         ...buildFBEntry(fb, ctx),
         ...(methods.length > 0 ? { methods } : {}),
+        ...(properties.length > 0 ? { properties } : {}),
         ...(locals.length > 0 ? { locals } : {}),
       });
     }),
@@ -752,6 +796,17 @@ export function compileLibrary(
     /** Global constants available during compilation (e.g., STRING_LENGTH) */
     globalConstants?: Record<string, number>;
   },
+): LibraryCompileResult {
+  try {
+    return compileLibraryUnit(sources, options);
+  } finally {
+    writtenText = undefined;
+  }
+}
+
+function compileLibraryUnit(
+  sources: Parameters<typeof compileLibrary>[0],
+  options: Parameters<typeof compileLibrary>[1],
 ): LibraryCompileResult {
   const catByName = buildCategoryByPouName(sources);
   const docByName = buildDocByPouName(sources);
@@ -872,8 +927,9 @@ export function compileLibrary(
     };
   }
 
-  // Extract manifest entries from the AST
+  // Extract manifest entries from the AST; initial values as written.
   const ast = result.ast!;
+  writtenText = sourceTextLookup(stSources, primarySource.fileName);
 
   const headerFileName = `${options.name}.hpp`;
 
@@ -987,11 +1043,9 @@ export function compileLibrary(
       const entry: {
         name: string;
         kind: typeof kind;
-        declaredName?: string;
+        displayName?: string;
         fields?: LibraryStructField[];
-        members?: string[];
-        declaredMembers?: string[];
-        values?: Array<string | null>;
+        members?: NonNullable<LibraryTypeEntry["members"]>;
         defaultValue?: string;
         baseType?: string;
         attributes?: Array<{ name: string; value?: string }>;
@@ -1007,32 +1061,23 @@ export function compileLibrary(
       // Only when it says something the folded name does not, so an all-caps
       // library adds nothing to its manifest.
       if (t.declaredName !== undefined && t.declaredName !== t.name) {
-        entry.declaredName = t.declaredName;
+        entry.displayName = t.declaredName;
       }
       // Export the enumerators, so a consumer can name one. The C++ chunk has
       // them, but the symbol table is built from the manifest.
       if (t.definition.kind === "EnumDefinition") {
-        const members = t.definition.members;
-        entry.members = members.map((m) => m.name);
-        if (
-          members.some(
-            (m) => declaredNameOf(m.name, m.declaredName).declaredName,
-          )
-        ) {
-          entry.declaredMembers = members.map(
-            (m) =>
-              declaredNameOf(m.name, m.declaredName).declaredName ?? m.name,
-          );
-        }
-        // Explicit values (6.4.4.3) and the type's own initial value, so a
-        // consumer evaluates and initialises the type as the library does.
-        if (t.definition.members.some((m) => m.value !== undefined)) {
-          entry.values = t.definition.members.map((m) =>
-            m.value !== undefined
-              ? (serializeInitialValue(m.value) ?? null)
-              : null,
-          );
-        }
+        // Each member with its explicit value (6.4.4.3), so a consumer names,
+        // evaluates and displays them as the library does.
+        entry.members = t.definition.members.map((m) => {
+          const value =
+            m.value !== undefined ? serializeInitialValue(m.value) : undefined;
+          return {
+            name: m.name,
+            ...declaredNameOf(m.name, m.declaredName),
+            ...(value !== undefined ? { value } : {}),
+            ...attributesOf(m),
+          };
+        });
         if (t.defaultValue !== undefined) {
           const initial = serializeInitialValue(t.defaultValue);
           if (initial !== undefined) entry.defaultValue = initial;

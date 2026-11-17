@@ -996,6 +996,9 @@ export class ASTBuilder {
       kind: "PropertyDeclaration",
       sourceSpan: nodeToSourceSpan(node),
       name,
+      ...(nameToken !== undefined && declaredImageOf(nameToken) !== name
+        ? { declaredName: declaredImageOf(nameToken) }
+        : {}),
       type,
       visibility,
       ...(getter !== undefined ? { getter } : {}),

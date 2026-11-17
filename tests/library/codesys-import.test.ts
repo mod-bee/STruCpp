@@ -489,12 +489,16 @@ describe("V3 integration: OSCAT Basic 335", () => {
 
     // OSCAT-specific: at least one GVL must declare the five CONSTANTS_*
     // instances. Without these, HOLIDAY/SUN_POS et al. would compile-fail.
-    const constantsGvl = gvls.find((s) =>
-      /MATH\s*:\s*CONSTANTS_MATH/.test(s.source) &&
-      /LANGUAGE\s*:\s*CONSTANTS_LANGUAGE/.test(s.source) &&
-      /LOCATION\s*:\s*CONSTANTS_LOCATION/.test(s.source),
+    const constantsGvl = gvls.find(
+      (s) =>
+        /MATH\s*:\s*CONSTANTS_MATH/.test(s.source) &&
+        /LANGUAGE\s*:\s*CONSTANTS_LANGUAGE/.test(s.source) &&
+        /LOCATION\s*:\s*CONSTANTS_LOCATION/.test(s.source),
     );
-    expect(constantsGvl, "Expected a GVL declaring MATH/LANGUAGE/LOCATION instances").toBeDefined();
+    expect(
+      constantsGvl,
+      "Expected a GVL declaring MATH/LANGUAGE/LOCATION instances",
+    ).toBeDefined();
     expect(constantsGvl!.source).toMatch(/PHYS\s*:\s*CONSTANTS_PHYS/);
     expect(constantsGvl!.source).toMatch(/SETUP\s*:\s*CONSTANTS_SETUP/);
     expect(constantsGvl!.source).toMatch(/END_VAR/);
@@ -512,9 +516,10 @@ describe("V3 integration: OSCAT Basic 335", () => {
     const result = await importCodesysLibrary(OSCAT_V3_PATH);
     expect(result.globalConstants.STRING_LENGTH).toBeTypeOf("number");
     expect(result.globalConstants.LIST_LENGTH).toBeTypeOf("number");
-    const constGvl = result.sources.find((s) =>
-      /\bVAR_GLOBAL\s+CONSTANT\b/.test(s.source) &&
-      /\bSTRING_LENGTH\b/.test(s.source),
+    const constGvl = result.sources.find(
+      (s) =>
+        /\bVAR_GLOBAL\s+CONSTANT\b/.test(s.source) &&
+        /\bSTRING_LENGTH\b/.test(s.source),
     );
     expect(
       constGvl,
@@ -623,10 +628,7 @@ describe("V3 integration: OSCAT Basic 335", () => {
     // the way through the compileStlib pipeline onto manifest entries
     // (functions / functionBlocks / types).
     const archive = JSON.parse(
-      readFileSync(
-        resolve(__dirname, "../../libs/oscat-basic.stlib"),
-        "utf-8",
-      ),
+      readFileSync(resolve(__dirname, "../../libs/oscat-basic.stlib"), "utf-8"),
     );
     const fns: Array<{ documentation?: string }> = archive.manifest.functions;
     const fbs: Array<{ documentation?: string }> =

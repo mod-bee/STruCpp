@@ -108,7 +108,10 @@ describe("loadLibraryConfig", () => {
       globalConstants: { STRING_LENGTH: 254, LIST_LENGTH: 254 },
     });
     const cfg = loadLibraryConfig(tmp);
-    expect(cfg?.globalConstants).toEqual({ STRING_LENGTH: 254, LIST_LENGTH: 254 });
+    expect(cfg?.globalConstants).toEqual({
+      STRING_LENGTH: 254,
+      LIST_LENGTH: 254,
+    });
   });
 
   it("throws when globalConstants is an array instead of an object map", () => {

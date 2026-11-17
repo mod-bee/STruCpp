@@ -120,20 +120,22 @@ describe("library block inheritance in the manifest", () => {
   });
 });
 
-(hasGpp ? describe : describe.skip)("library inheritance and outputs, run", () => {
-  it("runs the derived body with SUPER(), the edge, and the function outputs", () => {
-    const result = compile(PROJECT, {
-      headerFileName: "generated.hpp",
-      libraries: [buildLib()],
-    });
-    expect(result.errors.map((e) => e.message)).toEqual([]);
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-libinh-"));
-    try {
-      fs.writeFileSync(path.join(dir, "generated.hpp"), result.headerCode);
-      fs.writeFileSync(path.join(dir, "generated.cpp"), result.cppCode);
-      fs.writeFileSync(
-        path.join(dir, "main.cpp"),
-        `#include "generated.hpp"
+(hasGpp ? describe : describe.skip)(
+  "library inheritance and outputs, run",
+  () => {
+    it("runs the derived body with SUPER(), the edge, and the function outputs", () => {
+      const result = compile(PROJECT, {
+        headerFileName: "generated.hpp",
+        libraries: [buildLib()],
+      });
+      expect(result.errors.map((e) => e.message)).toEqual([]);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-libinh-"));
+      try {
+        fs.writeFileSync(path.join(dir, "generated.hpp"), result.headerCode);
+        fs.writeFileSync(path.join(dir, "generated.cpp"), result.cppCode);
+        fs.writeFileSync(
+          path.join(dir, "main.cpp"),
+          `#include "generated.hpp"
 #include <cstdio>
 strucpp::Configuration_CONFIG0 g_config;
 int main() {
@@ -144,20 +146,21 @@ int main() {
   return 0;
 }
 `,
-      );
-      const bin = path.join(dir, "run");
-      execSync(
-        `g++ -std=${CXX_STD} -I"${RUNTIME_INCLUDE_PATH}" -I"${dir}" -o "${bin}" ` +
-          `"${path.join(dir, "main.cpp")}" "${path.join(dir, "generated.cpp")}"`,
-        { encoding: "utf-8", env: cxxEnv },
-      );
-      // x = 3 * (a + 1) + b = 8; one rising edge over two calls; Kind
-      // overridden; 25 of 0..50 -> 5 of 0..10; a zero span flags SpanBad.
-      expect(execSync(`"${bin}"`, { encoding: "utf-8" }).trim()).toBe(
-        "8|1|2|5|0|0|1",
-      );
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
+        );
+        const bin = path.join(dir, "run");
+        execSync(
+          `g++ -std=${CXX_STD} -I"${RUNTIME_INCLUDE_PATH}" -I"${dir}" -o "${bin}" ` +
+            `"${path.join(dir, "main.cpp")}" "${path.join(dir, "generated.cpp")}"`,
+          { encoding: "utf-8", env: cxxEnv },
+        );
+        // x = 3 * (a + 1) + b = 8; one rising edge over two calls; Kind
+        // overridden; 25 of 0..50 -> 5 of 0..10; a zero span flags SpanBad.
+        expect(execSync(`"${bin}"`, { encoding: "utf-8" }).trim()).toBe(
+          "8|1|2|5|0|0|1",
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  },
+);

@@ -8,7 +8,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { compileLibrary, compileStlib } from "../../src/library/library-compiler.js";
+import {
+  compileLibrary,
+  compileStlib,
+} from "../../src/library/library-compiler.js";
 
 describe("Library chunks", () => {
   describe("compileLibrary chunk extraction", () => {
@@ -270,14 +273,16 @@ describe("Library chunks", () => {
           Caller := ZZZ(x) + AAA(x);
         END_FUNCTION
       `;
-      const first = compileLibrary(
-        [{ source, fileName: "t.st" }],
-        { name: "my-lib", version: "1.0.0", namespace: "my_lib" },
-      );
-      const second = compileLibrary(
-        [{ source, fileName: "t.st" }],
-        { name: "my-lib", version: "1.0.0", namespace: "my_lib" },
-      );
+      const first = compileLibrary([{ source, fileName: "t.st" }], {
+        name: "my-lib",
+        version: "1.0.0",
+        namespace: "my_lib",
+      });
+      const second = compileLibrary([{ source, fileName: "t.st" }], {
+        name: "my-lib",
+        version: "1.0.0",
+        namespace: "my_lib",
+      });
       const callerA = first.chunks!.find((c) => c.name === "CALLER")!;
       const callerB = second.chunks!.find((c) => c.name === "CALLER")!;
       expect(callerA.deps).toEqual(callerB.deps);
