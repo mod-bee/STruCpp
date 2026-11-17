@@ -485,6 +485,14 @@ export class SemanticAnalyzer {
     this.validateTypeReferences(ast);
     const typeReferenceErrors = this.errors.length - errorsBeforeTypeReferences;
 
+    // Method defaults that read variables, flagged before the calls are
+    // checked against them.
+    for (const fb of ast.functionBlocks) {
+      for (const method of fb.methods) {
+        this.validateMethodDefaults(fb, method, ast);
+      }
+    }
+
     // Pass 2: Type checking
     if (this.errors.length - typeReferenceErrors === 0) {
       const typeResult = this.typeChecker.check(ast);
@@ -3322,6 +3330,63 @@ export class SemanticAnalyzer {
     );
   }
 
+  /**
+   * An input default that reads a variable of the block (or of the method)
+   * rather than only constants cannot be evaluated by a call that omits the
+   * input: warned here, and such a call is refused (checkOmittedArguments),
+   * as CODESYS does.
+   */
+  private validateMethodDefaults(
+    fb: FunctionBlockDeclaration,
+    method: MethodDeclaration,
+    ast: CompilationUnit,
+  ): void {
+    const variables = new Set<string>();
+    const lineage: FunctionBlockDeclaration[] = [];
+    for (
+      let cur: FunctionBlockDeclaration | undefined = fb;
+      cur !== undefined && !lineage.includes(cur);
+      cur =
+        cur.extends === undefined
+          ? undefined
+          : ast.functionBlocks.find(
+              (f) => f.name.toUpperCase() === cur!.extends!.toUpperCase(),
+            )
+    ) {
+      lineage.push(cur);
+    }
+    for (const owner of [...lineage, method]) {
+      for (const block of owner.varBlocks) {
+        if (block.isConstant) continue;
+        for (const decl of block.declarations) {
+          for (const n of decl.names) variables.add(n.toUpperCase());
+        }
+      }
+    }
+    for (const block of method.varBlocks) {
+      if (block.blockType !== "VAR_INPUT") continue;
+      for (const decl of block.declarations) {
+        if (decl.initialValue === undefined) continue;
+        let read: string | undefined;
+        walkAST(decl.initialValue, (node) => {
+          if (read !== undefined || node.kind !== "VariableExpression") return;
+          const upper = (node as VariableExpression).name.toUpperCase();
+          if (variables.has(upper)) read = upper;
+        });
+        if (read === undefined) continue;
+        decl.defaultNotConstant = true;
+        for (const name of decl.names) {
+          this.addWarning(
+            `The default of '${name.toUpperCase()}' in method '${method.name.toUpperCase()}' reads ${read}, which is not constant; callers must pass it.`,
+            decl.sourceSpan.startLine,
+            decl.sourceSpan.startCol,
+            decl.sourceSpan.file,
+          );
+        }
+      }
+    }
+  }
+
   private validateOOPModifiers(ast: CompilationUnit): void {
     for (const iface of ast.interfaces) {
       for (const method of iface.methods) {
@@ -3329,7 +3394,9 @@ export class SemanticAnalyzer {
       }
     }
     for (const fb of ast.functionBlocks) {
-      for (const method of fb.methods) this.validateMethodName(method, fb.name);
+      for (const method of fb.methods) {
+        this.validateMethodName(method, fb.name);
+      }
     }
     // Build FB lookup map for OVERRIDE and IMPLEMENTS validation
     const fbMap = new Map<string, FunctionBlockDeclaration>();
@@ -4010,6 +4077,26 @@ export class SemanticAnalyzer {
     }
     for (const fb of ast.functionBlocks) {
       const varTypeMap = this.buildVarTypeMap(fb.varBlocks);
+      // Inside a block, a bare call of one of its methods (own or inherited)
+      // is that method, before a standard function of the name (CODESYS:
+      // `Len()` in a block with a method Len).
+      this.ownMethodNames = new Set();
+      for (
+        let cur: FunctionBlockDeclaration | undefined = fb, depth = 0;
+        cur !== undefined && depth < 32;
+        depth++
+      ) {
+        for (const m of cur.methods)
+          this.ownMethodNames.add(m.name.toUpperCase());
+        const base: string | undefined = cur.extends?.toUpperCase();
+        cur =
+          base === undefined
+            ? undefined
+            : (ast.functionBlocks.find((f) => f.name.toUpperCase() === base) ??
+              ast.libraryFunctionBlocks?.find(
+                (f) => f.name.toUpperCase() === base,
+              ));
+      }
       this.walkStatementsForExpressionValidation(fb.body, varTypeMap, ast);
       for (const method of fb.methods) {
         const methodVarTypeMap = this.buildVarTypeMap(method.varBlocks);
@@ -4023,8 +4110,12 @@ export class SemanticAnalyzer {
           ast,
         );
       }
+      this.ownMethodNames = undefined;
     }
   }
+
+  /** The method names of the block whose bodies are being validated. */
+  private ownMethodNames: Set<string> | undefined;
 
   /**
    * Walk statements checking expressions for bit access bounds and ADR l-value issues.
@@ -4134,7 +4225,8 @@ export class SemanticAnalyzer {
     // Validate standard function argument counts and ADR l-value requirement
     if (
       expr.kind === "FunctionCallExpression" &&
-      !expr.functionName.includes(".")
+      !expr.functionName.includes(".") &&
+      this.ownMethodNames?.has(expr.functionName.toUpperCase()) !== true
     ) {
       this.checkStdFunctionArgs(expr);
       this.checkVarInfoArg(expr, varTypeMap);

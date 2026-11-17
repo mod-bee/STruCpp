@@ -968,25 +968,52 @@ export class STParser extends CstParser {
     this.OPTION2({
       GATE: () => {
         const name = typeNameTok.image.toUpperCase();
+        // STRING(n) (CODESYS) or STRING[n] (IEC 61131-3 Ed.3 6.4.4.1.1,
+        // Table 10: `STRING[10]`).
+        const open = this.LA(1).tokenType;
+        const close =
+          open === tokens.LParen
+            ? tokens.RParen
+            : open === tokens.LBracket
+              ? tokens.RBracket
+              : undefined;
         return (
           (name === "STRING" || name === "WSTRING") &&
-          this.LA(1).tokenType === tokens.LParen &&
-          ((this.LA(2).tokenType === tokens.IntegerLiteral &&
-            this.LA(3).tokenType === tokens.RParen) ||
-            (this.LA(2).tokenType === tokens.Identifier &&
-              this.LA(3).tokenType === tokens.RParen))
+          close !== undefined &&
+          (this.LA(2).tokenType === tokens.IntegerLiteral ||
+            this.LA(2).tokenType === tokens.Identifier) &&
+          this.LA(3).tokenType === close
         );
       },
       DEF: () => {
-        this.CONSUME(tokens.LParen);
-        this.OR4({
-          DEF: [
-            { ALT: () => this.CONSUME(tokens.IntegerLiteral) },
-            { ALT: () => this.CONSUME4(tokens.Identifier) },
-          ],
-          IGNORE_AMBIGUITIES: true,
-        });
-        this.CONSUME(tokens.RParen);
+        this.OR5([
+          {
+            ALT: () => {
+              this.CONSUME(tokens.LParen);
+              this.OR4({
+                DEF: [
+                  { ALT: () => this.CONSUME(tokens.IntegerLiteral) },
+                  { ALT: () => this.CONSUME4(tokens.Identifier) },
+                ],
+                IGNORE_AMBIGUITIES: true,
+              });
+              this.CONSUME(tokens.RParen);
+            },
+          },
+          {
+            ALT: () => {
+              this.CONSUME(tokens.LBracket);
+              this.OR6({
+                DEF: [
+                  { ALT: () => this.CONSUME2(tokens.IntegerLiteral) },
+                  { ALT: () => this.CONSUME5(tokens.Identifier) },
+                ],
+                IGNORE_AMBIGUITIES: true,
+              });
+              this.CONSUME(tokens.RBracket);
+            },
+          },
+        ]);
       },
     });
   });

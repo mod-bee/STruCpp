@@ -6172,7 +6172,9 @@ export class CodeGenerator {
       (stmt.target.kind === "VariableExpression"
         ? this.interfaceArrayLiteral(stmt.value, this.accessType(stmt.target))
         : undefined) ??
-      this.generateRealOperand(stmt.value, this.inferExprType(stmt.target));
+      (this.isUntypedRealLiteral(stmt.value)
+        ? this.generateRealOperand(stmt.value, this.inferExprType(stmt.target))
+        : this.generateSequencedExpression(stmt.value));
 
     this.emit(`${indent}${target} = ${value};`);
   }
@@ -6305,7 +6307,9 @@ export class CodeGenerator {
    */
   private generateIfStatement(stmt: IfStatement, indent: string): void {
     const ifLine = this.currentLine;
-    this.emit(`${indent}if (${this.generateExpression(stmt.condition)}) {`);
+    this.emit(
+      `${indent}if (${this.generateSequencedExpression(stmt.condition)}) {`,
+    );
     this.recordLineMapping(stmt.sourceSpan.startLine, ifLine);
     this.generateStatements(stmt.thenStatements, indent + this.options.indent);
 
@@ -6313,7 +6317,7 @@ export class CodeGenerator {
       this.emitLineDirective(elsif.sourceSpan.startLine);
       const elsifLine = this.currentLine;
       this.emit(
-        `${indent}} else if (${this.generateExpression(elsif.condition)}) {`,
+        `${indent}} else if (${this.generateSequencedExpression(elsif.condition)}) {`,
       );
       this.recordLineMapping(elsif.sourceSpan.startLine, elsifLine);
       this.generateStatements(elsif.statements, indent + this.options.indent);
@@ -6475,7 +6479,9 @@ export class CodeGenerator {
    */
   private generateWhileStatement(stmt: WhileStatement, indent: string): void {
     const whileLine = this.currentLine;
-    this.emit(`${indent}while (${this.generateExpression(stmt.condition)}) {`);
+    this.emit(
+      `${indent}while (${this.generateSequencedExpression(stmt.condition)}) {`,
+    );
     this.recordLineMapping(stmt.sourceSpan.startLine, whileLine);
     const exitLabel = {
       name: `__strucpp_loop_exit_${this.loopExitLabelCounter++}`,
@@ -6509,7 +6515,7 @@ export class CodeGenerator {
     this.emitLineDirective(stmt.sourceSpan.endLine);
     const untilLine = this.currentLine;
     this.emit(
-      `${indent}} while (!(${this.generateExpression(stmt.condition)}));`,
+      `${indent}} while (!(${this.generateSequencedExpression(stmt.condition)}));`,
     );
     if (exitLabel.used) this.emit(`${indent}${exitLabel.name}: ;`);
     this.recordLineMapping(stmt.sourceSpan.endLine, untilLine);
@@ -6569,6 +6575,101 @@ export class CodeGenerator {
    * Generate C++ code for an expression.
    * Returns the C++ expression as a string.
    */
+  /**
+   * `expr` evaluated left to right. IEC 61131-3 Ed.3 7.3.2 evaluates an
+   * operator's operands left first, and a call's arguments before the call;
+   * C++ leaves the order of operands and arguments unspecified, so an
+   * expression with two or more calls that may have side effects (a method,
+   * a user or library function) evaluates them into temporaries in source
+   * order first. Anything else is generated as it is.
+   */
+  private generateSequencedExpression(expr: Expression): string {
+    if (this.lockCtx) return this.generateExpression(expr);
+    const calls: Expression[] = [];
+    const visit = (node: Expression): void => {
+      walkAST(node, (child) => {
+        if (child === node) return;
+        if (
+          child.kind === "MethodCallExpression" ||
+          child.kind === "FunctionCallExpression"
+        ) {
+          visit(child as Expression);
+          if (this.mayHaveSideEffects(child as Expression)) {
+            calls.push(child as Expression);
+          }
+          return false;
+        }
+        return undefined;
+      });
+    };
+    visit(expr);
+    if (calls.length < 2 || !this.callsUnsequenced(expr)) {
+      return this.generateExpression(expr);
+    }
+    const saved = this.argOverrides;
+    const overrides = new Map(saved ?? []);
+    const temps: string[] = [];
+    try {
+      for (const call of calls) {
+        this.argOverrides = overrides;
+        const code = this.generateExpression(call);
+        const name = `__seq${this.tempVarCounter++}`;
+        temps.push(`auto ${name} = ${code};`);
+        overrides.set(call, name);
+      }
+      this.argOverrides = overrides;
+      const final = this.generateExpression(expr);
+      return `[&]() { ${temps.join(" ")} return ${final}; }()`;
+    } finally {
+      this.argOverrides = saved;
+    }
+  }
+
+  /**
+   * Whether two calls with side effects are operands of one operator, or
+   * arguments of one call: C++ leaves their order open. A call and the calls
+   * in its own arguments are ordered already.
+   */
+  private callsUnsequenced(expr: Expression): boolean {
+    const hasCall = (e: Expression): boolean => {
+      let found = false;
+      walkAST(e, (node) => {
+        if (found) return false;
+        if (this.mayHaveSideEffects(node as Expression)) found = true;
+        return undefined;
+      });
+      return found;
+    };
+    let unsequenced = false;
+    walkAST(expr, (node) => {
+      if (unsequenced) return false;
+      const parts: Expression[] =
+        node.kind === "BinaryExpression"
+          ? [(node as BinaryExpression).left, (node as BinaryExpression).right]
+          : node.kind === "FunctionCallExpression" ||
+              node.kind === "MethodCallExpression"
+            ? (
+                node as FunctionCallExpression | MethodCallExpression
+              ).arguments.map((a) => a.value)
+            : [];
+      if (parts.filter(hasCall).length >= 2) unsequenced = true;
+      return undefined;
+    });
+    return unsequenced;
+  }
+
+  /** A call that may change state: a method, or a function of the unit or a library (not a standard one). */
+  private mayHaveSideEffects(expr: Expression): boolean {
+    if (expr.kind === "MethodCallExpression") return true;
+    if (expr.kind !== "FunctionCallExpression") return false;
+    const upper = expr.functionName.toUpperCase();
+    if (upper.includes(".")) return true;
+    return (
+      this.ast?.functions.some((f) => f.name.toUpperCase() === upper) ===
+        true || this.libraryFunctionParams.has(upper)
+    );
+  }
+
   protected generateExpression(expr: Expression): string {
     const override = this.argOverrides?.get(expr);
     if (override !== undefined) return override;
@@ -7338,11 +7439,13 @@ export class CodeGenerator {
     return this.methodCallPlan(ownerType, methodName, args).map((entry) => {
       if (entry.arg === undefined) return entry.code!;
       const arg = entry.arg;
-      const param = arg.name
-        ? params?.find((p) => p.name === arg.name!.toUpperCase())
-        : params?.[positional];
-      const paramName = arg.name ?? order[positional];
-      if (!arg.name) positional++;
+      const slot = arg.name?.toUpperCase() ?? entry.slot;
+      const param =
+        slot !== undefined
+          ? params?.find((p) => p.name === slot)
+          : params?.[positional];
+      const paramName = slot ?? order[positional];
+      if (!arg.name && entry.slot === undefined) positional++;
       if (paramName && generics.has(paramName.toUpperCase())) {
         const descriptor = this.generateAnyDescriptor(arg.value);
         if (descriptor) return descriptor;
@@ -7488,7 +7591,7 @@ export class CodeGenerator {
     ownerType: string | undefined,
     methodName: string,
     args: ReadonlyArray<A>,
-  ): Array<{ arg?: A; code?: string }> {
+  ): Array<{ arg?: A; code?: string; slot?: string }> {
     const asWritten = args.map((arg) => ({ arg }));
     // A positional call is taken as written; a call with no arguments is a
     // formal call that omits them all (IEC 61131-3 6.6.1.4.2).
@@ -7497,7 +7600,16 @@ export class CodeGenerator {
     }
     const decl = this.findMethodDecl(ownerType, methodName);
     if (!decl) return asWritten;
-    const plan: Array<{ arg?: A; code?: string }> = [];
+    // Positional arguments before named ones (CODESYS `m.Split(8, Half =>
+    // h)`) fill the parameters no name claims, in declaration order.
+    const claimed = new Set(
+      args
+        .filter((a) => a.name !== undefined)
+        .map((a) => a.name!.toUpperCase()),
+    );
+    const positional = args.filter((a) => a.name === undefined);
+    let nextPositional = 0;
+    const plan: Array<{ arg?: A; code?: string; slot?: string }> = [];
     for (const block of decl.varBlocks ?? []) {
       const kind = block.blockType;
       if (
@@ -7509,13 +7621,19 @@ export class CodeGenerator {
       }
       for (const d of block.declarations) {
         for (const name of d.names) {
-          const arg = args.find(
+          const named = args.find(
             (a) =>
               a.name !== undefined &&
               a.name.toUpperCase() === name.toUpperCase(),
           );
+          const arg =
+            named ??
+            (!claimed.has(name.toUpperCase()) &&
+            nextPositional < positional.length
+              ? positional[nextPositional++]
+              : undefined);
           if (arg) {
-            plan.push({ arg });
+            plan.push({ arg, slot: name.toUpperCase() });
           } else if (kind === "VAR_INPUT") {
             const passing = this.lightInputs(methodName)
               ? this.methodInputPassing(d.type)

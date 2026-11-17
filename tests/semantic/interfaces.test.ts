@@ -130,8 +130,10 @@ PROGRAM Main
   VAR r : I_RUN; s : I_SPEED; x : BOOL; END_VAR
   x := r < r;
   x := r = s;
+  x := r <> 1;
   x := r <> 0;
 END_PROGRAM`);
+    // `r <> 0` is CODESYS's NULL check, accepted; `r <> 1` is not.
     expect(errors).toHaveLength(3);
     for (const e of errors) expect(e).toMatch(/6\.6\.6\.5\.1/);
   });

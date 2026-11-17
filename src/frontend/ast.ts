@@ -373,6 +373,12 @@ export interface VarDeclaration extends ASTNode {
   type: TypeReference;
   initialValue?: Expression;
   /**
+   * An input whose initial value reads a variable rather than only constants:
+   * a call that omits the input cannot evaluate it there, so it must pass it
+   * (set by the analyzer, or by the loader for a library method).
+   */
+  defaultNotConstant?: true;
+  /**
    * Arguments for the instance's FB_Init, written after the type:
    * `com1 : serialdevice(iCOMnum := 1);` (CODESYS "Method: FB_Init"). Empty
    * for `fb : T();`; absent when no parentheses follow the type.

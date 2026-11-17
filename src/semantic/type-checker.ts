@@ -339,6 +339,53 @@ export class TypeChecker {
   }
 
   /**
+   * A formal call (named arguments, or none) of a method or function may omit
+   * an input, which then takes its declared default (IEC 61131-3 Ed.3
+   * 6.6.1.4.2), but not an in-out, which must be bound to a variable, nor an
+   * input whose default reads a variable rather than a constant: the call
+   * cannot evaluate it. A positional call is checked elsewhere.
+   */
+  checkOmittedArguments(
+    callee: { name: string; varBlocks: VarBlock[] },
+    args: ReadonlyArray<{ name?: string }>,
+    at: Expression,
+  ): void {
+    if (args.length > 0 && args.some((a) => a.name === undefined)) return;
+    const given = new Set(
+      args
+        .map((a) => a.name?.toUpperCase())
+        .filter((n): n is string => n !== undefined),
+    );
+    const name = callee.name.toUpperCase();
+    for (const block of callee.varBlocks) {
+      for (const decl of block.declarations) {
+        for (const param of decl.names) {
+          const upper = param.toUpperCase();
+          if (given.has(upper)) continue;
+          if (block.blockType === "VAR_IN_OUT") {
+            this.addError(
+              `'${name}' is missing its in-out argument '${upper}'`,
+              at.sourceSpan.startLine,
+              at.sourceSpan.startCol,
+              at.sourceSpan.file,
+            );
+          } else if (
+            block.blockType === "VAR_INPUT" &&
+            decl.defaultNotConstant === true
+          ) {
+            this.addError(
+              `'${name}' is missing input '${upper}': its default is not constant`,
+              at.sourceSpan.startLine,
+              at.sourceSpan.startCol,
+              at.sourceSpan.file,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Find a method by name on a function block or anything it EXTENDS. Walks
    * base-last, so an override is found before what it overrides. `seen` breaks
    * a cycle in a malformed EXTENDS chain, which the analyzer reports.
@@ -581,7 +628,7 @@ export class TypeChecker {
 
   /**
    * Comparison of interface variables (6.6.6.5.1): `=` and `<>` only, with
-   * a variable of the same interface or NULL.
+   * a variable of the same interface or NULL (or 0, CODESYS), either side.
    */
   private validateInterfaceComparison(
     expr: BinaryExpression,
@@ -591,8 +638,11 @@ export class TypeChecker {
     const left = this.interfaceOf(leftType);
     const right = this.interfaceOf(rightType);
     if (left === undefined && right === undefined) return;
+    // NULL, or 0 as CODESYS writes the check ("Interface": `itf <> 0`).
     const isNull = (e: Expression): boolean =>
-      e.kind === "LiteralExpression" && e.literalType === "NULL";
+      e.kind === "LiteralExpression" &&
+      (e.literalType === "NULL" ||
+        (e.literalType === "INT" && !e.typePrefix && Number(e.value) === 0));
     const ok =
       (expr.operator === "=" || expr.operator === "<>") &&
       ((left !== undefined &&
@@ -1382,6 +1432,18 @@ export class TypeChecker {
 
     const funcSymbol = this.symbolTables.lookupFunction(expr.functionName);
     if (funcSymbol !== undefined) {
+      // A function of this unit: an omitted in-out is refused, as for a
+      // method (a library function's declaration is a placeholder).
+      if (
+        funcSymbol.declaration !== undefined &&
+        this.ast?.functions.includes(funcSymbol.declaration) === true
+      ) {
+        this.checkOmittedArguments(
+          funcSymbol.declaration,
+          stripEnEno(expr.arguments),
+          expr,
+        );
+      }
       let returnType = funcSymbol.returnType;
       // Overloaded standard functions are published in the builtin stdlib
       // manifest with their generic return *constraint* (e.g. NOT -> ANY_BIT,
@@ -1487,6 +1549,7 @@ export class TypeChecker {
         expr.functionName.slice(dot + 1),
       );
       if (dotted) {
+        this.checkOmittedArguments(dotted, expr.arguments, expr);
         const retType = this.methodReturnType(dotted);
         if (retType) expr.resolvedType = retType;
         return retType;
@@ -1520,6 +1583,7 @@ export class TypeChecker {
       expr.functionName,
     );
     if (ownMethod) {
+      this.checkOmittedArguments(ownMethod, expr.arguments, expr);
       const retType = this.methodReturnType(ownMethod);
       if (retType) expr.resolvedType = retType;
       return retType;
@@ -1627,6 +1691,7 @@ export class TypeChecker {
       }
     }
     if (method) {
+      this.checkOmittedArguments(method, expr.arguments, expr);
       this.validateInterfaceArguments(
         expr.arguments,
         method.varBlocks,

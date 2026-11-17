@@ -228,7 +228,12 @@ function serializeLocal(
   };
   const cppName = mangledMemberName(name, decl.type.name, ctx);
   if (cppName !== name) entry.cppName = cppName;
-  if (block.isConstant) entry.readOnly = true;
+  if (block.isConstant) {
+    entry.readOnly = true;
+    // Its value, as written: a consumer evaluates a method default that
+    // names it in the block's terms (resolved in the callee).
+    Object.assign(entry, initialValueOf(decl.initialValue));
+  }
   if (block.isRetain) entry.retain = true;
   if (block.isNonRetain) entry.nonRetain = true;
   return entry;
@@ -239,6 +244,40 @@ function serializeLocal(
  * does not (see `LibraryVarType.declaredName`), so an all-caps library adds
  * nothing to its manifest.
  */
+/** Upper-case names of the variables a function or method declares. */
+function localNamesOf(pou: { varBlocks: VarBlock[] }): Set<string> {
+  return new Set(
+    pou.varBlocks.flatMap((b) =>
+      b.declarations.flatMap((d) => d.names.map((n) => n.toUpperCase())),
+    ),
+  );
+}
+
+/**
+ * A parameter's default for the manifest, which a consumer fills an omitted
+ * input with: as written, unless it names a variable of the function or
+ * method itself, which a consumer cannot see; then its value, with the
+ * POU's constants folded in (the analyzer folds them in place). A block's
+ * constants stay by name: the consumer resolves them from the block's
+ * `locals` (`readOnly` with `initialValue`).
+ */
+function parameterDefault(
+  expr: Expression,
+  localNames: ReadonlySet<string>,
+): string | undefined {
+  const written = writtenText?.(expr);
+  if (written !== undefined) {
+    const names = written
+      .replace(/'(?:[^'$]|\$.)*'|"(?:[^"$]|\$.)*"/g, "")
+      .replace(/#\w+/g, "")
+      .match(/[A-Za-z_]\w*/g);
+    if (!(names ?? []).some((n) => localNames.has(n.toUpperCase()))) {
+      return written;
+    }
+  }
+  return renderInitialValue(expr);
+}
+
 /** A declaration's initial value as ST text, when it has one the manifest can carry. */
 function initialValueOf(expr: Expression | undefined): {
   initialValue?: string;
@@ -489,7 +528,10 @@ function buildMethodEntry(method: MethodDeclaration): LibraryMethodEntry {
               ...attributesOf(d),
             };
             if (blockType === "VAR_INPUT" && d.initialValue !== undefined) {
-              const initial = serializeInitialValue(d.initialValue);
+              const initial = parameterDefault(
+                d.initialValue,
+                localNamesOf(method),
+              );
               if (initial !== undefined) entry.initialValue = initial;
             }
             return entry;
@@ -980,7 +1022,7 @@ function compileLibraryUnit(
                 block.declarations.flatMap((decl) => {
                   const initialValue =
                     decl.initialValue !== undefined
-                      ? serializeInitialValue(decl.initialValue)
+                      ? parameterDefault(decl.initialValue, localNamesOf(fn))
                       : undefined;
                   return decl.names.map((name, i) => ({
                     ...serializeVarType(name, decl.type),
