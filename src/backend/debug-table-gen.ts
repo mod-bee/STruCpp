@@ -34,7 +34,11 @@ import type {
   VarDeclaration,
 } from "../frontend/ast.js";
 import { hasAttribute } from "../frontend/ast.js";
-import { lockedGlobals, type ProjectModel } from "../project-model.js";
+import {
+  getProjectNamespace,
+  lockedGlobals,
+  type ProjectModel,
+} from "../project-model.js";
 import type { SymbolTables } from "../semantic/symbol-table.js";
 import { isElementaryType } from "../semantic/type-registry.js";
 import {
@@ -1937,6 +1941,7 @@ export function generateDebugTable(
   const debugTableCpp = renderCpp(
     arrays,
     configGlobal,
+    getProjectNamespace(projectModel),
     configName,
     retainVars,
     retainIdentities,
@@ -2285,6 +2290,7 @@ interface GlobalLeafRun {
 function renderCpp(
   arrays: Entry[][],
   configGlobal: string,
+  ns: string,
   configName: string,
   retainVars: Array<{
     arrayIdx: number;
@@ -2357,14 +2363,14 @@ function renderCpp(
     lines.push(
       `// The sketch/runtime must define this global with external linkage:`,
     );
-    lines.push(`//   strucpp::Configuration_${configName} ${configGlobal};`);
+    lines.push(`//   ${ns}::Configuration_${configName} ${configGlobal};`);
     lines.push(`// The debug table below reaches into it via compile-time`);
     lines.push(
       `// address-of expressions — so it must be a real object, not a`,
     );
     lines.push(`// static-local or a pointer.`);
     lines.push(
-      `extern ::strucpp::Configuration_${configName} ${configGlobal};`,
+      `extern ::${ns}::Configuration_${configName} ${configGlobal};`,
     );
   }
   lines.push("");
