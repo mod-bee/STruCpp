@@ -209,6 +209,28 @@ Libraries use a single-file `.stlib` archive format (JSON):
 
 `compile()` is a pure function -- no auto-discovery or implicit library loading. All libraries must be explicitly provided via `libraryPaths` or `libraries` options. The CLI auto-adds a bundled `libs/` directory (like gcc system lib paths), which can be disabled with `--no-default-libs`.
 
+### Library ABI version
+
+An archive carries `abiVersion`, the calling convention of the C++ in its
+chunks (`STRUCPP_ABI_VERSION` in `src/library/library-manifest.ts`). A
+consumer refuses an archive with chunks whose `abiVersion` differs from its
+own, with a plain error naming the library and its version ("built for an
+older compiler ... reinstall it ... or rebuild it"), before any C++ is
+generated; an archive without the field counts as 1. An archive with no
+chunks (symbol entries only) is not checked.
+
+Bump `STRUCPP_ABI_VERSION` by one, and add a line to the list beside it, in
+the same commit as any change after which code built by this compiler can no
+longer call, or be called by, a chunk built by the previous one: a C++
+signature of a generated POU, method or function (how a parameter is
+passed), a runtime type a chunk lays out or fills by position (`IEC_ANY`,
+`MemberDesc`, `TypeDesc` fields that are not appended), or the name of a
+generated symbol a chunk refers to. Appending a field that defaults to
+null, or a change confined to a consumer's own code, needs no bump.
+
+- 1: before 0.7.0-modbee.4 (no stamp)
+- 2: a method's and a function's VAR_OUTPUT passed by pointer (f295701, fd86039)
+
 ### Bundled Libraries
 
 - **iec-standard-fb.stlib**: IEC 61131-3 standard function blocks (TON, TOF, TP, CTU, CTD, CTUD, R_TRIG, F_TRIG, SR, RS) compiled from ST source

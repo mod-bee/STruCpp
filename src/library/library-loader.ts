@@ -976,6 +976,11 @@ export function loadStlibArchive(json: unknown): StlibArchive {
     dependencies: obj.dependencies as Array<{ name: string; version: string }>,
   };
 
+  // The calling convention it was built for; absent in an older archive.
+  if (typeof obj.abiVersion === "number") {
+    archive.abiVersion = obj.abiVersion;
+  }
+
   // Optional sources
   if (Array.isArray(obj.sources)) {
     archive.sources = obj.sources as Array<{

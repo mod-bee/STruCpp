@@ -12,6 +12,7 @@ import type {
   StlibCompileResult,
   StlibArchive,
 } from "./library-manifest.js";
+import { STRUCPP_ABI_VERSION } from "./library-manifest.js";
 import { compile } from "../index.js";
 import { buildChunks } from "./library-chunks.js";
 import type { MemberManglingContext } from "../backend/member-mangling.js";
@@ -1164,6 +1165,7 @@ export function compileStlib(
   // dependency's, by construction.
   const archive: StlibCompileResult["archive"] = {
     formatVersion: 1,
+    abiVersion: STRUCPP_ABI_VERSION,
     manifest,
     chunks: libResult.chunks ?? [],
     dependencies: (options.dependencies ?? []).map((d) => ({

@@ -532,9 +532,23 @@ export interface LibraryCompileResult {
  * library-wide blob field: the legacy `headerCode` / `cppCode` were
  * retired in Phase 4 of the function-level tree-shaking work.
  */
+/**
+ * The calling convention (ABI) of the C++ this compiler writes into a
+ * library's chunks. Bumped whenever a consumer built by this compiler can no
+ * longer call a chunk built by the previous one (see docs/ARCHITECTURE.md,
+ * "Library ABI version"):
+ *   1  (unstamped) before 0.7.0-modbee.4
+ *   2  a method's and a function's VAR_OUTPUT by pointer (f295701, fd86039)
+ */
+export const STRUCPP_ABI_VERSION = 2;
+
 export interface StlibArchive {
   /** Format version for forward compatibility */
   formatVersion: 1;
+  /** The calling convention its chunks were built for (STRUCPP_ABI_VERSION).
+   *  Absent in an archive built before the stamp, which counts as 1. A
+   *  consumer refuses an archive with chunks built for another one. */
+  abiVersion?: number;
   /** Library metadata (function/FB/type signatures for symbol registration) */
   manifest: LibraryManifest;
   /** Per-symbol chunks. One entry per top-level declaration emitted

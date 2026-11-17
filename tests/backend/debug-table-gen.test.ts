@@ -9,7 +9,12 @@ import { describe, it, expect } from "vitest";
 import { discoverStlibs } from "../../src/node/library-loader.js";
 import { compile } from "../../src/index.js";
 import { compileLibrary } from "../../src/library/library-compiler.js";
-import { tagNameForTypeName, sizeForTypeName, TAG } from "../../src/backend/debug-table-gen.js";
+import { STRUCPP_ABI_VERSION } from "../../src/library/library-manifest.js";
+import {
+  tagNameForTypeName,
+  sizeForTypeName,
+  TAG,
+} from "../../src/backend/debug-table-gen.js";
 
 describe("debug-table-gen helpers", () => {
   it("maps common IEC names to tag names", () => {
@@ -141,8 +146,14 @@ END_CONFIGURATION
     const map = result.debugMap!;
     const labelLeaf = map.leaves.find((l) => l.path === "INSTANCE0.LABEL");
     const noteLeaf = map.leaves.find((l) => l.path === "INSTANCE0.NOTE");
-    expect(labelLeaf, "STRING leaf must be emitted into the debug table").toBeDefined();
-    expect(noteLeaf, "WSTRING leaf must be emitted into the debug table").toBeDefined();
+    expect(
+      labelLeaf,
+      "STRING leaf must be emitted into the debug table",
+    ).toBeDefined();
+    expect(
+      noteLeaf,
+      "WSTRING leaf must be emitted into the debug table",
+    ).toBeDefined();
     expect(labelLeaf!.type).toBe("STRING");
     expect(labelLeaf!.size).toBe(127); // 1 + DEBUG_STRING_CAP
     expect(noteLeaf!.type).toBe("WSTRING");
@@ -163,8 +174,8 @@ END_CONFIGURATION
     // drag in `<avr/pgmspace.h>` → `<avr/io.h>` and AVR's register
     // macros (e.g. `SP`) would mangle user variable references like
     // PID's `SP` setpoint.  See runtime/include/debug_table.hpp.
-    expect(cpp).toContain("#include \"debug_table.hpp\"");
-    expect(cpp).not.toContain("#include \"debug_dispatch.hpp\"");
+    expect(cpp).toContain('#include "debug_table.hpp"');
+    expect(cpp).not.toContain('#include "debug_dispatch.hpp"');
     expect(cpp).toContain("extern ::strucpp::Configuration_CONFIG0 g_config;");
     expect(cpp).toContain("namespace strucpp { namespace debug {");
     expect(cpp).toContain("const Entry debug_arr_0[");
@@ -993,7 +1004,9 @@ END_PROGRAM${CFG_R}`,
       { libraries: withoutLocals(discoverStlibs("libs")) },
     );
     expect(r.success).toBe(true);
-    expect(r.warnings.map((w) => w.message).join("\n")).not.toMatch(/RETAIN on/);
+    expect(r.warnings.map((w) => w.message).join("\n")).not.toMatch(
+      /RETAIN on/,
+    );
     expect(r.debugMap!.leaves.map((l) => l.path)).toContain("INSTANCE0.T.Q");
   });
 
@@ -1038,10 +1051,18 @@ END_PROGRAM${CFG_R}`,
     expect(ids[1]![1]).toBe(fnv("INSTANCE0.SPARE[]"));
     // An enumeration's definition is part of its identity: name and base, XOR
     // its member list (so a shorter start of the list is one XOR away).
-    expect(ids[5]![1]).toBe(hex(fnvN("INSTANCE0.MODE|ENUM MODE_T:") ^ fnvN("(OFF,AUTO)")));
-    expect(cpp).toContain("const RetainLeaf retain_leaves[6] STRUCPP_DEBUG_FLASH = {");
-    expect(cpp).toMatch(/\{ 0x[0-9a-f]{8}u, RETAIN_NO_INDEX, TAG_DINT, 0, 0 \},\s*\/\/ INSTANCE0\.BOOTS/);
-    expect(cpp).toMatch(/\{ 0x[0-9a-f]{8}u, 2, TAG_INT, 0, 0 \},\s*\/\/ INSTANCE0\.SPARE\[2\]/);
+    expect(ids[5]![1]).toBe(
+      hex(fnvN("INSTANCE0.MODE|ENUM MODE_T:") ^ fnvN("(OFF,AUTO)")),
+    );
+    expect(cpp).toContain(
+      "const RetainLeaf retain_leaves[6] STRUCPP_DEBUG_FLASH = {",
+    );
+    expect(cpp).toMatch(
+      /\{ 0x[0-9a-f]{8}u, RETAIN_NO_INDEX, TAG_DINT, 0, 0 \},\s*\/\/ INSTANCE0\.BOOTS/,
+    );
+    expect(cpp).toMatch(
+      /\{ 0x[0-9a-f]{8}u, 2, TAG_INT, 0, 0 \},\s*\/\/ INSTANCE0\.SPARE\[2\]/,
+    );
     expect(cpp).toMatch(/TAG_STRING, 20, 0 \},\s*\/\/ INSTANCE0\.SITE/);
     // The enumeration's leaf points at its group of shorter-start identities.
     expect(cpp).toMatch(/TAG_INT, 0, 1 \},\s*\/\/ INSTANCE0\.MODE/);
@@ -1134,9 +1155,9 @@ END_PROGRAM${CFG_R}`).map.retainLayoutHash;
 
     it("changes when retained variables are reordered", () => {
       // Order is the blob's packing order, so a swap has to invalidate it.
-      expect(hashOf("VAR RETAIN a : DINT; b : INT; END_VAR", "a := 1;")).not.toBe(
-        hashOf("VAR RETAIN b : INT; a : DINT; END_VAR", "a := 1;"),
-      );
+      expect(
+        hashOf("VAR RETAIN a : DINT; b : INT; END_VAR", "a := 1;"),
+      ).not.toBe(hashOf("VAR RETAIN b : INT; a : DINT; END_VAR", "a := 1;"));
     });
   });
 
@@ -1183,19 +1204,26 @@ END_FUNCTION_BLOCK
 `;
 
     const archive = () => {
-      const built = compileLibrary([{ source: LIB_SOURCE, fileName: "gauge.st" }], {
-        name: "user-gauge",
-        version: "1.0.0",
-        namespace: "usergauge",
-      });
+      const built = compileLibrary(
+        [{ source: LIB_SOURCE, fileName: "gauge.st" }],
+        {
+          name: "user-gauge",
+          version: "1.0.0",
+          namespace: "usergauge",
+        },
+      );
       expect(built.errors).toEqual([]);
       expect(built.success).toBe(true);
       return built;
     };
 
     it("records the mangled member name only where mangling happened", () => {
-      const gauge = archive().manifest.functionBlocks.find((f) => f.name.toUpperCase() === "GAUGE")!;
-      const byName = new Map(gauge.locals!.map((l) => [l.name.toUpperCase(), l]));
+      const gauge = archive().manifest.functionBlocks.find(
+        (f) => f.name.toUpperCase() === "GAUGE",
+      )!;
+      const byName = new Map(
+        gauge.locals!.map((l) => [l.name.toUpperCase(), l]),
+      );
       // `Tally : Tally` collides with its own type name — codegen emits TALLY_.
       expect(byName.get("TALLY")!.cppName).toBe("TALLY_");
       // Nothing else needed it, so nothing else carries the field.
@@ -1213,7 +1241,15 @@ VAR RETAIN g : Gauge; END_VAR
 VAR go : BOOL; END_VAR
   g(bump := go);
 END_PROGRAM${CFG_R}`,
-        { libraries: [{ manifest: built.manifest, chunks: built.chunks }] as never },
+        {
+          libraries: [
+            {
+              manifest: built.manifest,
+              chunks: built.chunks,
+              abiVersion: STRUCPP_ABI_VERSION,
+            },
+          ] as never,
+        },
       );
       expect(r.errors.map((e) => e.message)).toEqual([]);
       const retained = (r.debugMap!.retainVars ?? []).map((v) => v.path);
@@ -1240,7 +1276,15 @@ VAR g : Gauge; END_VAR
 VAR go : BOOL; END_VAR
   g(bump := go);
 END_PROGRAM${CFG_R}`,
-        { libraries: [{ manifest: built.manifest, chunks: built.chunks }] as never },
+        {
+          libraries: [
+            {
+              manifest: built.manifest,
+              chunks: built.chunks,
+              abiVersion: STRUCPP_ABI_VERSION,
+            },
+          ] as never,
+        },
       );
       expect(r.errors.map((e) => e.message)).toEqual([]);
       const retained = (r.debugMap!.retainVars ?? []).map((v) => v.path);
@@ -1292,7 +1336,9 @@ END_FUNCTION_BLOCK
   };
 
   it("marks the RETAIN pins in the manifest", () => {
-    const setter = archive().manifest.functionBlocks.find((f) => f.name === "SETTER")!;
+    const setter = archive().manifest.functionBlocks.find(
+      (f) => f.name === "SETTER",
+    )!;
     expect(setter.inputs.find((v) => v.name === "SP")?.retain).toBe(true);
     expect(setter.inputs.find((v) => v.name === "GO")?.retain).toBeUndefined();
     expect(setter.outputs.find((v) => v.name === "COUNT")?.retain).toBe(true);
@@ -1307,7 +1353,15 @@ VAR s : Setter; h : Holder; END_VAR
   s(go := TRUE);
   h();
 END_PROGRAM${CFG}`,
-      { libraries: [{ manifest: built.manifest, chunks: built.chunks }] as never },
+      {
+        libraries: [
+          {
+            manifest: built.manifest,
+            chunks: built.chunks,
+            abiVersion: STRUCPP_ABI_VERSION,
+          },
+        ] as never,
+      },
     );
     expect(r.errors.map((e) => e.message)).toEqual([]);
     const retained = (r.debugMap!.retainVars ?? []).map((v) => v.path);
@@ -1400,7 +1454,9 @@ END_CONFIGURATION
     const result = compile(source);
     expect(result.success).toBe(true);
     const warnings = result.warnings.map((w) => w.message);
-    expect(warnings.some((m) => m.includes("unresolved type name"))).toBe(false);
+    expect(warnings.some((m) => m.includes("unresolved type name"))).toBe(
+      false,
+    );
     for (const p of ["INSTANCE0.B.UNITS", "INSTANCE0.B.LEVELS"]) {
       expect(warnings).toContain(
         `${p} is not debuggable: ARRAY [*] in-out: a view of the caller's array, an alias debugged at its own name`,

@@ -48,6 +48,7 @@ import {
   registerLibrarySymbols,
 } from "./library/library-loader.js";
 import type { StlibArchive } from "./library/library-manifest.js";
+import { STRUCPP_ABI_VERSION } from "./library/library-manifest.js";
 import { annotateErrorsWithPouContext } from "./diagnostic-pou-context.js";
 
 /**
@@ -185,6 +186,39 @@ function libraryReadsOf(
   const out = new Set<string>();
   for (const name of variableNames) {
     if (!declaredAnywhere.has(name) || free.has(name)) out.add(name);
+  }
+  return out;
+}
+
+/**
+ * One error per library whose chunks were built for another calling
+ * convention than this compiler's (STRUCPP_ABI_VERSION; an unstamped archive
+ * is 1). An archive with no chunks (symbol entries only) carries no C++ and
+ * is not checked.
+ */
+export function libraryAbiErrors(
+  archives: readonly StlibArchive[],
+): CompileError[] {
+  const out: CompileError[] = [];
+  for (const archive of archives) {
+    if ((archive.chunks ?? []).length === 0) continue;
+    const abi = archive.abiVersion ?? 1;
+    if (abi === STRUCPP_ABI_VERSION) continue;
+    const lib = `library ${archive.manifest.name} ${archive.manifest.version}`;
+    out.push({
+      message:
+        abi < STRUCPP_ABI_VERSION
+          ? `${lib} was built for an older compiler (calling convention ${abi}; ` +
+            `this one needs ${STRUCPP_ABI_VERSION}): reinstall it from a release ` +
+            `built with STruC++ ${STRUCPP_VERSION_BUILD} or later (toolchain ` +
+            `v0.7.0-modbee.4 or later), or rebuild it`
+          : `${lib} was built for a newer compiler (calling convention ${abi}; ` +
+            `this one has ${STRUCPP_ABI_VERSION}): update the toolchain, or ` +
+            `install a release of the library built for this one`,
+      line: 0,
+      column: 0,
+      severity: "error",
+    });
   }
   return out;
 }
@@ -695,6 +729,22 @@ function runPipeline(
   // Phase 4: Library loading.  Archives arrive pre-loaded;
   // fs-based discovery lives in `strucpp/node`.
   allArchives.push(...(mergedOptions.libraries ?? []));
+
+  // A library whose C++ was written for another calling convention cannot be
+  // called from this compiler's code: say so here, not as a C++ error later.
+  const abiErrors = libraryAbiErrors(allArchives);
+  errors.push(...abiErrors);
+  if (abiErrors.length > 0 && !continueOnError) {
+    return {
+      ast,
+      projectModel,
+      symbolTables,
+      errors,
+      warnings,
+      allArchives,
+      mergedOptions,
+    };
+  }
 
   // The libraries' interfaces and OOP blocks, beside the unit's own, for the
   // interface rules (IEC 61131-3 6.6.6) — never emitted, see the loader.
