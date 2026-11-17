@@ -2365,6 +2365,25 @@ export class SemanticAnalyzer {
   }
 
   /** A block followed by the blocks it EXTENDS, nearest first. */
+  /**
+   * The block and every block it EXTENDS, library ones included: a library
+   * block's manifest lists its own methods and properties (its bases have
+   * theirs), and its pins and VAR members with the inherited ones.
+   */
+  private fbChain(fb: FunctionBlockSymbol): FunctionBlockSymbol[] {
+    const chain: FunctionBlockSymbol[] = [];
+    let block: FunctionBlockSymbol | undefined = fb;
+    while (block && !chain.includes(block)) {
+      chain.push(block);
+      const parent: string | undefined = block.declaration.extends;
+      block =
+        parent !== undefined && parent !== ""
+          ? this.symbolTables.lookupFunctionBlock(parent)
+          : undefined;
+    }
+    return chain;
+  }
+
   private fbLineage(fb: FunctionBlockSymbol): FunctionBlockSymbol[] {
     const lineage: FunctionBlockSymbol[] = [];
     let block: FunctionBlockSymbol | undefined = fb;
@@ -3882,6 +3901,10 @@ export class SemanticAnalyzer {
       // it names the caller's instance of a derived block.
       if (block.blockType === "VAR_IN_OUT") continue;
       for (const decl of block.declarations) {
+        // A POINTER TO / REF_TO / REFERENCE TO an abstract block names an
+        // instance of a derived one; only an instance is refused.
+        const ref = decl.type.referenceKind;
+        if (ref !== undefined && ref !== "none") continue;
         if (abstractFBs.has(decl.type.name.toUpperCase())) {
           this.addError(
             `Cannot instantiate ABSTRACT FUNCTION_BLOCK '${decl.type.name}'.`,
@@ -4707,7 +4730,7 @@ export class SemanticAnalyzer {
       // The called element itself: a member instance, or a method.
       const fb = this.symbolTables.lookupFunctionBlock(owner);
       const wanted = last.name.toUpperCase();
-      const isMethod = (fb === undefined ? [] : this.fbLineage(fb)).some(
+      const isMethod = (fb === undefined ? [] : this.fbChain(fb)).some(
         (block) =>
           block.declaration.methods.some(
             (m) => m.name.toUpperCase() === wanted,
@@ -4779,8 +4802,8 @@ export class SemanticAnalyzer {
    * manifest that exports its fields. A user function block's members are its
    * variables of every section, its methods and properties, those of the
    * blocks it extends, and the implicit EN / ENO (IEC 61131-3 §6.6.3.2, Table
-   * 40 note 9). A library block is left out: its manifest carries only its
-   * own variables, not what it inherits, nor its methods or properties.
+   * 40 note 9). A library block's come from its manifest (ABI 5 lists its
+   * pins and VAR members, its own methods and properties).
    */
   private declaredMembersOf(
     typeName: string,
@@ -4799,12 +4822,11 @@ export class SemanticAnalyzer {
     const fb = this.symbolTables.lookupFunctionBlock(name);
     if (fb === undefined) return undefined;
     const members = new Set<string>(["EN", "ENO"]);
-    const lineage = this.fbLineage(fb);
+    const lineage = this.fbChain(fb);
     const top = lineage[lineage.length - 1]!;
     const parent = top.declaration.extends;
     if (parent !== undefined && parent !== "") return undefined; // unknown base
     for (const block of lineage) {
-      if (block.libraryName !== undefined) return undefined;
       for (const varBlock of block.declaration.varBlocks) {
         for (const decl of varBlock.declarations) {
           for (const n of decl.names) members.add(n.toUpperCase());

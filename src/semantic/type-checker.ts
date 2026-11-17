@@ -340,6 +340,53 @@ export class TypeChecker {
     };
   }
 
+  /**
+   * A method called on a function block that has none of the name, own or
+   * inherited, nor a property of it: refused here, at the ST line, rather
+   * than by the C++ compiler (`'ELEM' has no method 'NOPE'`).
+   */
+  private reportUnknownBlockMethod(
+    fbName: string,
+    methodName: string,
+    at: Expression,
+  ): void {
+    if (!this.ast) return;
+    const fb = findFunctionBlock(this.ast, fbName);
+    if (fb === undefined) return;
+    const upper = methodName.toUpperCase();
+    for (
+      let cur: FunctionBlockDeclaration | undefined = fb, depth = 0;
+      cur !== undefined && depth < 32;
+      depth++
+    ) {
+      if (cur.properties.some((p) => p.name.toUpperCase() === upper)) return;
+      // A member (a block instance called, `fb.inner(...)`), not a method.
+      if (
+        cur.varBlocks.some((b) =>
+          b.declarations.some((d) =>
+            d.names.some((n) => n.toUpperCase() === upper),
+          ),
+        )
+      ) {
+        return;
+      }
+      const sym = this.symbolTables.lookupFunctionBlock(cur.name);
+      if (sym !== undefined && libraryBlockMember(sym, upper) !== undefined) {
+        return;
+      }
+      cur =
+        cur.extends === undefined
+          ? undefined
+          : findFunctionBlock(this.ast, cur.extends);
+    }
+    this.addError(
+      `'${fb.name.toUpperCase()}' has no method '${upper}'`,
+      at.sourceSpan.startLine,
+      at.sourceSpan.startCol,
+      at.sourceSpan.file,
+    );
+  }
+
   /** The result type of a conversion to or from an enumeration, or undefined. */
   enumConversionType(nameUpper: string): IECType | undefined {
     const conv = parseConversionName(nameUpper);
@@ -1716,6 +1763,8 @@ export class TypeChecker {
           expr.sourceSpan.startCol,
           expr.sourceSpan.file,
         );
+      } else {
+        this.reportUnknownBlockMethod(objTypeName, expr.methodName, expr);
       }
     }
     if (method) {

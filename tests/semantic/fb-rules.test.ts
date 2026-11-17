@@ -188,11 +188,11 @@ describe("function block rules: warned (CODESYS overrides without OVERRIDE)", ()
     expect(warnings.some((m) => m.includes("requires METHOD OVERRIDE"))).toBe(true);
   });
 
-  it("an overriding method with another access specifier", () => {
-    const { warnings } = messages(
+  it("refuses an overriding method with another access specifier, as CODESYS does", () => {
+    const { errors } = messages(
       `${BASE} FUNCTION_BLOCK D EXTENDS B METHOD PROTECTED OVERRIDE M : INT M := 2; END_METHOD END_FUNCTION_BLOCK`,
     );
-    expect(warnings.some((m) => m.includes("same access specifier"))).toBe(true);
+    expect(errors.some((m) => m.includes("same access specifier"))).toBe(true);
   });
 });
 

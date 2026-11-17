@@ -65,10 +65,17 @@ const LOOPS = new Set(["ForStatement", "WhileStatement", "RepeatStatement"]);
 
 class Family {
   private readonly fbs = new Map<string, FunctionBlockDeclaration>();
+  /** The blocks a linked library declares (from its manifest). */
+  readonly fromLibrary = new Set<FunctionBlockDeclaration>();
 
   constructor(ast: CompilationUnit) {
     for (const fb of ast.functionBlocks)
       this.fbs.set(fb.name.toUpperCase(), fb);
+    for (const fb of ast.libraryFunctionBlocks ?? []) {
+      if (this.fbs.has(fb.name.toUpperCase())) continue;
+      this.fbs.set(fb.name.toUpperCase(), fb);
+      this.fromLibrary.add(fb);
+    }
   }
 
   get(name: string | undefined): FunctionBlockDeclaration | undefined {
@@ -420,13 +427,27 @@ function checkDeclarations(
       if (upperName === "FB_INIT" || upperName === "FB_EXIT") continue;
       const base = inherited.method;
       if (base.visibility === "PRIVATE") {
-        // 6.6.5.5.2 rule 1: a PRIVATE method is not inherited.
-        if (method.isOverride) {
-          err(
-            `Method '${method.name}' of '${fb.name}' is marked OVERRIDE, but '${method.name}' of '${inherited.owner.name}' is PRIVATE and not inherited (IEC 61131-3 6.6.5.5.2 rule 1)`,
-            method.sourceSpan,
-          );
-        }
+        // 6.6.5.5.2 rule 1: a PRIVATE method is not inherited. A method of the
+        // name would still take its place in the base's own calls (C++
+        // virtual dispatch), so it is refused either way.
+        err(
+          method.isOverride
+            ? `Method '${method.name}' of '${fb.name}' is marked OVERRIDE, but '${method.name}' of '${inherited.owner.name}' is PRIVATE and not inherited (IEC 61131-3 6.6.5.5.2 rule 1)`
+            : `Method '${method.name}' in '${fb.name}' cannot override PRIVATE method '${method.name}' of '${inherited.owner.name.toUpperCase()}'.`,
+          method.sourceSpan,
+        );
+        continue;
+      }
+      if (
+        base.visibility === "INTERNAL" &&
+        family.fromLibrary.has(inherited.owner)
+      ) {
+        // INTERNAL is the library's namespace (6.6.5.9): outside it, the
+        // method is not inherited, and one of its name would take its place.
+        err(
+          `Method '${method.name}' in '${fb.name}' cannot override INTERNAL method '${method.name}' of '${inherited.owner.name.toUpperCase()}' from outside its library.`,
+          method.sourceSpan,
+        );
         continue;
       }
       if (!method.isOverride && !base.isAbstract) {
@@ -437,10 +458,10 @@ function checkDeclarations(
         );
       }
       if (method.visibility !== base.visibility) {
+        // An error, as CODESYS refuses the change too.
         err(
           `Method '${method.name}' of '${fb.name}' is ${method.visibility}, but the method it replaces in '${inherited.owner.name}' is ${base.visibility}; IEC 61131-3 6.6.5.5.3 rule 2 requires the same access specifier`,
           method.sourceSpan,
-          true,
         );
       }
     }
@@ -556,8 +577,9 @@ function checkMemberAccess(
     access: Visibility | undefined,
   ): boolean => {
     if (access === undefined || access === "PUBLIC") return true;
-    // One namespace: the compilation unit (IEC 61131-3 6.6.5.9).
-    if (access === "INTERNAL") return true;
+    // One namespace: the compilation unit, or a library for its own blocks
+    // (IEC 61131-3 6.6.5.9): a library block's INTERNAL member is outside.
+    if (access === "INTERNAL") return !family.fromLibrary.has(owner);
     if (!caller) return false;
     if (access === "PRIVATE") return caller === owner;
     return family.isOrDerives(caller, owner);
@@ -660,6 +682,14 @@ function checkMemberAccess(
           if (dot > 0 && fn.indexOf(".", dot + 1) < 0) {
             objName = fn.substring(0, dot);
             methodName = fn.substring(dot + 1);
+          } else if (
+            dot < 0 &&
+            caller !== undefined &&
+            family.findMethod(caller, fn) !== undefined
+          ) {
+            // A bare call of a method of the own block or a base.
+            objName = "THIS";
+            methodName = fn;
           }
         } else if (n.kind === "MethodCallExpression") {
           const mc = n as MethodCallExpression;
@@ -693,8 +723,10 @@ function checkMemberAccess(
         }
         err(
           method.visibility === "PRIVATE"
-            ? `Cannot call PRIVATE method '${methodName}' of '${owner.name.toUpperCase()}' from outside '${owner.name.toUpperCase()}'.`
-            : `Cannot call PROTECTED method '${methodName}' of '${owner.name.toUpperCase()}' from '${caller ? caller.name.toUpperCase() : "PROGRAM"}'.`,
+            ? `Cannot call PRIVATE method '${methodName.toUpperCase()}' of '${owner.name.toUpperCase()}' from outside '${owner.name.toUpperCase()}'.`
+            : method.visibility === "INTERNAL"
+              ? `Cannot call INTERNAL method '${methodName.toUpperCase()}' of '${owner.name.toUpperCase()}' from outside its library.`
+              : `Cannot call PROTECTED method '${methodName.toUpperCase()}' of '${owner.name.toUpperCase()}' from '${caller ? caller.name.toUpperCase() : "PROGRAM"}'.`,
           n.sourceSpan,
         );
         return undefined;
