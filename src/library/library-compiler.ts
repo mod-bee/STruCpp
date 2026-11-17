@@ -1151,16 +1151,12 @@ function compileLibraryUnit(
     }),
     // Exported interfaces: a consumer declares variables of them, passes
     // instances to interface-typed pins and calls their methods (6.6.6).
-    ...(ast.interfaces.length > 0
-      ? {
-          interfaces: ast.interfaces.map((i) =>
-            tagDocumentation(
-              tagCategory(buildInterfaceEntry(i), catByName),
-              docByName,
-            ),
-          ),
-        }
-      : {}),
+    interfaces: ast.interfaces.map((i) =>
+      tagDocumentation(
+        tagCategory(buildInterfaceEntry(i), catByName),
+        docByName,
+      ),
+    ),
     // Exported VAR_GLOBAL variables — their storage is emitted as inlineGlobal
     // chunks; this list lets consumers' analyzers resolve the symbols. Every
     // importing program merges all libraries' globals into one global scope.

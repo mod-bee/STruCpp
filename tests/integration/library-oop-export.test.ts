@@ -214,7 +214,7 @@ END_FUNCTION_BLOCK`,
         archive,
       ),
     ).toEqual([
-      "Method 'OWN' in 'W' cannot override PRIVATE method 'OWN' of 'ELEM'.",
+      "Method 'OWN' of 'W' is marked OVERRIDE, but 'OWN' of 'ELEM' is PRIVATE and not inherited (IEC 61131-3 6.6.5.5.2 rule 1)",
       "Method 'SECRET' in 'W' cannot override INTERNAL method 'SECRET' of 'ELEM' from outside its library.",
     ]);
   });
@@ -227,7 +227,7 @@ END_FUNCTION_BLOCK`,
       );
     expect(override("PROTECTED")).toEqual([]);
     expect(override("PUBLIC")).toEqual([
-      "Method 'HOVERED' in 'W' cannot change the access modifier PROTECTED of method 'HOVERED' of 'ELEM' it overrides.",
+      "Method 'HOVERED' of 'W' is PUBLIC, but the method it replaces in 'ELEM' is PROTECTED; IEC 61131-3 6.6.5.5.3 rule 2 requires the same access specifier",
     ]);
   });
 
@@ -331,8 +331,9 @@ END_PROGRAM`,
         archive,
       ),
     ).toEqual([
-      "Cannot assign OTHER to IELEM: OTHER does not implement IELEM",
-      "'IELEM' has no method 'MISSING'",
+      // ModBee wording, same checks.
+      "Cannot assign OTHER to interface IELEM: it takes an instance of a block implementing it, a variable of the same or a derived interface, or NULL (IEC 61131-3 6.6.6.5.1)",
+      "INTERFACE 'IELEM' has no method 'MISSING'",
     ]);
     expect(
       errorsWith(
@@ -340,7 +341,7 @@ END_PROGRAM`,
         archive,
       ),
     ).toEqual([
-      "FUNCTION_BLOCK 'NOPROP' implements 'IELEM' but does not provide PROPERTY 'SIZE'.",
+      "FUNCTION_BLOCK 'NOPROP' does not implement property 'SIZE' of INTERFACE 'IELEM'",
     ]);
   });
 
@@ -350,24 +351,21 @@ END_PROGRAM`,
         "PROGRAM P VAR e : Elem; x : DINT; END_VAR x := e.Nope(); END_PROGRAM",
         archive,
       ),
-    ).toEqual(["'ELEM' has no method 'NOPE'"]);
+    ).toEqual(["'NOPE' is not a member of function block type ELEM"]);
   });
 
-  it("keeps an archive without exported members working as before", () => {
+  it("refuses an archive built before members were exported (an older calling convention)", () => {
+    // ModBee: every archive of the current calling convention lists its
+    // blocks' methods and properties; an older one is refused with the plain
+    // rebuild error (see abi-version.test.ts) rather than half-checked.
     const old = JSON.parse(JSON.stringify(archive)) as StlibArchive;
-    for (const fb of old.manifest.functionBlocks) {
-      delete fb.methods;
-      delete fb.properties;
-    }
-    delete old.manifest.interfaces;
+    old.abiVersion = (old.abiVersion ?? 2) - 1;
     expect(
       compile(
         "PROGRAM P VAR e : Elem; x : DINT; END_VAR x := e.Nope(); END_PROGRAM",
-        {
-          libraries: [old],
-        },
-      ).errors,
-    ).toEqual([]);
+        { libraries: [old] },
+      ).errors.map((e) => e.message),
+    ).toEqual([expect.stringMatching(/was built for an older compiler/)]);
   });
 });
 

@@ -246,6 +246,58 @@ function validateDescriptions(obj: Record<string, unknown>): void {
     if (!Array.isArray(obj[key])) return;
     (obj[key] as unknown[]).forEach((e, i) => fn(e, `${key}[${i}]`));
   };
+  const VISIBILITIES = ["PUBLIC", "PRIVATE", "PROTECTED", "INTERNAL"];
+  const named = (e: unknown, at: string): Record<string, unknown> => {
+    if (!isRecord(e) || typeof e.name !== "string" || e.name === "") {
+      throw new LibraryManifestError(
+        `Invalid library manifest: ${at}.name must be a non-empty string`,
+      );
+    }
+    return e;
+  };
+  // Methods and properties of a block or an interface: named entries with a
+  // known visibility, methods with their three parameter lists of named
+  // entries.
+  const members = (owner: unknown, where: string): void => {
+    if (!isRecord(owner)) return;
+    for (const key of ["methods", "properties"] as const) {
+      const entries = owner[key];
+      if (entries === undefined) continue;
+      if (!Array.isArray(entries)) {
+        throw new LibraryManifestError(
+          `Invalid library manifest: ${where}.${key} must be an array`,
+        );
+      }
+      entries.forEach((e: unknown, j) => {
+        const at = `${where}.${key}[${j}]`;
+        const m = named(e, at);
+        if (
+          typeof m.visibility !== "string" ||
+          !VISIBILITIES.includes(m.visibility)
+        ) {
+          throw new LibraryManifestError(
+            `Invalid library manifest: ${at}.visibility must be PUBLIC, PRIVATE, PROTECTED or INTERNAL`,
+          );
+        }
+        if (key !== "methods") return;
+        for (const params of ["inputs", "outputs", "inouts"] as const) {
+          if (!Array.isArray(m[params])) {
+            throw new LibraryManifestError(
+              `Invalid library manifest: ${at}.${params} must be an array`,
+            );
+          }
+          (m[params] as unknown[]).forEach((v, k) =>
+            named(v, `${at}.${params}[${k}]`),
+          );
+        }
+      });
+    }
+  };
+  each("functionBlocks", (fb, where) => members(fb, where));
+  each("interfaces", (iface, where) => {
+    named(iface, where);
+    members(iface, where);
+  });
   each("functions", (fn, where) => {
     one(fn, where);
     list(fn, "parameters", where);

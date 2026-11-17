@@ -12,6 +12,7 @@ import {
   CompileResult,
   CompileError,
   AnalysisResult,
+  SourceSpan,
 } from "./types.js";
 import { parse as parseSource } from "./frontend/parser.js";
 import { suggestionForParseError } from "./frontend/parser-error-message-provider.js";
@@ -815,6 +816,68 @@ function runPipeline(
   if (ast && allArchives.length > 0) {
     const oop = libraryOopDeclarations(allArchives.map((a) => a.manifest));
     if (oop.interfaces.length > 0) ast.libraryInterfaces = oop.interfaces;
+    // A library INTERFACE shares the unit's global names (IEC 61131-3 6.9.1):
+    // a TYPE, FUNCTION_BLOCK or INTERFACE of the unit or of another library
+    // with its name would be silently shadowed by one or the other.
+    {
+      const declared = new Map<
+        string,
+        { kind: string; name: string; library?: string; span?: SourceSpan }
+      >();
+      for (const t of ast.types)
+        declared.set(t.name.toUpperCase(), {
+          kind: "TYPE",
+          name: t.name,
+          span: t.sourceSpan,
+        });
+      for (const fb of ast.functionBlocks)
+        declared.set(fb.name.toUpperCase(), {
+          kind: "FUNCTION_BLOCK",
+          name: fb.name,
+          span: fb.sourceSpan,
+        });
+      for (const i of ast.interfaces)
+        declared.set(i.name.toUpperCase(), {
+          kind: "INTERFACE",
+          name: i.name,
+          span: i.sourceSpan,
+        });
+      for (const archive of allArchives) {
+        for (const iface of archive.manifest.interfaces ?? []) {
+          const upper = iface.name.toUpperCase();
+          const clash = declared.get(upper);
+          if (clash === undefined) {
+            declared.set(upper, {
+              kind: "INTERFACE",
+              name: iface.name,
+              library: archive.manifest.name,
+              // Reported against the library it comes from.
+              span: {
+                startLine: 0,
+                startCol: 0,
+                endLine: 0,
+                endCol: 0,
+                file: archive.manifest.name,
+              },
+            });
+            continue;
+          }
+          const other =
+            clash.library === undefined
+              ? "this program"
+              : `library '${clash.library}'`;
+          errors.push({
+            message: `INTERFACE '${upper}' of library '${archive.manifest.name}' clashes with ${clash.kind} '${clash.name.toUpperCase()}' of ${other}; rename one of them.`,
+            line: clash.span?.startLine ?? 0,
+            column: clash.span?.startCol ?? 0,
+            severity: "error",
+            ...(clash.span?.file !== undefined
+              ? { file: clash.span.file }
+              : {}),
+          });
+        }
+      }
+    }
     if (oop.functionBlocks.length > 0) {
       ast.libraryFunctionBlocks = oop.functionBlocks;
     }
