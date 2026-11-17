@@ -21,6 +21,7 @@ import type {
   FunctionCallExpression,
   MethodCallExpression,
   MethodDeclaration,
+  PropertyDeclaration,
   Statement,
   VarBlock,
   VarDeclaration,
@@ -115,6 +116,18 @@ class Family {
           }
         }
       }
+    }
+    return undefined;
+  }
+
+  findProperty(
+    fb: FunctionBlockDeclaration,
+    name: string,
+  ): { owner: FunctionBlockDeclaration; prop: PropertyDeclaration } | undefined {
+    const upper = name.toUpperCase();
+    for (const owner of this.lineage(fb)) {
+      const prop = owner.properties.find((p) => p.name.toUpperCase() === upper);
+      if (prop) return { owner, prop };
     }
     return undefined;
   }
@@ -661,6 +674,24 @@ function checkMemberAccess(
               const outside = upper !== "THIS" && upper !== "SUPER";
               if (hit)
                 reportVar(hit, `${v.name}.${field}`, v.sourceSpan, outside);
+              // A property's access specifier (6.6.5.9 applies to it as to
+              // a method): read and written through its accessors.
+              const found = hit ? undefined : family.findProperty(target, field);
+              if (
+                found !== undefined &&
+                !allowed(caller, found.owner, found.prop.visibility)
+              ) {
+                const name = found.prop.name.toUpperCase();
+                const owner = found.owner.name.toUpperCase();
+                err(
+                  found.prop.visibility === "PRIVATE"
+                    ? `Cannot access PRIVATE property '${name}' of '${owner}' from outside '${owner}'.`
+                    : found.prop.visibility === "INTERNAL"
+                      ? `Cannot access INTERNAL property '${name}' of '${owner}' from outside its library.`
+                      : `Cannot access PROTECTED property '${name}' of '${owner}' from '${caller ? caller.name.toUpperCase() : "PROGRAM"}'.`,
+                  v.sourceSpan,
+                );
+              }
             }
           }
           if (

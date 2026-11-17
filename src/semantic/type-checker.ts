@@ -2072,6 +2072,66 @@ export class TypeChecker {
   }
 
   /**
+   * `p := ADR(o)` with p a POINTER TO block or interface A and o a block that
+   * is neither A, derived from it, nor implementing it: a method called
+   * through p would run on the wrong object (CODESYS lets it compile).
+   */
+  private warnUnrelatedBlockAddress(
+    target: Expression,
+    value: Expression,
+    scope: Scope,
+  ): void {
+    if (
+      !this.ast ||
+      value.kind !== "FunctionCallExpression" ||
+      value.functionName.toUpperCase() !== "ADR"
+    ) {
+      return;
+    }
+    const pointee = this.declaredTypeRefOf(target, scope)?.name;
+    const operand = value.arguments[0]?.value;
+    const source =
+      operand !== undefined ? this.declaredTypeRefOf(operand, scope) : undefined;
+    if (pointee === undefined || source === undefined) return;
+    if (source.referenceKind !== undefined && source.referenceKind !== "none") {
+      return;
+    }
+    const sourceFb = findFunctionBlock(this.ast, source.name);
+    if (sourceFb === undefined) return;
+    const wanted = pointee.toUpperCase();
+    const pointeeIsBlock = findFunctionBlock(this.ast, pointee) !== undefined;
+    const pointeeIsInterface = findInterface(this.ast, pointee) !== undefined;
+    if (!pointeeIsBlock && !pointeeIsInterface) return;
+    const implemented: string[] = [];
+    for (
+      let cur: FunctionBlockDeclaration | undefined = sourceFb, depth = 0;
+      cur !== undefined && depth < 32;
+      depth++
+    ) {
+      if (cur.name.toUpperCase() === wanted) return;
+      implemented.push(...(cur.implements ?? []));
+      cur =
+        cur.extends === undefined
+          ? undefined
+          : findFunctionBlock(this.ast, cur.extends);
+    }
+    if (
+      pointeeIsInterface &&
+      interfaceClosure(this.ast, implemented).some(
+        (n) => n.toUpperCase() === wanted,
+      )
+    ) {
+      return;
+    }
+    this.addWarning(
+      `ADR of an instance of ${sourceFb.name.toUpperCase()} assigned to POINTER TO ${wanted}: ${sourceFb.name.toUpperCase()} is not derived from ${wanted}, so a method call through the pointer is undefined`,
+      value.sourceSpan.startLine,
+      value.sourceSpan.startCol,
+      value.sourceSpan.file,
+    );
+  }
+
+  /**
    * Whether `target` is a POINTER TO variable (or member) and `valueType` an
    * address (__XWORD, what ADR gives). The checker types a pointer variable as
    * its target type, so the address was checked against the target type and
@@ -2218,7 +2278,10 @@ export class TypeChecker {
         // type (CODESYS "Operator: ADR", "Data Type: POINTER TO"; IEC
         // 61131-3 Ed.3 has REF_TO and REF() only, 6.4.4.10), as it did for
         // an integer target type.
-        if (this.isAddressIntoPointer(stmt.target, valueType, scope)) break;
+        if (this.isAddressIntoPointer(stmt.target, valueType, scope)) {
+          this.warnUnrelatedBlockAddress(stmt.target, stmt.value, scope);
+          break;
+        }
         const errorsBefore = this.errors.length;
         this.validateAssignment(
           targetType,
