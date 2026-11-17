@@ -564,7 +564,12 @@ export class TypeChecker {
     const valueIface = this.interfaceOf(valueType);
     if (targetIface === undefined && valueIface === undefined) return false;
     const isNull =
-      value.kind === "LiteralExpression" && value.literalType === "NULL";
+      value.kind === "LiteralExpression" &&
+      (value.literalType === "NULL" ||
+        // `itf := 0`, CODESYS's way to clear an interface reference.
+        (value.literalType === "INT" &&
+          !value.typePrefix &&
+          Number(value.value) === 0));
     if (targetIface !== undefined && isNull) return true;
     if (
       targetIface !== undefined &&
@@ -708,11 +713,19 @@ export class TypeChecker {
       e.kind === "LiteralExpression" &&
       (e.literalType === "NULL" ||
         (e.literalType === "INT" && !e.typePrefix && Number(e.value) === 0));
+    // The same interface, or one that EXTENDS the other: both name an
+    // instance, compared by identity (CODESYS compares interface references).
+    const related = (a: string, b: string): boolean =>
+      this.ast !== undefined &&
+      (interfaceClosure(this.ast, [a]).some(
+        (n) => n.toUpperCase() === b.toUpperCase(),
+      ) ||
+        interfaceClosure(this.ast, [b]).some(
+          (n) => n.toUpperCase() === a.toUpperCase(),
+        ));
     const ok =
       (expr.operator === "=" || expr.operator === "<>") &&
-      ((left !== undefined &&
-        right !== undefined &&
-        left.toUpperCase() === right.toUpperCase()) ||
+      ((left !== undefined && right !== undefined && related(left, right)) ||
         (left !== undefined && isNull(expr.right)) ||
         (right !== undefined && isNull(expr.left)));
     if (ok) return;
