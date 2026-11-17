@@ -1478,7 +1478,7 @@ export function libraryTypeDefaults(
         const member =
           hash >= 0 ? t.defaultValue.slice(hash + 1) : t.defaultValue;
         if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(member)) {
-          out.set(key, qualifiedEnumValue(t.name, member, span));
+          out.set(key, qualifiedEnumValue(t.name, member.toUpperCase(), span));
         } else {
           // A data type with named values may start from any value (6.4.4.3.2).
           const value = parseInitialValueText(t.defaultValue);

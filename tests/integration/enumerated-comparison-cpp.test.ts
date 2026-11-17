@@ -34,7 +34,12 @@ import * as path from "path";
 import * as os from "os";
 import { compile } from "../../src/index.js";
 import { discoverStlibs } from "../../src/node/library-loader.js";
-import { hasGpp, createPCH, compileWithGpp, compileAndRunStandalone } from "./test-helpers.js";
+import {
+  hasGpp,
+  createPCH,
+  compileWithGpp,
+  compileAndRunStandalone,
+} from "./test-helpers.js";
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
@@ -55,79 +60,88 @@ END_VAR
   ${body}
 END_PROGRAM`;
 
-describeIfGpp("EQ and NE on an enumerated data type (IEC 61131-3 Table 38)", () => {
-  let tempDir: string;
-  let pchPath: string;
-  let caseId = 0;
+describeIfGpp(
+  "EQ and NE on an enumerated data type (IEC 61131-3 Table 38)",
+  () => {
+    let tempDir: string;
+    let pchPath: string;
+    let caseId = 0;
 
-  beforeAll(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-enum-cmp-"));
-    pchPath = createPCH(tempDir);
-  });
-  afterAll(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+    beforeAll(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-enum-cmp-"));
+      pchPath = createPCH(tempDir);
+    });
+    afterAll(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
-  /** Translate to C++ and compile it. Returns whether g++ accepted it. */
-  const builds = (vars: string, body: string): boolean => {
-    const result = compile(program(vars, body), { programName: "Main" });
-    if (!result.success) return false;
-    return compileWithGpp({
-      tempDir,
-      pchPath,
-      headerCode: result.headerCode ?? "",
-      cppCode: result.cppCode ?? "",
-      testName: `enum_cmp_${caseId++}`,
-    }).success;
-  };
+    /** Translate to C++ and compile it. Returns whether g++ accepted it. */
+    const builds = (vars: string, body: string): boolean => {
+      const result = compile(program(vars, body), { programName: "Main" });
+      if (!result.success) return false;
+      return compileWithGpp({
+        tempDir,
+        pchPath,
+        headerCode: result.headerCode ?? "",
+        cppCode: result.cppCode ?? "",
+        testName: `enum_cmp_${caseId++}`,
+      }).success;
+    };
 
-  // --- the four functions Table 38 admits ---------------------------------
+    // --- the four functions Table 38 admits ---------------------------------
 
-  it("compares an enumeration with EQ, the way a ladder box does", () => {
-    expect(builds("", `b := EQ(q, GOOD);`)).toBe(true);
-  });
+    it("compares an enumeration with EQ, the way a ladder box does", () => {
+      expect(builds("", `b := EQ(q, GOOD);`)).toBe(true);
+    });
 
-  it("compares two enumeration VARIABLES with EQ", () => {
-    expect(builds("q2 : Quality;", `b := EQ(q, q2);`)).toBe(true);
-  });
+    it("compares two enumeration VARIABLES with EQ", () => {
+      expect(builds("q2 : Quality;", `b := EQ(q, q2);`)).toBe(true);
+    });
 
-  it("compares with NE", () => {
-    expect(builds("", `b := NE(q, GOOD);`)).toBe(true);
-  });
+    it("compares with NE", () => {
+      expect(builds("", `b := NE(q, GOOD);`)).toBe(true);
+    });
 
-  it("is extensible, as Table 33 feature 3 is", () => {
-    expect(builds("q2 : Quality; q3 : Quality;", `b := EQ(q, q2, q3);`)).toBe(true);
-  });
+    it("is extensible, as Table 33 feature 3 is", () => {
+      expect(builds("q2 : Quality; q3 : Quality;", `b := EQ(q, q2, q3);`)).toBe(
+        true,
+      );
+    });
 
-  it("still admits SEL and MUX", () => {
-    expect(builds("q3 : Quality;", `q3 := SEL(TRUE, q, q);`)).toBe(true);
-    expect(builds("q3 : Quality;", `q3 := MUX(0, q, q);`)).toBe(true);
-  });
+    it("still admits SEL and MUX", () => {
+      expect(builds("q3 : Quality;", `q3 := SEL(TRUE, q, q);`)).toBe(true);
+      expect(builds("q3 : Quality;", `q3 := MUX(0, q, q);`)).toBe(true);
+    });
 
-  // --- every shape an operand can arrive in --------------------------------
+    // --- every shape an operand can arrive in --------------------------------
 
-  it("reaches an enumeration held in a STRUCT", () => {
-    expect(builds("bx : Box;", `b := EQ(bx.q, GOOD);`)).toBe(true);
-  });
+    it("reaches an enumeration held in a STRUCT", () => {
+      expect(builds("bx : Box;", `b := EQ(bx.q, GOOD);`)).toBe(true);
+    });
 
-  it("reaches an enumeration held in an ARRAY", () => {
-    expect(builds("qs : ARRAY [0..2] OF Quality;", `b := EQ(qs[0], GOOD);`)).toBe(true);
-  });
+    it("reaches an enumeration held in an ARRAY", () => {
+      expect(
+        builds("qs : ARRAY [0..2] OF Quality;", `b := EQ(qs[0], GOOD);`),
+      ).toBe(true);
+    });
 
-  // --- and actually gives the right answer ---------------------------------
+    // --- and actually gives the right answer ---------------------------------
 
-  it("evaluates correctly, not merely compiles", () => {
-    const src = program("q2 : Quality;", `
+    it("evaluates correctly, not merely compiles", () => {
+      const src = program(
+        "q2 : Quality;",
+        `
   q := GOOD;
   q2 := BAD;
-  b := EQ(q, GOOD);`);
-    const result = compile(src, { programName: "Main" });
-    expect(result.success, JSON.stringify(result.errors)).toBe(true);
-    const out = compileAndRunStandalone({
-      tempDir,
-      pchPath,
-      headerCode: result.headerCode ?? "",
-      cppCode: result.cppCode ?? "",
-      testName: "enum_cmp_run",
-      mainCode: `
+  b := EQ(q, GOOD);`,
+      );
+      const result = compile(src, { programName: "Main" });
+      expect(result.success, JSON.stringify(result.errors)).toBe(true);
+      const out = compileAndRunStandalone({
+        tempDir,
+        pchPath,
+        headerCode: result.headerCode ?? "",
+        cppCode: result.cppCode ?? "",
+        testName: "enum_cmp_run",
+        mainCode: `
 #include <iostream>
 int main() {
   using namespace strucpp;
@@ -138,32 +152,32 @@ int main() {
   std::cout << (bool)prog.B << " " << (bool)EQ(prog.Q, prog.Q2) << "\\n";
   return 0;
 }`,
+      });
+      expect(out).toBe("1 0");
     });
-    expect(out).toBe("1 0");
-  });
 
-  it("types SEL and MUX of an enumeration as the enumeration, with the standard library loaded", () => {
-    // The library publishes SEL/MUX with a generic ANY result; assigning that
-    // to an enumeration was refused ("Cannot assign ANY to Quality").
-    const src = program(
-      "q2 : Quality := BAD; q3 : Quality; q4 : Quality; sw : BOOL := TRUE; bx : Box;",
-      `q := GOOD;
+    it("types SEL and MUX of an enumeration as the enumeration, with the standard library loaded", () => {
+      // The library publishes SEL/MUX with a generic ANY result; assigning that
+      // to an enumeration was refused ("Cannot assign ANY to Quality").
+      const src = program(
+        "q2 : Quality := BAD; q3 : Quality; q4 : Quality; sw : BOOL := TRUE; bx : Box;",
+        `q := GOOD;
   q3 := SEL(sw, q, q2);
   q4 := MUX(0, q2, q);
   bx.q := SEL(G := FALSE, IN0 := UNCERTAIN, IN1 := q);`,
-    );
-    const result = compile(src, {
-      programName: "Main",
-      libraries: discoverStlibs(path.resolve(__dirname, "../../libs")),
-    });
-    expect(result.success, JSON.stringify(result.errors)).toBe(true);
-    const out = compileAndRunStandalone({
-      tempDir,
-      pchPath,
-      headerCode: result.headerCode ?? "",
-      cppCode: result.cppCode ?? "",
-      testName: "enum_sel_run",
-      mainCode: `
+      );
+      const result = compile(src, {
+        programName: "Main",
+        libraries: discoverStlibs(path.resolve(__dirname, "../../libs")),
+      });
+      expect(result.success, JSON.stringify(result.errors)).toBe(true);
+      const out = compileAndRunStandalone({
+        tempDir,
+        pchPath,
+        headerCode: result.headerCode ?? "",
+        cppCode: result.cppCode ?? "",
+        testName: "enum_sel_run",
+        mainCode: `
 #include <iostream>
 int main() {
   using namespace strucpp;
@@ -172,26 +186,29 @@ int main() {
   std::cout << (prog.Q3 == QUALITY::BAD) << (prog.Q4 == QUALITY::BAD) << (prog.BX.Q == QUALITY::UNCERTAIN) << "\\n";
   return 0;
 }`,
+      });
+      expect(out).toBe("111");
     });
-    expect(out).toBe("111");
-  });
 
-  // --- what Table 38 does NOT admit ----------------------------------------
+    // --- what Table 38 does NOT admit ----------------------------------------
 
-  it("refuses an ORDERING on an enumeration — Table 38 lists no such function", () => {
-    for (const op of ["GT", "GE", "LT", "LE"]) {
-      expect(builds("", `b := ${op}(q, GOOD);`), `${op} must not compile`).toBe(false);
-    }
-  });
+    it("refuses an ORDERING on an enumeration — Table 38 lists no such function", () => {
+      for (const op of ["GT", "GE", "LT", "LE"]) {
+        expect(
+          builds("", `b := ${op}(q, GOOD);`),
+          `${op} must not compile`,
+        ).toBe(false);
+      }
+    });
 
-  it("refuses MIN, MAX and LIMIT on an enumeration", () => {
-    expect(builds("q3 : Quality;", `q3 := MIN(q, q);`)).toBe(false);
-    expect(builds("q3 : Quality;", `q3 := MAX(q, q);`)).toBe(false);
-    expect(builds("q3 : Quality;", `q3 := LIMIT(q, q, q);`)).toBe(false);
-  });
+    it("refuses MIN, MAX and LIMIT on an enumeration", () => {
+      expect(builds("q3 : Quality;", `q3 := MIN(q, q);`)).toBe(false);
+      expect(builds("q3 : Quality;", `q3 := MAX(q, q);`)).toBe(false);
+      expect(builds("q3 : Quality;", `q3 := LIMIT(q, q, q);`)).toBe(false);
+    });
 
-  it("converts an enumeration to its numeric value with TO_*", () => {
-    const src = `${PRELUDE}
+    it("converts an enumeration to its numeric value with TO_*", () => {
+      const src = `${PRELUDE}
 TYPE Coded : (C_LOW := 10, C_HIGH := 20); END_TYPE
 PROGRAM Main
 VAR
@@ -206,15 +223,15 @@ END_VAR
   m := TO_INT(c);
   r := TO_REAL(GOOD);
 END_PROGRAM`;
-    const result = compile(src, { programName: "Main" });
-    expect(result.success, JSON.stringify(result.errors)).toBe(true);
-    const out = compileAndRunStandalone({
-      tempDir,
-      pchPath,
-      headerCode: result.headerCode ?? "",
-      cppCode: result.cppCode ?? "",
-      testName: "enum_to_int_run",
-      mainCode: `
+      const result = compile(src, { programName: "Main" });
+      expect(result.success, JSON.stringify(result.errors)).toBe(true);
+      const out = compileAndRunStandalone({
+        tempDir,
+        pchPath,
+        headerCode: result.headerCode ?? "",
+        cppCode: result.cppCode ?? "",
+        testName: "enum_to_int_run",
+        mainCode: `
 #include <iostream>
 int main() {
   using namespace strucpp;
@@ -223,16 +240,17 @@ int main() {
   std::cout << prog.N << " " << prog.D << " " << prog.M << " " << prog.R << "\\n";
   return 0;
 }`,
+      });
+      expect(out).toBe("3 2 20 1");
     });
-    expect(out).toBe("3 2 20 1");
-  });
 
-  it("refuses a comparison ACROSS two different enumerations", () => {
-    // §6.4.4.2: "Different enumerated data types may use the same identifiers
-    // for enumerated values" — so this would compare names that only look alike.
-    expect(builds("", `b := EQ(q, OTHER_A);`)).toBe(false);
-  });
-});
+    it("refuses a comparison ACROSS two different enumerations", () => {
+      // §6.4.4.2: "Different enumerated data types may use the same identifiers
+      // for enumerated values" — so this would compare names that only look alike.
+      expect(builds("", `b := EQ(q, OTHER_A);`)).toBe(false);
+    });
+  },
+);
 
 describeIfGpp("the fundamental integer types carry IEC traits", () => {
   let tempDir: string;

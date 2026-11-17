@@ -162,8 +162,12 @@ END_TEST
       tempDirPrefix: "strucpp-fb-init-",
     });
     expect(stdout).toContain("[PASS] declaration arguments and order");
-    expect(stdout).toContain("[PASS] nested instance, function local and FB_Reinit");
-    expect(stdout).toContain("[PASS] FB_Exit runs on __DELETE, the derived block first");
+    expect(stdout).toContain(
+      "[PASS] nested instance, function local and FB_Reinit",
+    );
+    expect(stdout).toContain(
+      "[PASS] FB_Exit runs on __DELETE, the derived block first",
+    );
     expect(exitCode).toBe(0);
   });
 });
@@ -323,7 +327,9 @@ END_CONFIGURATION`;
     for (const line of methodLines) {
       expect(line).not.toMatch(/\bvirtual\b|\boverride\b/);
     }
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-fb-init-sealed-"));
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "strucpp-fb-init-sealed-"),
+    );
     try {
       fs.writeFileSync(path.join(dir, "generated.hpp"), result.headerCode);
       fs.writeFileSync(path.join(dir, "generated.cpp"), result.cppCode);
@@ -394,7 +400,9 @@ END_CONFIGURATION
       "GlobalVar<FB_BASE> CG{strucpp::FbCtorArgs{}, strucpp::FbInitThen{}, [](auto& v0) { v0.X = 5; }, 3};",
     );
     expect(result.cppCode).toContain("    FB_BASE T{1};");
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-fb-init-cfg-"));
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "strucpp-fb-init-cfg-"),
+    );
     try {
       const built = compileWithGpp({
         tempDir,

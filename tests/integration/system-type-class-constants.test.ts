@@ -16,7 +16,12 @@ import * as os from "os";
 import { execSync } from "child_process";
 import { compile } from "../../src/index.js";
 import { TYPE_CLASS_MEMBERS } from "../../src/semantic/type-utils.js";
-import { hasGpp, RUNTIME_INCLUDE_PATH, cxxEnv, CXX_STD } from "./test-helpers.js";
+import {
+  hasGpp,
+  RUNTIME_INCLUDE_PATH,
+  cxxEnv,
+  CXX_STD,
+} from "./test-helpers.js";
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
@@ -44,7 +49,10 @@ END_FUNCTION
 
 describe("__SYSTEM.TYPE_CLASS constants", () => {
   it("lists exactly the enumerators the runtime header defines", () => {
-    const hpp = fs.readFileSync(path.join(RUNTIME_INCLUDE_PATH, "iec_type_class.hpp"), "utf-8");
+    const hpp = fs.readFileSync(
+      path.join(RUNTIME_INCLUDE_PATH, "iec_type_class.hpp"),
+      "utf-8",
+    );
     const body = /enum TYPE_CLASS : uint32_t \{([\s\S]*?)\};/.exec(hpp)![1]!;
     const fromHeader = [...body.matchAll(/(TYPE_\w+)\s*=/g)].map((m) => m[1]);
     expect([...TYPE_CLASS_MEMBERS]).toEqual(fromHeader);
@@ -141,6 +149,8 @@ int main() {
       { encoding: "utf-8", env: cxxEnv },
     );
     // DINT has no CASE branch, so it takes ELSE
-    expect(execSync(`"${bin}"`, { encoding: "utf-8" }).trim()).toBe("-300 1.25 -1");
+    expect(execSync(`"${bin}"`, { encoding: "utf-8" }).trim()).toBe(
+      "-300 1.25 -1",
+    );
   });
 });

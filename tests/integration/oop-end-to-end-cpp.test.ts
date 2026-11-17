@@ -194,7 +194,9 @@ END_TEST
     expect(stdout).toContain(
       "[PASS] references as input and parameter, SUPER^() body, PERSISTENT",
     );
-    expect(stdout).toContain("[PASS] interfaces, properties, methods and access");
+    expect(stdout).toContain(
+      "[PASS] interfaces, properties, methods and access",
+    );
     expect(exitCode).toBe(0);
   });
 });

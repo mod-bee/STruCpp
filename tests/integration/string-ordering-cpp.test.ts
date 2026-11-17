@@ -65,8 +65,20 @@ CONFIGURATION Config0
 END_CONFIGURATION`;
 
 const CHECKS: Array<[string, number]> = [
-  ["UPPER", 1], ["LT", 1], ["LE", 1], ["GT", 1], ["GE", 0], ["LIT_GT", 1], ["LIT_LT", 0],
-  ["LIT_EQ", 1], ["LIT_NE", 0], ["VV_LE", 1], ["VV_GE", 0], ["W_LT", 1], ["W_GE", 0], ["N", 4],
+  ["UPPER", 1],
+  ["LT", 1],
+  ["LE", 1],
+  ["GT", 1],
+  ["GE", 0],
+  ["LIT_GT", 1],
+  ["LIT_LT", 0],
+  ["LIT_EQ", 1],
+  ["LIT_NE", 0],
+  ["VV_LE", 1],
+  ["VV_GE", 0],
+  ["W_LT", 1],
+  ["W_GE", 0],
+  ["N", 4],
 ];
 
 describeIfGpp("string ordering and an in-out array of STRING(n)", () => {
@@ -79,7 +91,9 @@ describeIfGpp("string ordering and an in-out array of STRING(n)", () => {
   it("compares by character code in every form, and passes the array", () => {
     const result = compile(SOURCE, { headerFileName: "generated.hpp" });
     expect(result.errors.map((e) => e.message)).toEqual([]);
-    expect(result.headerCode).toContain("Array1D<IECStringVar<160>, 1, 4>& LINES");
+    expect(result.headerCode).toContain(
+      "Array1D<IECStringVar<160>, 1, 4>& LINES",
+    );
     fs.writeFileSync(path.join(tempDir, "generated.hpp"), result.headerCode);
     fs.writeFileSync(path.join(tempDir, "generated.cpp"), result.cppCode);
     const checks = CHECKS.map(

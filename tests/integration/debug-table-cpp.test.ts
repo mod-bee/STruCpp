@@ -78,7 +78,6 @@ int main() {
 }
 `;
 
-
 const RUNTIME_INCLUDE = path.resolve(__dirname, "../../src/runtime/include");
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
@@ -691,7 +690,10 @@ END_CONFIGURATION`,
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "generated.hpp"), result.headerCode);
     fs.writeFileSync(path.join(dir, "generated.cpp"), result.cppCode);
-    fs.writeFileSync(path.join(dir, "generated_debug.cpp"), result.debugTableCpp!);
+    fs.writeFileSync(
+      path.join(dir, "generated_debug.cpp"),
+      result.debugTableCpp!,
+    );
 
     fs.writeFileSync(
       path.join(dir, "main.cpp"),
@@ -796,7 +798,9 @@ END_CONFIGURATION`,
     const retained = (result.debugMap!.retainVars ?? []).map((v) => v.path);
     expect(retained).toContain("INSTANCE0.T.START_TIME");
     // …and the un-retained sibling contributes nothing.
-    expect(retained.filter((p) => p.startsWith("INSTANCE0.LOOSE."))).toEqual([]);
+    expect(retained.filter((p) => p.startsWith("INSTANCE0.LOOSE."))).toEqual(
+      [],
+    );
 
     const dir = path.join(tempDir, "libfb-retain");
     fs.mkdirSync(dir, { recursive: true });

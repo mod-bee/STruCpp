@@ -47,8 +47,8 @@ FUNCTION_BLOCK FB_S
     nMethodCalls := nMethodCalls + 1;
     Shared := nMethodCalls;
   END_METHOD
-  METHOD PUBLIC Limit : INT
-    Limit := nLimit;
+  METHOD PUBLIC Ceiling : INT
+    Ceiling := nLimit;
   END_METHOD
   nCalls := nCalls + nStep;
   nSeen := nCalls;
@@ -73,8 +73,8 @@ END_TEST
 
 TEST 'VAR_INPUT CONSTANT'
   VAR a : FB_S; c : FB_S := (nLimit := 9); END_VAR
-  ASSERT_EQ(a.Limit(), 3);
-  ASSERT_EQ(c.Limit(), 9);
+  ASSERT_EQ(a.Ceiling(), 3);
+  ASSERT_EQ(c.Ceiling(), 9);
 END_TEST
 `,
       testFileName: "test_var_stat.st",
@@ -107,7 +107,9 @@ END_CONFIGURATION
     expect(result.errors.map((e) => e.message)).toEqual([]);
     expect(result.headerCode).toContain("    static IEC_INT NRUNS;");
     expect(result.cppCode).toContain("IEC_INT Program_P::NRUNS = 100;");
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-var-stat-p-"));
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "strucpp-var-stat-p-"),
+    );
     try {
       const built = compileWithGpp({
         tempDir,

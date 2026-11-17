@@ -26,7 +26,11 @@ function findTestFiles(dir: string): string[] {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       results.push(...findTestFiles(fullPath));
-    } else if (entry.isFile() && entry.name.startsWith("test_") && entry.name.endsWith(".st")) {
+    } else if (
+      entry.isFile() &&
+      entry.name.startsWith("test_") &&
+      entry.name.endsWith(".st")
+    ) {
       results.push(fullPath);
     }
   }
@@ -36,7 +40,10 @@ function findTestFiles(dir: string): string[] {
 /** Load only the IEC standard FB library (not the full libs/ directory,
  *  to avoid loading oscat-basic.stlib which would conflict with inline
  *  OSCAT test sources that redefine the same functions/FBs). */
-const IEC_STDLIB_PATH = path.resolve(__dirname, "../../libs/iec-standard-fb.stlib");
+const IEC_STDLIB_PATH = path.resolve(
+  __dirname,
+  "../../libs/iec-standard-fb.stlib",
+);
 const iecStdlib = fs.existsSync(IEC_STDLIB_PATH)
   ? loadStlibFromFile(IEC_STDLIB_PATH)
   : undefined;
@@ -82,14 +89,10 @@ describe.skipIf(!hasGpp)("ST Validation Suite", () => {
     }
     const testName = `${category}/${featureName}`;
 
-    it(
-      `validates ${testName}`,
-      () => {
-        const { stdout, exitCode } = runValidation(sourcePath, testPath);
-        expect(stdout).not.toContain("[FAIL]");
-        expect(exitCode).toBe(0);
-      },
-      30000,
-    );
+    it(`validates ${testName}`, () => {
+      const { stdout, exitCode } = runValidation(sourcePath, testPath);
+      expect(stdout).not.toContain("[FAIL]");
+      expect(exitCode).toBe(0);
+    }, 30000);
   }
 });

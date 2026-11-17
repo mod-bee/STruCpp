@@ -111,10 +111,16 @@ describe("a library method's ANY input, called from another library", () => {
         dependencies: [libA(noSource)],
       });
       expect(b.errors).toEqual([]);
-      const code = b.archive.chunks.map((c) => `${c.header}\n${c.cpp}`).join("\n");
+      const code = b.archive.chunks
+        .map((c) => `${c.header}\n${c.cpp}`)
+        .join("\n");
       expectDescriptors(code, CALLER_CALLS);
-      expect(code).toContain("WATCH(strucpp::IEC_ANY{ strucpp::TYPE_CLASS::TYPE_INT");
-      expect(code).toContain("WATCH(strucpp::IEC_ANY{ strucpp::TYPE_CLASS::TYPE_ARRAY");
+      expect(code).toContain(
+        "WATCH(strucpp::IEC_ANY{ strucpp::TYPE_CLASS::TYPE_INT",
+      );
+      expect(code).toContain(
+        "WATCH(strucpp::IEC_ANY{ strucpp::TYPE_CLASS::TYPE_ARRAY",
+      );
     });
   }
 });

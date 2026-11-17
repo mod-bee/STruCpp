@@ -15,7 +15,12 @@ import * as path from "path";
 import * as os from "os";
 import { execSync } from "child_process";
 import { compile } from "../../src/index.js";
-import { hasGpp, RUNTIME_INCLUDE_PATH, cxxEnv, CXX_STD } from "./test-helpers.js";
+import {
+  hasGpp,
+  RUNTIME_INCLUDE_PATH,
+  cxxEnv,
+  CXX_STD,
+} from "./test-helpers.js";
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
@@ -55,7 +60,7 @@ describe("type of AND, OR and XOR", () => {
     const result = compile(SOURCE, { headerFileName: "generated.hpp" });
     expect(result.errors.map((e) => e.message)).toEqual([]);
     expect(result.cppCode).toContain(
-      "Q1 = NOT(static_cast<bool>((A > 0.0) & (B > 0.0)));",
+      "Q1 = NOT(static_cast<bool>((A > 0.0f) & (B > 0.0f)));",
     );
   });
 

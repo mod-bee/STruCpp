@@ -63,7 +63,11 @@ describeIfGpp("64-bit integer literals — generated C++", () => {
       // aborts on it before reaching the literal this test is about. They cannot
       // become a static-local — generated_debug.cpp takes their address into
       // PROGMEM, which needs a constant.
-      extraFlags: ["-pedantic-errors", "-Wno-c++17-extensions", "-Werror=overflow"],
+      extraFlags: [
+        "-pedantic-errors",
+        "-Wno-c++17-extensions",
+        "-Werror=overflow",
+      ],
       mainCode: `#include <iostream>\n\nint main() {\n    using namespace strucpp;\n${mainBody}\n    return 0;\n}\n`,
     });
   }

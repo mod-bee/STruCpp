@@ -17,7 +17,12 @@ import * as path from "path";
 import * as os from "os";
 import { execSync } from "child_process";
 import { compile } from "../../src/index.js";
-import { hasGpp, RUNTIME_INCLUDE_PATH, cxxEnv, CXX_STD } from "./test-helpers.js";
+import {
+  hasGpp,
+  RUNTIME_INCLUDE_PATH,
+  cxxEnv,
+  CXX_STD,
+} from "./test-helpers.js";
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
@@ -60,7 +65,9 @@ describe("declared string length of array elements", () => {
 
   it("keeps STRING(n) for an ARRAY type", () => {
     const result = compile(SOURCE, { headerFileName: "generated.hpp" });
-    expect(result.headerCode).toMatch(/using NAMES_T = Array1D<IECStringVar<8>, 1, 2>;/);
+    expect(result.headerCode).toMatch(
+      /using NAMES_T = Array1D<IECStringVar<8>, 1, 2>;/,
+    );
   });
 });
 
@@ -90,7 +97,10 @@ describeIfGpp("array-of-string elements read back over the debugger", () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "generated.hpp"), result.headerCode);
     fs.writeFileSync(path.join(dir, "generated.cpp"), result.cppCode);
-    fs.writeFileSync(path.join(dir, "generated_debug.cpp"), result.debugTableCpp!);
+    fs.writeFileSync(
+      path.join(dir, "generated_debug.cpp"),
+      result.debugTableCpp!,
+    );
     fs.writeFileSync(
       path.join(dir, "main.cpp"),
       `#include "generated.hpp"

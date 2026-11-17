@@ -4,94 +4,94 @@
  * End-to-end tests for the complete compilation pipeline.
  */
 
-import { describe, it, expect } from 'vitest';
-import { compile, parse, getVersion, defaultOptions } from '../../src/index.js';
+import { describe, it, expect } from "vitest";
+import { compile, parse, getVersion, defaultOptions } from "../../src/index.js";
 
-describe('STruC++ Compiler', () => {
-  describe('getVersion', () => {
-    it('should return version string', () => {
+describe("STruC++ Compiler", () => {
+  describe("getVersion", () => {
+    it("should return version string", () => {
       const version = getVersion();
       expect(version).toBeDefined();
-      expect(typeof version).toBe('string');
+      expect(typeof version).toBe("string");
       expect(version).toMatch(/^\d+\.\d+\.\d+/);
     });
   });
 
-  describe('defaultOptions', () => {
-    it('should have sensible defaults', () => {
+  describe("defaultOptions", () => {
+    it("should have sensible defaults", () => {
       expect(defaultOptions.debug).toBe(false);
       expect(defaultOptions.lineMapping).toBe(true);
       expect(defaultOptions.optimizationLevel).toBe(0);
     });
   });
 
-  describe('compile', () => {
-    it('should return a result object', () => {
-      const result = compile('');
+  describe("compile", () => {
+    it("should return a result object", () => {
+      const result = compile("");
       expect(result).toBeDefined();
-      expect(result).toHaveProperty('success');
-      expect(result).toHaveProperty('cppCode');
-      expect(result).toHaveProperty('headerCode');
-      expect(result).toHaveProperty('lineMap');
-      expect(result).toHaveProperty('errors');
-      expect(result).toHaveProperty('warnings');
+      expect(result).toHaveProperty("success");
+      expect(result).toHaveProperty("cppCode");
+      expect(result).toHaveProperty("headerCode");
+      expect(result).toHaveProperty("lineMap");
+      expect(result).toHaveProperty("errors");
+      expect(result).toHaveProperty("warnings");
     });
 
-    it('should compile a simple program successfully', () => {
-      const result = compile('PROGRAM Main END_PROGRAM');
+    it("should compile a simple program successfully", () => {
+      const result = compile("PROGRAM Main END_PROGRAM");
       // Phase 2.1: Compiler now generates code for programs
       expect(result.success).toBe(true);
-      expect(result.headerCode).toContain('Program_MAIN');
+      expect(result.headerCode).toContain("Program_MAIN");
     });
 
-    it('should accept compilation options', () => {
-      const result = compile('PROGRAM Main END_PROGRAM', {
+    it("should accept compilation options", () => {
+      const result = compile("PROGRAM Main END_PROGRAM", {
         debug: true,
         lineMapping: false,
       });
       expect(result).toBeDefined();
     });
 
-    it('should compile CODESYS-style chained assignment (a := b := expr)', () => {
+    it("should compile CODESYS-style chained assignment (a := b := expr)", () => {
       // Used by OSCAT (e.g. BOILER: `flag_0 := boost_mode := FALSE;`). Desugars to a
       // right-to-left cascade so every target receives the value: b := expr; a := b.
       const result = compile(
-        'FUNCTION_BLOCK FB\n' +
-          'VAR a : BOOL; b : BOOL; c : INT; d : INT; END_VAR\n' +
-          'a := b := FALSE;\n' +
-          'c := d := 5;\n' +
-          'END_FUNCTION_BLOCK',
+        "FUNCTION_BLOCK FB\n" +
+          "VAR a : BOOL; b : BOOL; c : INT; d : INT; END_VAR\n" +
+          "a := b := FALSE;\n" +
+          "c := d := 5;\n" +
+          "END_FUNCTION_BLOCK",
       );
       expect(result.errors).toHaveLength(0);
       expect(result.success).toBe(true);
-      const body = result.cppCode.replace(/\s+/g, ' ');
+      const body = result.cppCode.replace(/\s+/g, " ");
       // cascade: rightmost target gets the value first, then propagates left.
-      expect(body).toContain('B = false;');
-      expect(body).toContain('A = B;');
-      expect(body).toContain('D = 5;');
-      expect(body).toContain('C = D;');
+      expect(body).toContain("B = false;");
+      expect(body).toContain("A = B;");
+      expect(body).toContain("D = 5;");
+      expect(body).toContain("C = D;");
     });
 
-    it('should evaluate a chained-assignment RHS once into the rightmost target', () => {
+    it("should evaluate a chained-assignment RHS once into the rightmost target", () => {
       // a := b := c := 7  →  c := 7; b := c; a := b  (three targets, one value)
       const result = compile(
-        'FUNCTION_BLOCK FB\n' +
-          'VAR a : INT; b : INT; c : INT; END_VAR\n' +
-          'a := b := c := 7;\n' +
-          'END_FUNCTION_BLOCK',
+        "FUNCTION_BLOCK FB\n" +
+          "VAR a : INT; b : INT; c : INT; END_VAR\n" +
+          "a := b := c := 7;\n" +
+          "END_FUNCTION_BLOCK",
       );
       expect(result.success).toBe(true);
-      const body = result.cppCode.replace(/\s+/g, ' ');
-      expect(body).toContain('C = 7;');
-      expect(body).toContain('B = C;');
-      expect(body).toContain('A = B;');
+      const body = result.cppCode.replace(/\s+/g, " ");
+      expect(body).toContain("C = 7;");
+      expect(body).toContain("B = C;");
+      expect(body).toContain("A = B;");
     });
   });
 });
 
-describe('Phase 2.1 - Project Structure Tests', () => {
-  describe('Configuration and Resource', () => {
-    it('should compile a configuration with resource', () => {
+describe("Phase 2.1 - Project Structure Tests", () => {
+  describe("Configuration and Resource", () => {
+    it("should compile a configuration with resource", () => {
       const source = `
         CONFIGURATION MyConfig
           RESOURCE MyResource ON PLC
@@ -105,11 +105,11 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.headerCode).toContain('Configuration_MYCONFIG');
-      expect(result.headerCode).toContain('Program_MAIN');
+      expect(result.headerCode).toContain("Configuration_MYCONFIG");
+      expect(result.headerCode).toContain("Program_MAIN");
     });
 
-    it('should compile multiple resources in a configuration', () => {
+    it("should compile multiple resources in a configuration", () => {
       const source = `
         CONFIGURATION MultiResourceConfig
           RESOURCE Resource1 ON PLC
@@ -127,12 +127,12 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.headerCode).toContain('Configuration_MULTIRESOURCECONFIG');
+      expect(result.headerCode).toContain("Configuration_MULTIRESOURCECONFIG");
     });
   });
 
-  describe('VAR_GLOBAL and VAR_EXTERNAL', () => {
-    it('should compile program with VAR_GLOBAL', () => {
+  describe("VAR_GLOBAL and VAR_EXTERNAL", () => {
+    it("should compile program with VAR_GLOBAL", () => {
       const source = `
         CONFIGURATION GlobalConfig
           VAR_GLOBAL
@@ -153,10 +153,10 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.headerCode).toContain('GLOBALCOUNTER');
+      expect(result.headerCode).toContain("GLOBALCOUNTER");
     });
 
-    it('should compile program with VAR_GLOBAL CONSTANT', () => {
+    it("should compile program with VAR_GLOBAL CONSTANT", () => {
       const source = `
         CONFIGURATION ConstConfig
           VAR_GLOBAL CONSTANT
@@ -174,7 +174,7 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should compile program with VAR_GLOBAL RETAIN', () => {
+    it("should compile program with VAR_GLOBAL RETAIN", () => {
       const source = `
         CONFIGURATION RetainConfig
           VAR_GLOBAL RETAIN
@@ -193,8 +193,8 @@ describe('Phase 2.1 - Project Structure Tests', () => {
     });
   });
 
-  describe('Task Scheduling', () => {
-    it('should compile task with INTERVAL property', () => {
+  describe("Task Scheduling", () => {
+    it("should compile task with INTERVAL property", () => {
       const source = `
         CONFIGURATION TaskConfig
           RESOURCE MainResource ON PLC
@@ -210,7 +210,7 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should compile task with PRIORITY property', () => {
+    it("should compile task with PRIORITY property", () => {
       const source = `
         CONFIGURATION PriorityConfig
           RESOURCE MainResource ON PLC
@@ -228,7 +228,7 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should compile program instance without task assignment', () => {
+    it("should compile program instance without task assignment", () => {
       const source = `
         CONFIGURATION NoTaskConfig
           RESOURCE MainResource ON PLC
@@ -247,8 +247,8 @@ describe('Phase 2.1 - Project Structure Tests', () => {
     });
   });
 
-  describe('Program Variables', () => {
-    it('should compile program with VAR block', () => {
+  describe("Program Variables", () => {
+    it("should compile program with VAR block", () => {
       const source = `
         PROGRAM Main
           VAR
@@ -259,10 +259,10 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.headerCode).toContain('Program_MAIN');
+      expect(result.headerCode).toContain("Program_MAIN");
     });
 
-    it('should compile program with initialized variables', () => {
+    it("should compile program with initialized variables", () => {
       const source = `
         PROGRAM Main
           VAR
@@ -275,7 +275,7 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should compile program with VAR CONSTANT', () => {
+    it("should compile program with VAR CONSTANT", () => {
       const source = `
         PROGRAM Main
           VAR CONSTANT
@@ -288,8 +288,8 @@ describe('Phase 2.1 - Project Structure Tests', () => {
     });
   });
 
-  describe('Time Literals', () => {
-    it('should parse millisecond time literals', () => {
+  describe("Time Literals", () => {
+    it("should parse millisecond time literals", () => {
       const source = `
         CONFIGURATION TimeConfig
           RESOURCE MainResource ON PLC
@@ -305,7 +305,7 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should parse second time literals', () => {
+    it("should parse second time literals", () => {
       const source = `
         CONFIGURATION TimeConfig
           RESOURCE MainResource ON PLC
@@ -321,7 +321,7 @@ describe('Phase 2.1 - Project Structure Tests', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should parse minute time literals', () => {
+    it("should parse minute time literals", () => {
       const source = `
         CONFIGURATION TimeConfig
           RESOURCE MainResource ON PLC
@@ -339,9 +339,9 @@ describe('Phase 2.1 - Project Structure Tests', () => {
   });
 });
 
-describe('Error Handling Tests', () => {
-  describe('Parse Errors', () => {
-    it('should report syntax errors for invalid program', () => {
+describe("Error Handling Tests", () => {
+  describe("Parse Errors", () => {
+    it("should report syntax errors for invalid program", () => {
       const source = `
         PROGRAM Main
           VAR x : ; END_VAR
@@ -352,16 +352,16 @@ describe('Error Handling Tests', () => {
       expect(result.errors.length).toBeGreaterThan(0);
     });
 
-    it('should handle empty input gracefully', () => {
-      const result = compile('');
+    it("should handle empty input gracefully", () => {
+      const result = compile("");
       // Empty input is valid - produces boilerplate output with empty namespace
       expect(result).toBeDefined();
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('namespace strucpp');
-      expect(result.headerCode).toContain('namespace strucpp');
+      expect(result.cppCode).toContain("namespace strucpp");
+      expect(result.headerCode).toContain("namespace strucpp");
     });
 
-    it('should report error for incomplete configuration', () => {
+    it("should report error for incomplete configuration", () => {
       const source = `
         CONFIGURATION MyConfig
           RESOURCE MyResource ON PLC
@@ -371,7 +371,7 @@ describe('Error Handling Tests', () => {
       expect(result.success).toBe(false);
     });
 
-    it('should report error for missing program definition', () => {
+    it("should report error for missing program definition", () => {
       const source = `
         CONFIGURATION MyConfig
           RESOURCE MyResource ON PLC
@@ -384,8 +384,8 @@ describe('Error Handling Tests', () => {
     });
   });
 
-  describe('VAR_EXTERNAL Validation', () => {
-    it('should report error for VAR_EXTERNAL without matching VAR_GLOBAL', () => {
+  describe("VAR_EXTERNAL Validation", () => {
+    it("should report error for VAR_EXTERNAL without matching VAR_GLOBAL", () => {
       const source = `
         CONFIGURATION MyConfig
           VAR_GLOBAL
@@ -404,10 +404,12 @@ describe('Error Handling Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(false);
-      expect(result.errors.some(e => e.message.includes('NONEXISTENTVAR'))).toBe(true);
+      expect(
+        result.errors.some((e) => e.message.includes("NONEXISTENTVAR")),
+      ).toBe(true);
     });
 
-    it('reports a located error for a FUNCTION_BLOCK VAR_EXTERNAL without a matching VAR_GLOBAL', () => {
+    it("reports a located error for a FUNCTION_BLOCK VAR_EXTERNAL without a matching VAR_GLOBAL", () => {
       // IEC 61131-3 lets an FB access globals via VAR_EXTERNAL, so a missing
       // global must be flagged — and anchored at the declaration so the editor
       // can surface it (previously FBs were skipped and the error was file-less).
@@ -430,7 +432,9 @@ describe('Error Handling Tests', () => {
       const result = compile(source);
       expect(result.success).toBe(false);
       const err = result.errors.find(
-        (e) => e.message.includes('BOGUSGLOBAL') && e.message.includes('no matching'),
+        (e) =>
+          e.message.includes("BOGUSGLOBAL") &&
+          e.message.includes("no matching"),
       );
       expect(err).toBeDefined();
       expect(err!.message).toContain("function block 'WORKER'");
@@ -439,7 +443,7 @@ describe('Error Handling Tests', () => {
       expect(err!.file).toBeTruthy();
     });
 
-    it('should report error for VAR_EXTERNAL with type mismatch', () => {
+    it("should report error for VAR_EXTERNAL with type mismatch", () => {
       const source = `
         CONFIGURATION MyConfig
           VAR_GLOBAL
@@ -458,7 +462,9 @@ describe('Error Handling Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(false);
-      expect(result.errors.some(e => e.message.includes('Type mismatch'))).toBe(true);
+      expect(
+        result.errors.some((e) => e.message.includes("Type mismatch")),
+      ).toBe(true);
     });
   });
 
@@ -467,8 +473,8 @@ describe('Error Handling Tests', () => {
   // Scalars get full read()/write() codegen; composite globals (struct / array
   // / function-block) can be declared + debugged but their in-body access is
   // gated (fail-loud) until locked field/element/call codegen lands.
-  describe('Shared globals (mutex model)', () => {
-    it('compiles a scalar located shared global end-to-end', () => {
+  describe("Shared globals (mutex model)", () => {
+    it("compiles a scalar located shared global end-to-end", () => {
       // The address lives on the CONFIGURATION VAR_GLOBAL, which owns the
       // storage; the VAR_EXTERNAL only names it. Repeating `AT` on the external
       // is rejected (see 'rejects a located VAR_EXTERNAL' below).
@@ -490,15 +496,15 @@ describe('Error Handling Tests', () => {
       const result = compile(source);
       expect(result.success).toBe(true);
       // Scalar external access is rewritten through the GlobalVar pointer.
-      expect(result.cppCode).toContain('RUN->write(');
+      expect(result.cppCode).toContain("RUN->write(");
       // The config global is a file-scope GlobalVar<V> singleton (reachable from
       // every POU) and the located image binds through its `.value`.
-      expect(result.headerCode).toContain('extern GlobalVar<IEC_BOOL> RUN;');
-      expect(result.cppCode).toContain('GlobalVar<IEC_BOOL> RUN{');
-      expect(result.cppCode).toContain('RUN.value.raw_ptr()');
+      expect(result.headerCode).toContain("extern GlobalVar<IEC_BOOL> RUN;");
+      expect(result.cppCode).toContain("GlobalVar<IEC_BOOL> RUN{");
+      expect(result.cppCode).toContain("RUN.value.raw_ptr()");
     });
 
-    it('allows declaring a composite (struct) shared global', () => {
+    it("allows declaring a composite (struct) shared global", () => {
       const source = `
         TYPE Point : STRUCT x : INT; y : INT; END_STRUCT END_TYPE
         PROGRAM Main
@@ -516,7 +522,7 @@ describe('Error Handling Tests', () => {
       expect(result.success).toBe(true);
     });
 
-    it('reads a composite shared global field under the global mutex (with_lock)', () => {
+    it("reads a composite shared global field under the global mutex (with_lock)", () => {
       // Composite shared globals are accessed under their own per-global mutex
       // via GlobalVar::with_lock (a no-op lock on non-threaded builds).
       const source = `
@@ -536,10 +542,10 @@ describe('Error Handling Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('PT->with_lock(');
+      expect(result.cppCode).toContain("PT->with_lock(");
     });
 
-    it('writes a composite shared global field via the canonical value pointer', () => {
+    it("writes a composite shared global field via the canonical value pointer", () => {
       const source = `
         TYPE Point : STRUCT x : INT; y : INT; END_STRUCT END_TYPE
         PROGRAM Main
@@ -556,10 +562,10 @@ describe('Error Handling Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('PT->with_lock(');
+      expect(result.cppCode).toContain("PT->with_lock(");
     });
 
-    it('locks bit read + bit write on a composite shared global field', () => {
+    it("locks bit read + bit write on a composite shared global field", () => {
       const source = `
         TYPE Ctrl : STRUCT cw : UINT; END_STRUCT END_TYPE
         PROGRAM Main
@@ -579,12 +585,16 @@ describe('Error Handling Tests', () => {
       const result = compile(source);
       expect(result.success).toBe(true);
       // Bit write: read-modify-write happens inside one lock (atomic).
-      expect(result.cppCode).toMatch(/C->with_lock\(\[&\]\(auto\* __glk\)\{ \(\*__glk\)\.CW = \(\(\*__glk\)\.CW & ~\(1ULL << 3\)\)/);
+      expect(result.cppCode).toMatch(
+        /C->with_lock\(\[&\]\(auto\* __glk\)\{ \(\*__glk\)\.CW = \(\(\*__glk\)\.CW & ~\(1ULL << 3\)\)/,
+      );
       // Bit read: extracted inside the lock.
-      expect(result.cppCode).toMatch(/C->with_lock\(\[&\]\(auto\* __glk\)\{ return \(\(static_cast<uint64_t>\(\(\*__glk\)\.CW\) >> 5\) & 1\)/);
+      expect(result.cppCode).toMatch(
+        /C->with_lock\(\[&\]\(auto\* __glk\)\{ return \(\(static_cast<uint64_t>\(\(\*__glk\)\.CW\) >> 5\) & 1\)/,
+      );
     });
 
-    it('locks element access on an array-of-scalar and array-of-struct global', () => {
+    it("locks element access on an array-of-scalar and array-of-struct global", () => {
       const source = `
         TYPE Item : STRUCT v : INT; END_STRUCT END_TYPE
         TYPE Bag : STRUCT nums : ARRAY[1..4] OF INT; items : ARRAY[1..3] OF Item; END_STRUCT END_TYPE
@@ -604,11 +614,15 @@ describe('Error Handling Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('BAG->with_lock([&](auto* __glk){ (*__glk).NUMS.at(I) = ');
-      expect(result.cppCode).toContain('BAG->with_lock([&](auto* __glk){ return (*__glk).ITEMS.at(I).V; })');
+      expect(result.cppCode).toContain(
+        "BAG->with_lock([&](auto* __glk){ (*__glk).NUMS.at(I) = ",
+      );
+      expect(result.cppCode).toContain(
+        "BAG->with_lock([&](auto* __glk){ return (*__glk).ITEMS.at(I).V; })",
+      );
     });
 
-    it('passes a composite shared global to an FB VAR_IN_OUT under the lock (in + out)', () => {
+    it("passes a composite shared global to an FB VAR_IN_OUT under the lock (in + out)", () => {
       const source = `
         TYPE Axis : STRUCT pos : INT; END_STRUCT END_TYPE
         FUNCTION_BLOCK Mover VAR_IN_OUT a : Axis; END_VAR a.pos := a.pos + 1; END_FUNCTION_BLOCK
@@ -634,7 +648,7 @@ describe('Error Handling Tests', () => {
       );
     });
 
-    it('never nests two global locks in one statement (reads hoisted before write-lock)', () => {
+    it("never nests two global locks in one statement (reads hoisted before write-lock)", () => {
       const source = `
         TYPE P : STRUCT a : INT; b : INT; END_STRUCT END_TYPE
         PROGRAM Main
@@ -653,15 +667,19 @@ describe('Error Handling Tests', () => {
       expect(result.success).toBe(true);
       // g2 read is hoisted to a temp BEFORE g1's write-lock — the g1 write-lock
       // body must contain only the temp, never a nested g2->with_lock.
-      expect(result.cppCode).toMatch(/auto __gwv_\d+ = G2->with_lock\(\[&\]\(auto\* __glk\)\{ return \(\*__glk\)\.B; \}\);/);
-      expect(result.cppCode).toMatch(/G1->with_lock\(\[&\]\(auto\* __glk\)\{ \(\*__glk\)\.A = __gwv_\d+; \}\);/);
+      expect(result.cppCode).toMatch(
+        /auto __gwv_\d+ = G2->with_lock\(\[&\]\(auto\* __glk\)\{ return \(\*__glk\)\.B; \}\);/,
+      );
+      expect(result.cppCode).toMatch(
+        /G1->with_lock\(\[&\]\(auto\* __glk\)\{ \(\*__glk\)\.A = __gwv_\d+; \}\);/,
+      );
       // No g2 lock inside a g1 lock lambda.
       expect(result.cppCode).not.toMatch(/G1->with_lock\([^;]*G2->with_lock/);
     });
   });
 
-  describe('Task Validation', () => {
-    it('should report error for undefined task reference', () => {
+  describe("Task Validation", () => {
+    it("should report error for undefined task reference", () => {
       const source = `
         CONFIGURATION MyConfig
           RESOURCE MyResource ON PLC
@@ -674,29 +692,28 @@ describe('Error Handling Tests', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(false);
-      expect(result.errors.some(e => e.message.includes('NONEXISTENTTASK'))).toBe(true);
+      expect(
+        result.errors.some((e) => e.message.includes("NONEXISTENTTASK")),
+      ).toBe(true);
     });
   });
 });
 
-describe('Parse Function Tests', () => {
-
-  it('should return errors for invalid syntax', () => {
-    const result = parse('PROGRAM Main VAR x : ; END_VAR END_PROGRAM');
+describe("Parse Function Tests", () => {
+  it("should return errors for invalid syntax", () => {
+    const result = parse("PROGRAM Main VAR x : ; END_VAR END_PROGRAM");
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  it('should parse empty input', () => {
-    const result = parse('');
+  it("should parse empty input", () => {
+    const result = parse("");
     expect(result).toBeDefined();
     expect(result.errors).toHaveLength(0);
   });
-
 });
 
-describe('Complex Program Tests', () => {
-
-  it('should parse configuration with VAR_GLOBAL and programs with VAR_EXTERNAL', () => {
+describe("Complex Program Tests", () => {
+  it("should parse configuration with VAR_GLOBAL and programs with VAR_EXTERNAL", () => {
     const source = `
       CONFIGURATION CompleteConfig
         VAR_GLOBAL
@@ -731,30 +748,31 @@ describe('Complex Program Tests', () => {
     const result = compile(source);
     expect(result.success).toBe(true);
   });
-
 });
 
-describe('Compiler Options Tests', () => {
-  it('should accept debug option', () => {
-    const result = compile('PROGRAM Main END_PROGRAM', { debug: true });
+describe("Compiler Options Tests", () => {
+  it("should accept debug option", () => {
+    const result = compile("PROGRAM Main END_PROGRAM", { debug: true });
     expect(result).toBeDefined();
     expect(result.success).toBe(true);
   });
 
-  it('should accept lineMapping option', () => {
-    const result = compile('PROGRAM Main END_PROGRAM', { lineMapping: false });
+  it("should accept lineMapping option", () => {
+    const result = compile("PROGRAM Main END_PROGRAM", { lineMapping: false });
     expect(result).toBeDefined();
     expect(result.success).toBe(true);
   });
 
-  it('should accept optimizationLevel option', () => {
-    const result = compile('PROGRAM Main END_PROGRAM', { optimizationLevel: 2 });
+  it("should accept optimizationLevel option", () => {
+    const result = compile("PROGRAM Main END_PROGRAM", {
+      optimizationLevel: 2,
+    });
     expect(result).toBeDefined();
     expect(result.success).toBe(true);
   });
 
-  it('should accept all options together', () => {
-    const result = compile('PROGRAM Main END_PROGRAM', {
+  it("should accept all options together", () => {
+    const result = compile("PROGRAM Main END_PROGRAM", {
       debug: true,
       lineMapping: true,
       optimizationLevel: 1,
@@ -764,9 +782,9 @@ describe('Compiler Options Tests', () => {
   });
 });
 
-describe('External Code Pragma Tests (Phase 2.8)', () => {
-  describe('compile with external pragma', () => {
-    it('should compile program with external pragma', () => {
+describe("External Code Pragma Tests (Phase 2.8)", () => {
+  describe("compile with external pragma", () => {
+    it("should compile program with external pragma", () => {
       const source = `
         PROGRAM Main
           VAR x : INT; END_VAR
@@ -777,7 +795,7 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should include external code in generated output', () => {
+    it("should include external code in generated output", () => {
       const source = `
         PROGRAM Main
           {external printf("Hello from C++"); }
@@ -788,7 +806,7 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       expect(result.cppCode).toContain('printf("Hello from C++")');
     });
 
-    it('should preserve nested braces in external code', () => {
+    it("should preserve nested braces in external code", () => {
       const source = `
         PROGRAM Main
           {external
@@ -800,11 +818,11 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('if (x > 0)');
-      expect(result.cppCode).toContain('y = x;');
+      expect(result.cppCode).toContain("if (x > 0)");
+      expect(result.cppCode).toContain("y = x;");
     });
 
-    it('should compile multiple external pragmas', () => {
+    it("should compile multiple external pragmas", () => {
       const source = `
         PROGRAM Main
           {external int a = 1; }
@@ -814,12 +832,12 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('int a = 1;');
-      expect(result.cppCode).toContain('int b = 2;');
-      expect(result.cppCode).toContain('int c = a + b;');
+      expect(result.cppCode).toContain("int a = 1;");
+      expect(result.cppCode).toContain("int b = 2;");
+      expect(result.cppCode).toContain("int c = a + b;");
     });
 
-    it('should compile external pragma in function', () => {
+    it("should compile external pragma in function", () => {
       const source = `
         FUNCTION AddWithLog : INT
           VAR_INPUT a : INT; b : INT; END_VAR
@@ -832,7 +850,7 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       expect(result.cppCode).toContain('printf("AddWithLog called")');
     });
 
-    it('should compile external pragma in function block', () => {
+    it("should compile external pragma in function block", () => {
       const source = `
         FUNCTION_BLOCK Logger
           VAR_INPUT message : INT; END_VAR
@@ -844,7 +862,7 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       expect(result.cppCode).toContain('std::cout << "FB executed"');
     });
 
-    it('should handle external pragma with C++ comments', () => {
+    it("should handle external pragma with C++ comments", () => {
       const source = `
         PROGRAM Main
           {external
@@ -858,12 +876,12 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('// This is a C++ comment');
-      expect(result.cppCode).toContain('int x = 10;');
-      expect(result.cppCode).toContain('int y = 20;');
+      expect(result.cppCode).toContain("// This is a C++ comment");
+      expect(result.cppCode).toContain("int x = 10;");
+      expect(result.cppCode).toContain("int y = 20;");
     });
 
-    it('should handle external pragma with string containing braces', () => {
+    it("should handle external pragma with string containing braces", () => {
       const source = `
         PROGRAM Main
           {external printf("braces: {} and more {}"); }
@@ -874,7 +892,7 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       expect(result.cppCode).toContain('printf("braces: {} and more {}")');
     });
 
-    it('should handle deeply nested C++ code structures', () => {
+    it("should handle deeply nested C++ code structures", () => {
       const source = `
         PROGRAM Main
           {external
@@ -894,13 +912,13 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('void processData()');
-      expect(result.cppCode).toContain('if (condition)');
-      expect(result.cppCode).toContain('while (running)');
-      expect(result.cppCode).toContain('for (int i = 0; i < 10; i++)');
+      expect(result.cppCode).toContain("void processData()");
+      expect(result.cppCode).toContain("if (condition)");
+      expect(result.cppCode).toContain("while (running)");
+      expect(result.cppCode).toContain("for (int i = 0; i < 10; i++)");
     });
 
-    it('should handle C++ class/struct definitions', () => {
+    it("should handle C++ class/struct definitions", () => {
       const source = `
         PROGRAM Main
           {external
@@ -914,12 +932,12 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('struct SensorData');
-      expect(result.cppCode).toContain('int id;');
-      expect(result.cppCode).toContain('float value;');
+      expect(result.cppCode).toContain("struct SensorData");
+      expect(result.cppCode).toContain("int id;");
+      expect(result.cppCode).toContain("float value;");
     });
 
-    it('should handle C++ lambda expressions', () => {
+    it("should handle C++ lambda expressions", () => {
       const source = `
         PROGRAM Main
           {external
@@ -932,11 +950,13 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('auto callback = [](int x) { return x * 2; };');
-      expect(result.cppCode).toContain('auto complex = [&](int a, int b)');
+      expect(result.cppCode).toContain(
+        "auto callback = [](int x) { return x * 2; };",
+      );
+      expect(result.cppCode).toContain("auto complex = [&](int a, int b)");
     });
 
-    it('should handle C++ template usage', () => {
+    it("should handle C++ template usage", () => {
       const source = `
         PROGRAM Main
           {external
@@ -948,11 +968,13 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('std::vector<int> numbers');
-      expect(result.cppCode).toContain('std::map<std::string, std::vector<int>> data');
+      expect(result.cppCode).toContain("std::vector<int> numbers");
+      expect(result.cppCode).toContain(
+        "std::map<std::string, std::vector<int>> data",
+      );
     });
 
-    it('should handle empty external pragma', () => {
+    it("should handle empty external pragma", () => {
       const source = `
         PROGRAM Main
           {external }
@@ -962,7 +984,7 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should handle preprocessor directives', () => {
+    it("should handle preprocessor directives", () => {
       const source = `
         PROGRAM Main
           {external
@@ -976,11 +998,11 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('#ifdef ARDUINO');
-      expect(result.cppCode).toContain('#endif');
+      expect(result.cppCode).toContain("#ifdef ARDUINO");
+      expect(result.cppCode).toContain("#endif");
     });
 
-    it('should place external code inside run() method', () => {
+    it("should place external code inside run() method", () => {
       const source = `
         PROGRAM TestPlacement
           {external int localVar = 42; }
@@ -989,11 +1011,13 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       const result = compile(source);
       expect(result.success).toBe(true);
       // Verify code appears after run() { and before closing }
-      const runMethodMatch = result.cppCode?.match(/void Program_TESTPLACEMENT::run\(\)\s*\{([^}]*int localVar = 42;[^}]*)\}/);
+      const runMethodMatch = result.cppCode?.match(
+        /void Program_TESTPLACEMENT::run\(\)\s*\{([^}]*int localVar = 42;[^}]*)\}/,
+      );
       expect(runMethodMatch).not.toBeNull();
     });
 
-    it('should handle real-world OpenPLC-style hardware access pattern', () => {
+    it("should handle real-world OpenPLC-style hardware access pattern", () => {
       const source = `
         PROGRAM HardwareControl
           VAR
@@ -1013,14 +1037,14 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       `;
       const result = compile(source);
       expect(result.success).toBe(true);
-      expect(result.cppCode).toContain('analogRead(A0)');
-      expect(result.cppCode).toContain('sensorInput.set(rawValue)');
-      expect(result.cppCode).toContain('motorSpeed.get()');
+      expect(result.cppCode).toContain("analogRead(A0)");
+      expect(result.cppCode).toContain("sensorInput.set(rawValue)");
+      expect(result.cppCode).toContain("motorSpeed.get()");
     });
   });
 
-  describe('error cases', () => {
-    it('should fail to compile with unclosed external pragma', () => {
+  describe("error cases", () => {
+    it("should fail to compile with unclosed external pragma", () => {
       const source = `
         PROGRAM Main
           {external printf("test");
@@ -1031,7 +1055,7 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       expect(result.errors.length).toBeGreaterThan(0);
     });
 
-    it('should fail to compile with unclosed nested braces in external pragma', () => {
+    it("should fail to compile with unclosed nested braces in external pragma", () => {
       const source = `
         PROGRAM Main
           {external if (x) { y = 1; }
@@ -1043,7 +1067,7 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       expect(result.errors.length).toBeGreaterThan(0);
     });
 
-    it('should fail to compile with completely unclosed external pragma', () => {
+    it("should fail to compile with completely unclosed external pragma", () => {
       const source = `
         PROGRAM Main
           {external int x = 0;
@@ -1054,8 +1078,8 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
     });
   });
 
-  describe('AST representation', () => {
-    it('should create ExternalCodePragma AST node', () => {
+  describe("AST representation", () => {
+    it("should create ExternalCodePragma AST node", () => {
       const source = `
         PROGRAM Main
           {external printf("test"); }
@@ -1069,10 +1093,10 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       const program = result.ast?.programs[0];
       expect(program).toBeDefined();
       expect(program?.body).toHaveLength(1);
-      expect(program?.body[0]?.kind).toBe('ExternalCodePragma');
+      expect(program?.body[0]?.kind).toBe("ExternalCodePragma");
     });
 
-    it('should extract code content correctly', () => {
+    it("should extract code content correctly", () => {
       const source = `
         PROGRAM Main
           {external int x = 42; }
@@ -1082,18 +1106,18 @@ describe('External Code Pragma Tests (Phase 2.8)', () => {
       const program = result.ast?.programs[0];
       const pragma = program?.body[0];
 
-      expect(pragma?.kind).toBe('ExternalCodePragma');
-      if (pragma?.kind === 'ExternalCodePragma') {
-        expect(pragma.code).toContain('int x = 42;');
+      expect(pragma?.kind).toBe("ExternalCodePragma");
+      if (pragma?.kind === "ExternalCodePragma") {
+        expect(pragma.code).toContain("int x = 42;");
       }
     });
   });
 });
 
-describe('Future Integration Tests', () => {
+describe("Future Integration Tests", () => {
   // These tests are placeholders for Phase 3+ when the compiler is implemented
 
-  it.skip('should compile a simple program', () => {
+  it.skip("should compile a simple program", () => {
     const source = `
       PROGRAM Main
         VAR counter : INT; END_VAR
@@ -1102,10 +1126,10 @@ describe('Future Integration Tests', () => {
     `;
     const result = compile(source);
     expect(result.success).toBe(true);
-    expect(result.cppCode).toContain('class Program_MAIN');
+    expect(result.cppCode).toContain("class Program_MAIN");
   });
 
-  it.skip('should compile a function', () => {
+  it.skip("should compile a function", () => {
     const source = `
       FUNCTION Add : INT
         VAR_INPUT a, b : INT; END_VAR
@@ -1114,10 +1138,10 @@ describe('Future Integration Tests', () => {
     `;
     const result = compile(source);
     expect(result.success).toBe(true);
-    expect(result.cppCode).toContain('IEC_INT ADD(');
+    expect(result.cppCode).toContain("IEC_INT ADD(");
   });
 
-  it.skip('should compile a function block', () => {
+  it.skip("should compile a function block", () => {
     const source = `
       FUNCTION_BLOCK Counter
         VAR_INPUT enable : BOOL; END_VAR
@@ -1131,10 +1155,10 @@ describe('Future Integration Tests', () => {
     `;
     const result = compile(source);
     expect(result.success).toBe(true);
-    expect(result.cppCode).toContain('class COUNTER');
+    expect(result.cppCode).toContain("class COUNTER");
   });
 
-  it.skip('should generate line mapping', () => {
+  it.skip("should generate line mapping", () => {
     const source = `
       PROGRAM Main
         VAR x : INT; END_VAR
@@ -1147,7 +1171,7 @@ describe('Future Integration Tests', () => {
     expect(result.lineMap.size).toBeGreaterThan(0);
   });
 
-  it.skip('should report syntax errors', () => {
+  it.skip("should report syntax errors", () => {
     const source = `
       PROGRAM Main
         VAR x : ; END_VAR
@@ -1158,7 +1182,7 @@ describe('Future Integration Tests', () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  it.skip('should report type errors', () => {
+  it.skip("should report type errors", () => {
     const source = `
       PROGRAM Main
         VAR x : INT; y : STRING; END_VAR
@@ -1167,6 +1191,6 @@ describe('Future Integration Tests', () => {
     `;
     const result = compile(source);
     expect(result.success).toBe(false);
-    expect(result.errors.some((e) => e.message.includes('type'))).toBe(true);
+    expect(result.errors.some((e) => e.message.includes("type"))).toBe(true);
   });
 });

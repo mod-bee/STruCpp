@@ -25,10 +25,7 @@ const iecStdlib = fs.existsSync(IEC_STDLIB_PATH)
   ? loadStlibFromFile(IEC_STDLIB_PATH)
   : undefined;
 
-const PROJECT_DIR = path.resolve(
-  __dirname,
-  "../fixtures/smart-traffic-light",
-);
+const PROJECT_DIR = path.resolve(__dirname, "../fixtures/smart-traffic-light");
 const SRC_DIR = path.join(PROJECT_DIR, "src");
 const TEST_DIR = path.join(PROJECT_DIR, "tests");
 
@@ -88,9 +85,7 @@ describe.skipIf(!hasGpp)("smart-traffic-light project", () => {
       // exitCode 0 only when every assertion passed; the summary line confirms
       // every test ran (passed count == total) and none failed.
       expect(stdout).not.toContain("[FAIL]");
-      const summary = stdout.match(
-        /(\d+) tests?, (\d+) passed, (\d+) failed/,
-      );
+      const summary = stdout.match(/(\d+) tests?, (\d+) passed, (\d+) failed/);
       expect(summary, `no summary line in:\n${stdout}`).not.toBeNull();
       const [, total, passed, failed] = summary!;
       expect(Number(total)).toBeGreaterThan(0);

@@ -156,7 +156,9 @@ END_FUNCTION
     );
     expect(lib.errors).toEqual([]);
     const archive = JSON.parse(JSON.stringify(lib.archive)) as StlibArchive;
-    const entry = archive.manifest.types.find((t) => t.name === "ST_LIBDERIVED");
+    const entry = archive.manifest.types.find(
+      (t) => t.name === "ST_LIBDERIVED",
+    );
     expect(entry?.extends).toBe("ST_BASE");
     expect(entry?.fields?.map((f) => f.name)).toEqual(["NMODE", "NEXTRA"]);
     const { stdout, exitCode } = runE2ETestPipeline({

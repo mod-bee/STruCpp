@@ -6,13 +6,13 @@
  * Requires g++ with C++17 support and a C compiler (cc).
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { compile } from '../../src/index.js';
-import { generateReplMain } from '../../src/backend/repl-main-gen.js';
-import { execSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { compile } from "../../src/index.js";
+import { generateReplMain } from "../../src/backend/repl-main-gen.js";
+import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import {
   hasGpp,
   hasCc,
@@ -22,17 +22,17 @@ import {
   REPL_PATH,
   cxxEnv,
   CXX_STD,
-} from './test-helpers.js';
+} from "./test-helpers.js";
 
 const describeIfCompilers = hasGpp && hasCc ? describe : describe.skip;
 
-describeIfCompilers('REPL Runner Integration Tests', () => {
+describeIfCompilers("REPL Runner Integration Tests", () => {
   let tempDir: string;
   let pchPath: string;
   let isoclineObj: string;
 
   beforeAll(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'strucpp-repl-test-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-repl-test-"));
     pchPath = createPCH(tempDir);
     isoclineObj = precompileIsocline(tempDir);
   });
@@ -48,12 +48,14 @@ describeIfCompilers('REPL Runner Integration Tests', () => {
     replCommands: string,
     testName: string,
   ): string {
-    const result = compile(stSource, { headerFileName: 'generated.hpp' });
+    const result = compile(stSource, { headerFileName: "generated.hpp" });
     if (!result.success) {
-      throw new Error(`Compilation failed: ${result.errors.map(e => e.message).join(', ')}`);
+      throw new Error(
+        `Compilation failed: ${result.errors.map((e) => e.message).join(", ")}`,
+      );
     }
 
-    const headerPath = path.join(tempDir, 'generated.hpp');
+    const headerPath = path.join(tempDir, "generated.hpp");
     const cppPath = path.join(tempDir, `${testName}.cpp`);
     const mainPath = path.join(tempDir, `${testName}_main.cpp`);
     const binPath = path.join(tempDir, testName);
@@ -62,7 +64,7 @@ describeIfCompilers('REPL Runner Integration Tests', () => {
     fs.writeFileSync(cppPath, result.cppCode);
 
     const mainCpp = generateReplMain(result.ast!, result.projectModel!, {
-      headerFileName: 'generated.hpp',
+      headerFileName: "generated.hpp",
       stSource,
       cppCode: result.cppCode,
       headerCode: result.headerCode,
@@ -74,45 +76,49 @@ describeIfCompilers('REPL Runner Integration Tests', () => {
     // Compile C++ and link with pre-compiled isocline.o + PCH
     execSync(
       `g++ -std=${CXX_STD} -include "${pchPath}" -I"${RUNTIME_INCLUDE_PATH}" -I"${REPL_PATH}" -I"${tempDir}" "${mainPath}" "${cppPath}" "${isoclineObj}" -o "${binPath}" 2>&1`,
-      { encoding: 'utf-8', env: cxxEnv },
+      { encoding: "utf-8", env: cxxEnv },
     );
 
     // Run with piped commands
-    const output = execSync(
-      `echo "${replCommands}" | "${binPath}"`,
-      { encoding: 'utf-8', timeout: 10000 },
-    );
+    const output = execSync(`echo "${replCommands}" | "${binPath}"`, {
+      encoding: "utf-8",
+      timeout: 10000,
+    });
 
     return output;
   }
 
-  it('should compile and run a simple counter program', () => {
+  it("should compile and run a simple counter program", () => {
     const source = `
       PROGRAM Counter
         VAR count : INT; END_VAR
         count := count + 1;
       END_PROGRAM
     `;
-    const output = buildAndRun(source, 'programs\nquit', 'counter');
-    expect(output).toContain('STruC++ Interactive PLC Test REPL');
-    expect(output).toContain('COUNTER');
+    const output = buildAndRun(source, "programs\nquit", "counter");
+    expect(output).toContain("STruC++ Interactive PLC Test REPL");
+    expect(output).toContain("COUNTER");
   });
 
-  it('should execute cycles and show updated values', () => {
+  it("should execute cycles and show updated values", () => {
     const source = `
       PROGRAM Counter
         VAR count : INT; END_VAR
         count := count + 1;
       END_PROGRAM
     `;
-    const output = buildAndRun(source, 'run 3\nvars COUNTER\nquit', 'counter_run');
-    expect(output).toContain('Executed 3 cycle(s)');
-    expect(output).toContain('COUNTER.COUNT');
-    expect(output).toContain('INT');
-    expect(output).toContain('3');
+    const output = buildAndRun(
+      source,
+      "run 3\nvars COUNTER\nquit",
+      "counter_run",
+    );
+    expect(output).toContain("Executed 3 cycle(s)");
+    expect(output).toContain("COUNTER.COUNT");
+    expect(output).toContain("INT");
+    expect(output).toContain("3");
   });
 
-  it('should get and set variables', () => {
+  it("should get and set variables", () => {
     const source = `
       PROGRAM Test
         VAR x : INT; y : BOOL; END_VAR
@@ -120,20 +126,20 @@ describeIfCompilers('REPL Runner Integration Tests', () => {
       END_PROGRAM
     `;
     const commands = [
-      'set TEST.X 42',
-      'get TEST.X',
-      'set TEST.Y TRUE',
-      'get TEST.Y',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'get_set');
-    expect(output).toContain('TEST.X');
-    expect(output).toContain('42');
-    expect(output).toContain('TEST.Y');
-    expect(output).toContain('TRUE');
+      "set TEST.X 42",
+      "get TEST.X",
+      "set TEST.Y TRUE",
+      "get TEST.Y",
+      "quit",
+    ].join("\n");
+    const output = buildAndRun(source, commands, "get_set");
+    expect(output).toContain("TEST.X");
+    expect(output).toContain("42");
+    expect(output).toContain("TEST.Y");
+    expect(output).toContain("TRUE");
   });
 
-  it('should force and unforce variables', () => {
+  it("should force and unforce variables", () => {
     const source = `
       PROGRAM Test
         VAR counter : INT; END_VAR
@@ -141,21 +147,21 @@ describeIfCompilers('REPL Runner Integration Tests', () => {
       END_PROGRAM
     `;
     const commands = [
-      'force TEST.COUNTER 100',
-      'run 5',
-      'get TEST.COUNTER',
-      'unforce TEST.COUNTER',
-      'run 1',
-      'get TEST.COUNTER',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'force');
-    expect(output).toContain('FORCED');
-    expect(output).toContain('100');
-    expect(output).toContain('unforced');
+      "force TEST.COUNTER 100",
+      "run 5",
+      "get TEST.COUNTER",
+      "unforce TEST.COUNTER",
+      "run 1",
+      "get TEST.COUNTER",
+      "quit",
+    ].join("\n");
+    const output = buildAndRun(source, commands, "force");
+    expect(output).toContain("FORCED");
+    expect(output).toContain("100");
+    expect(output).toContain("unforced");
   });
 
-  it('should handle multiple programs', () => {
+  it("should handle multiple programs", () => {
     const source = `
       PROGRAM Prog1
         VAR a : INT; END_VAR
@@ -167,113 +173,93 @@ describeIfCompilers('REPL Runner Integration Tests', () => {
         b := b + 10;
       END_PROGRAM
     `;
-    const commands = [
-      'programs',
-      'run 2',
-      'vars',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'multi');
-    expect(output).toContain('PROG1');
-    expect(output).toContain('PROG2');
-    expect(output).toContain('2');
-    expect(output).toContain('20');
+    const commands = ["programs", "run 2", "vars", "quit"].join("\n");
+    const output = buildAndRun(source, commands, "multi");
+    expect(output).toContain("PROG1");
+    expect(output).toContain("PROG2");
+    expect(output).toContain("2");
+    expect(output).toContain("20");
   });
 
-  it('should show help text', () => {
+  it("should show help text", () => {
     const source = `
       PROGRAM Test
         VAR x : INT; END_VAR
         x := 1;
       END_PROGRAM
     `;
-    const output = buildAndRun(source, 'help\nquit', 'help');
-    expect(output).toContain('Commands');
-    expect(output).toContain('run');
-    expect(output).toContain('vars');
-    expect(output).toContain('get');
-    expect(output).toContain('set');
-    expect(output).toContain('force');
-    expect(output).toContain('unforce');
-    expect(output).toContain('quit');
+    const output = buildAndRun(source, "help\nquit", "help");
+    expect(output).toContain("Commands");
+    expect(output).toContain("run");
+    expect(output).toContain("vars");
+    expect(output).toContain("get");
+    expect(output).toContain("set");
+    expect(output).toContain("force");
+    expect(output).toContain("unforce");
+    expect(output).toContain("quit");
   });
 
-  it('should handle REAL type variables', () => {
+  it("should handle REAL type variables", () => {
     const source = `
       PROGRAM Test
         VAR x : REAL; END_VAR
         x := x + 1.5;
       END_PROGRAM
     `;
-    const commands = [
-      'set TEST.X 3.14',
-      'get TEST.X',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'real_type');
-    expect(output).toContain('REAL');
-    expect(output).toContain('3.14');
+    const commands = ["set TEST.X 3.14", "get TEST.X", "quit"].join("\n");
+    const output = buildAndRun(source, commands, "real_type");
+    expect(output).toContain("REAL");
+    expect(output).toContain("3.14");
   });
 
-  it('should show source line count in welcome banner', () => {
+  it("should show source line count in welcome banner", () => {
     const source = `
       PROGRAM Counter
         VAR count : INT; END_VAR
         count := count + 1;
       END_PROGRAM
     `;
-    const output = buildAndRun(source, 'quit', 'source_banner');
-    expect(output).toContain('lines loaded');
+    const output = buildAndRun(source, "quit", "source_banner");
+    expect(output).toContain("lines loaded");
   });
 
-  it('should execute step command as alias for run 1', () => {
+  it("should execute step command as alias for run 1", () => {
     const source = `
       PROGRAM Counter
         VAR count : INT; END_VAR
         count := count + 1;
       END_PROGRAM
     `;
-    const commands = [
-      'step',
-      'step',
-      'get COUNTER.COUNT',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'step_cmd');
-    expect(output).toContain('Executed 1 cycle(s)');
-    expect(output).toContain('2');
+    const commands = ["step", "step", "get COUNTER.COUNT", "quit"].join("\n");
+    const output = buildAndRun(source, commands, "step_cmd");
+    expect(output).toContain("Executed 1 cycle(s)");
+    expect(output).toContain("2");
   });
 
-  it('should display source code with code command', () => {
+  it("should display source code with code command", () => {
     const source = `PROGRAM Counter
   VAR count : INT; END_VAR
   count := count + 1;
 END_PROGRAM`;
-    const commands = [
-      'code',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'code_cmd');
-    expect(output).toContain('PROGRAM Counter');
-    expect(output).toContain('count := count + 1');
+    const commands = ["code", "quit"].join("\n");
+    const output = buildAndRun(source, commands, "code_cmd");
+    expect(output).toContain("PROGRAM Counter");
+    expect(output).toContain("count := count + 1");
     // Should have line numbers
     expect(output).toMatch(/\d+ \|/);
   });
 
-  it('should display code around a specific line', () => {
+  it("should display code around a specific line", () => {
     const source = `PROGRAM Counter
   VAR count : INT; END_VAR
   count := count + 1;
 END_PROGRAM`;
-    const commands = [
-      'code 2',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'code_line');
-    expect(output).toContain('VAR count');
+    const commands = ["code 2", "quit"].join("\n");
+    const output = buildAndRun(source, commands, "code_line");
+    expect(output).toContain("VAR count");
   });
 
-  it('should add and display watched variables', () => {
+  it("should add and display watched variables", () => {
     const source = `
       PROGRAM Counter
         VAR count : INT; END_VAR
@@ -281,19 +267,19 @@ END_PROGRAM`;
       END_PROGRAM
     `;
     const commands = [
-      'watch COUNTER.COUNT',
-      'run 3',
-      'watch list',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'watch_cmd');
-    expect(output).toContain('Watching:');
-    expect(output).toContain('--- watch ---');
-    expect(output).toContain('COUNTER.COUNT');
-    expect(output).toContain('3');
+      "watch COUNTER.COUNT",
+      "run 3",
+      "watch list",
+      "quit",
+    ].join("\n");
+    const output = buildAndRun(source, commands, "watch_cmd");
+    expect(output).toContain("Watching:");
+    expect(output).toContain("--- watch ---");
+    expect(output).toContain("COUNTER.COUNT");
+    expect(output).toContain("3");
   });
 
-  it('should clear watch list', () => {
+  it("should clear watch list", () => {
     const source = `
       PROGRAM Counter
         VAR count : INT; END_VAR
@@ -301,85 +287,75 @@ END_PROGRAM`;
       END_PROGRAM
     `;
     const commands = [
-      'watch COUNTER.COUNT',
-      'watch clear',
-      'watch list',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'watch_clear');
-    expect(output).toContain('Watch list cleared');
-    expect(output).toContain('Watch list is empty');
+      "watch COUNTER.COUNT",
+      "watch clear",
+      "watch list",
+      "quit",
+    ].join("\n");
+    const output = buildAndRun(source, commands, "watch_clear");
+    expect(output).toContain("Watch list cleared");
+    expect(output).toContain("Watch list is empty");
   });
 
-  it('should show dashboard with variables and source', () => {
+  it("should show dashboard with variables and source", () => {
     const source = `PROGRAM Counter
   VAR count : INT; END_VAR
   count := count + 1;
 END_PROGRAM`;
-    const commands = [
-      'run 5',
-      'dashboard',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'dashboard_cmd');
-    expect(output).toContain('Dashboard');
-    expect(output).toContain('Cycle: 5');
-    expect(output).toContain('Variables');
-    expect(output).toContain('COUNTER.COUNT');
-    expect(output).toContain('Source');
-    expect(output).toContain('PROGRAM Counter');
+    const commands = ["run 5", "dashboard", "quit"].join("\n");
+    const output = buildAndRun(source, commands, "dashboard_cmd");
+    expect(output).toContain("Dashboard");
+    expect(output).toContain("Cycle: 5");
+    expect(output).toContain("Variables");
+    expect(output).toContain("COUNTER.COUNT");
+    expect(output).toContain("Source");
+    expect(output).toContain("PROGRAM Counter");
   });
 
-  it('should show step and code in help text', () => {
+  it("should show step and code in help text", () => {
     const source = `
       PROGRAM Test
         VAR x : INT; END_VAR
         x := 1;
       END_PROGRAM
     `;
-    const output = buildAndRun(source, 'help\nquit', 'help_new');
-    expect(output).toContain('step');
-    expect(output).toContain('code');
-    expect(output).toContain('watch');
-    expect(output).toContain('dashboard');
+    const output = buildAndRun(source, "help\nquit", "help_new");
+    expect(output).toContain("step");
+    expect(output).toContain("code");
+    expect(output).toContain("watch");
+    expect(output).toContain("dashboard");
   });
 
-  it('should display side-by-side ST and C++ code', () => {
+  it("should display side-by-side ST and C++ code", () => {
     const source = `PROGRAM Counter
   VAR count : INT; END_VAR
   count := count + 1;
 END_PROGRAM`;
-    const commands = [
-      'code',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'code_sbs');
+    const commands = ["code", "quit"].join("\n");
+    const output = buildAndRun(source, commands, "code_sbs");
     // Should have both ST and C++ headers
-    expect(output).toContain('ST');
-    expect(output).toContain('C++');
+    expect(output).toContain("ST");
+    expect(output).toContain("C++");
     // Should show ST source
-    expect(output).toContain('PROGRAM Counter');
+    expect(output).toContain("PROGRAM Counter");
     // Should show C++ generated code (run method)
-    expect(output).toContain('Program_COUNTER');
+    expect(output).toContain("Program_COUNTER");
     // Should have separator
-    expect(output).toContain('|');
+    expect(output).toContain("|");
   });
 
-  it('should show C++ line numbers in side-by-side display', () => {
+  it("should show C++ line numbers in side-by-side display", () => {
     const source = `PROGRAM Counter
   VAR count : INT; END_VAR
   count := count + 1;
 END_PROGRAM`;
-    const commands = [
-      'code',
-      'quit',
-    ].join('\n');
-    const output = buildAndRun(source, commands, 'code_sbs_nums');
+    const commands = ["code", "quit"].join("\n");
+    const output = buildAndRun(source, commands, "code_sbs_nums");
     // C++ side should show class definition alongside PROGRAM/VAR
-    expect(output).toContain('class Program_COUNTER');
-    expect(output).toContain('IEC_INT COUNT');
+    expect(output).toContain("class Program_COUNTER");
+    expect(output).toContain("IEC_INT COUNT");
     // C++ side should also show statement code
-    expect(output).toContain('COUNT = COUNT + 1');
+    expect(output).toContain("COUNT = COUNT + 1");
   });
 
   /**
@@ -393,7 +369,7 @@ END_PROGRAM`;
    * Building and running is the assertion — nothing else in the pipeline links
    * the REPL harness against the generated header.
    */
-  it('builds and runs with members named after their own type', () => {
+  it("builds and runs with members named after their own type", () => {
     const source = `
 FUNCTION_BLOCK Motor
 VAR_INPUT run : BOOL; END_VAR
@@ -426,12 +402,12 @@ END_VAR
 END_PROGRAM`;
     const output = buildAndRun(
       source,
-      ['run 3', 'get MAIN.COUNTER', 'get MAIN.BITS', 'quit'].join('\n'),
-      'member_mangling',
+      ["run 3", "get MAIN.COUNTER", "get MAIN.BITS", "quit"].join("\n"),
+      "member_mangling",
     );
     // The mangled composites and the scalars are exposed under the names the
     // user wrote (an elementary type name is a keyword, IEC 61131-3 6.1.3).
-    expect(output).toContain('MAIN.COUNTER : INT = 3');
-    expect(output).toContain('MAIN.BITS : WORD = 16#0007');
+    expect(output).toContain("MAIN.COUNTER : INT = 3");
+    expect(output).toContain("MAIN.BITS : WORD = 16#0007");
   });
 });

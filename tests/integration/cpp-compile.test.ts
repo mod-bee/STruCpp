@@ -6,28 +6,28 @@
  * syntactically correct and links properly with the runtime library.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execSync } from 'child_process';
-import { compile } from '../../src/index.js';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { execSync } from "child_process";
+import { compile } from "../../src/index.js";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import {
   hasGpp,
   createPCH,
   compileWithGpp as compileWithGppHelper,
   compileAndRunStandalone as compileAndRunHelper,
   CXX_STD,
-} from './test-helpers.js';
+} from "./test-helpers.js";
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
-describeIfGpp('C++ Compilation Tests', () => {
+describeIfGpp("C++ Compilation Tests", () => {
   let tempDir: string;
   let pchPath: string;
 
   beforeAll(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'strucpp-test-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-test-"));
     pchPath = createPCH(tempDir);
   });
 
@@ -42,13 +42,19 @@ describeIfGpp('C++ Compilation Tests', () => {
     cppCode: string,
     testName: string,
   ): { success: boolean; error?: string } {
-    return compileWithGppHelper({ tempDir, pchPath, headerCode, cppCode, testName });
+    return compileWithGppHelper({
+      tempDir,
+      pchPath,
+      headerCode,
+      cppCode,
+      testName,
+    });
   }
 
   // Basic program, variable, FB, and function compilation tests removed —
   // covered by st-validation behavioral tests.
 
-  it('should compile ST identifiers that platform headers #define as macros', () => {
+  it("should compile ST identifiers that platform headers #define as macros", () => {
     // <Arduino.h> on ESP32 defines PI, HIGH, ANALOG …, and the Xtensa headers
     // register names such as WINDOWSTART, all as plain macros. A TU that
     // includes them before generated.hpp (a C/C++ block, the Arduino glue)
@@ -77,11 +83,11 @@ describeIfGpp('C++ Compilation Tests', () => {
     expect(result.headerCode).toContain('#pragma pop_macro("PI")');
 
     const arduinoMacros = [
-      '-DPI=3.1415926535897932384626433832795',
-      '-DHIGH=0x1',
-      '-DINPUT=0x01',
-      '-DANALOG=0xC0',
-      '-DWINDOWSTART=73',
+      "-DPI=3.1415926535897932384626433832795",
+      "-DHIGH=0x1",
+      "-DINPUT=0x01",
+      "-DANALOG=0xC0",
+      "-DWINDOWSTART=73",
     ];
     // The generated code itself, with the macros defined from the start.
     const generated = compileWithGppHelper({
@@ -89,10 +95,10 @@ describeIfGpp('C++ Compilation Tests', () => {
       pchPath,
       headerCode: result.headerCode,
       cppCode: result.cppCode,
-      testName: 'arduino_macro_guard',
+      testName: "arduino_macro_guard",
       extraFlags: arduinoMacros,
     });
-    expect(generated.error ?? '').toBe('');
+    expect(generated.error ?? "").toBe("");
     expect(generated.success).toBe(true);
 
     // A C/C++ block's TU: includes the header, then uses the Arduino macros.
@@ -101,16 +107,16 @@ describeIfGpp('C++ Compilation Tests', () => {
       pchPath,
       headerCode: result.headerCode,
       cppCode: '#include "generated.hpp"',
-      testName: 'arduino_macro_guard_block',
+      testName: "arduino_macro_guard_block",
       extraFlags: arduinoMacros,
       mainCode:
         'static_assert(PI > 3.0 && HIGH == 1 && ANALOG == 0xC0 && WINDOWSTART == 73, "macros restored");\nint main() { return 0; }',
     });
-    expect(block.error ?? '').toBe('');
+    expect(block.error ?? "").toBe("");
     expect(block.success).toBe(true);
   });
 
-  it('should compile a configuration with resource and task', () => {
+  it("should compile a configuration with resource and task", () => {
     const source = `
       CONFIGURATION TestConfig
         RESOURCE TestResource ON PLC
@@ -126,11 +132,15 @@ describeIfGpp('C++ Compilation Tests', () => {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'config_resource');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "config_resource",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile a program with VAR_GLOBAL and VAR_EXTERNAL', () => {
+  it("should compile a program with VAR_GLOBAL and VAR_EXTERNAL", () => {
     const source = `
       CONFIGURATION GlobalConfig
         VAR_GLOBAL
@@ -151,11 +161,15 @@ describeIfGpp('C++ Compilation Tests', () => {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'global_external');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "global_external",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('compiles composite/array shared-global access (with_lock) — threaded and non-threaded', () => {
+  it("compiles composite/array shared-global access (with_lock) — threaded and non-threaded", () => {
     // A struct + array-of-struct global exercised via field/bit/element/FB-inout
     // access, all routed through GlobalVar::with_lock. Must compile both with the
     // per-global mutex active (-DSTRUCPP_THREADED) and with it compiled out.
@@ -191,32 +205,38 @@ describeIfGpp('C++ Compilation Tests', () => {
     `;
     const result = compile(source);
     expect(result.success).toBe(true);
-    expect(result.cppCode).toContain('->with_lock(');
+    expect(result.cppCode).toContain("->with_lock(");
 
-    const runtimeInclude = path.resolve(__dirname, '../../src/runtime/include');
-    const hpp = path.join(tempDir, 'generated.hpp');
-    const cpp = path.join(tempDir, 'composite_global.cpp');
+    const runtimeInclude = path.resolve(__dirname, "../../src/runtime/include");
+    const hpp = path.join(tempDir, "generated.hpp");
+    const cpp = path.join(tempDir, "composite_global.cpp");
     fs.writeFileSync(hpp, result.headerCode);
     fs.writeFileSync(cpp, `${result.cppCode}\n\nint main(){ return 0; }\n`);
 
     for (const threaded of [false, true]) {
-      const flag = threaded ? '-DSTRUCPP_THREADED' : '';
+      const flag = threaded ? "-DSTRUCPP_THREADED" : "";
       const out = path.join(tempDir, `composite_global_${threaded}.out`);
       let ok = true;
-      let diag = '';
+      let diag = "";
       try {
-        execSync(`g++ -std=${CXX_STD} ${flag} -I"${runtimeInclude}" "${cpp}" -o "${out}"`, {
-          stdio: 'pipe',
-        });
+        execSync(
+          `g++ -std=${CXX_STD} ${flag} -I"${runtimeInclude}" "${cpp}" -o "${out}"`,
+          {
+            stdio: "pipe",
+          },
+        );
       } catch (e) {
         ok = false;
         diag = (e as { stderr?: Buffer }).stderr?.toString() ?? String(e);
       }
-      expect(ok, `g++ ${threaded ? 'threaded' : 'non-threaded'} failed:\n${diag}`).toBe(true);
+      expect(
+        ok,
+        `g++ ${threaded ? "threaded" : "non-threaded"} failed:\n${diag}`,
+      ).toBe(true);
     }
   });
 
-  it('a function block VAR_EXTERNAL touches the SHARED global, not a local copy (threaded + non-threaded)', () => {
+  it("a function block VAR_EXTERNAL touches the SHARED global, not a local copy (threaded + non-threaded)", () => {
     // Regression: an FB's VAR_EXTERNAL used to compile to a plain member (a
     // private copy the FB mutated in isolation). It must instead be a
     // GlobalVar<V>* bound to the file-scope canonical, so the FB and everyone
@@ -242,19 +262,19 @@ describeIfGpp('C++ Compilation Tests', () => {
     const result = compile(source);
     expect(result.success).toBe(true);
     // File-scope canonical + FB pointer member bound to it + pointer access.
-    expect(result.headerCode).toContain('extern GlobalVar<IEC_INT> COUNTER;');
-    expect(result.headerCode).toContain('GlobalVar<IEC_INT>* COUNTER');
-    expect(result.cppCode).toContain('COUNTER(&');
+    expect(result.headerCode).toContain("extern GlobalVar<IEC_INT> COUNTER;");
+    expect(result.headerCode).toContain("GlobalVar<IEC_INT>* COUNTER");
+    expect(result.cppCode).toContain("COUNTER(&");
     // `counter := counter + 1` is one locked read-modify-write.
     expect(result.cppCode).toContain(
-      'COUNTER->with_lock([&](auto* __glk){ (*__glk) = (*__glk) + 1; });',
+      "COUNTER->with_lock([&](auto* __glk){ (*__glk) = (*__glk) + 1; });",
     );
     // The old bug: a plain value member on the FB. Must NOT appear.
-    expect(result.headerCode).not.toContain('    IEC_INT COUNTER;');
+    expect(result.headerCode).not.toContain("    IEC_INT COUNTER;");
 
-    const runtimeInclude = path.resolve(__dirname, '../../src/runtime/include');
-    const hpp = path.join(tempDir, 'generated.hpp');
-    const cpp = path.join(tempDir, 'fb_external.cpp');
+    const runtimeInclude = path.resolve(__dirname, "../../src/runtime/include");
+    const hpp = path.join(tempDir, "generated.hpp");
+    const cpp = path.join(tempDir, "fb_external.cpp");
     fs.writeFileSync(hpp, result.headerCode);
     fs.writeFileSync(
       cpp,
@@ -262,22 +282,28 @@ describeIfGpp('C++ Compilation Tests', () => {
     );
 
     for (const threaded of [false, true]) {
-      const flag = threaded ? '-DSTRUCPP_THREADED' : '';
+      const flag = threaded ? "-DSTRUCPP_THREADED" : "";
       const out = path.join(tempDir, `fb_external_${threaded}.out`);
       let ok = true;
-      let diag = '';
+      let diag = "";
       try {
-        execSync(`g++ -std=${CXX_STD} ${flag} -I"${runtimeInclude}" "${cpp}" -o "${out}"`, { stdio: 'pipe' });
-        execSync(`"${out}"`, { stdio: 'pipe' }); // exit 0 ⇒ shared COUNTER == 2
+        execSync(
+          `g++ -std=${CXX_STD} ${flag} -I"${runtimeInclude}" "${cpp}" -o "${out}"`,
+          { stdio: "pipe" },
+        );
+        execSync(`"${out}"`, { stdio: "pipe" }); // exit 0 ⇒ shared COUNTER == 2
       } catch (e) {
         ok = false;
         diag = (e as { stderr?: Buffer }).stderr?.toString() ?? String(e);
       }
-      expect(ok, `g++/run ${threaded ? 'threaded' : 'non-threaded'} failed:\n${diag}`).toBe(true);
+      expect(
+        ok,
+        `g++/run ${threaded ? "threaded" : "non-threaded"} failed:\n${diag}`,
+      ).toBe(true);
     }
   });
 
-  it('takes the global locks and IEC time from the platform (STRUCPP_PLATFORM_THREADS)', () => {
+  it("takes the global locks and IEC time from the platform (STRUCPP_PLATFORM_THREADS)", () => {
     // A firmware whose toolchain has no <mutex> or real thread_local (the ARM
     // Arduino cores) supplies both through four C functions. Host stand-ins
     // here: a recursive mutex per global, and one time slot.
@@ -302,9 +328,9 @@ describeIfGpp('C++ Compilation Tests', () => {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const runtimeInclude = path.resolve(__dirname, '../../src/runtime/include');
-    fs.writeFileSync(path.join(tempDir, 'generated.hpp'), result.headerCode);
-    const cpp = path.join(tempDir, 'platform_threads.cpp');
+    const runtimeInclude = path.resolve(__dirname, "../../src/runtime/include");
+    fs.writeFileSync(path.join(tempDir, "generated.hpp"), result.headerCode);
+    const cpp = path.join(tempDir, "platform_threads.cpp");
     fs.writeFileSync(
       cpp,
       `${result.cppCode}
@@ -327,15 +353,15 @@ int main() {
 }
 `,
     );
-    const out = path.join(tempDir, 'platform_threads.out');
+    const out = path.join(tempDir, "platform_threads.out");
     let ok = true;
-    let diag = '';
+    let diag = "";
     try {
       execSync(
         `g++ -std=c++17 -DSTRUCPP_THREADED -DSTRUCPP_PLATFORM_THREADS -I"${runtimeInclude}" "${cpp}" -o "${out}"`,
-        { stdio: 'pipe' },
+        { stdio: "pipe" },
       );
-      execSync(`"${out}"`, { stdio: 'pipe' });
+      execSync(`"${out}"`, { stdio: "pipe" });
     } catch (e) {
       ok = false;
       diag = (e as { stderr?: Buffer }).stderr?.toString() ?? String(e);
@@ -343,7 +369,7 @@ int main() {
     expect(ok, `g++/run with platform threads failed:\n${diag}`).toBe(true);
   });
 
-  it('compiles `=>` FB-output capture into a scalar shared global (SoftMotion bridge pattern)', () => {
+  it("compiles `=>` FB-output capture into a scalar shared global (SoftMotion bridge pattern)", () => {
     // Regression: capturing an FB output via `=>` into a VAR_EXTERNAL scalar used
     // to emit `g->read() = value;` — `read()` returns by value (an rvalue), so
     // g++ failed with "lvalue required as left operand of assignment". The write
@@ -372,16 +398,20 @@ int main() {
     expect(result.success).toBe(true);
     // The capture must route through the pointer's write(), never `->read() =`.
     // (Codegen upper-cases IEC identifiers.)
-    expect(result.cppCode).toContain('TARGETVEL->write(');
+    expect(result.cppCode).toContain("TARGETVEL->write(");
     expect(result.cppCode).not.toMatch(/TARGETVEL->read\(\)\s*=/);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'output_capture_scalar_external');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "output_capture_scalar_external",
+    );
     expect(cppResult.success).toBe(true);
   });
 
   // "multiple programs" test removed — covered by st-validation/programs/multi_program.
 
-  it('should compile a program with time literal intervals', () => {
+  it("should compile a program with time literal intervals", () => {
     const source = `
       CONFIGURATION TimerConfig
         RESOURCE TimerResource ON PLC
@@ -403,7 +433,11 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'time_intervals');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "time_intervals",
+    );
     expect(cppResult.success).toBe(true);
   });
 
@@ -423,7 +457,7 @@ int main() {
    * See https://github.com/Autonomy-Logic/STruCpp/pull/<TBD> for the
    * full diagnosis.
    */
-  it('compiles IEC TIME / DATE / DT / TOD standard arithmetic (regression)', () => {
+  it("compiles IEC TIME / DATE / DT / TOD standard arithmetic (regression)", () => {
     const source = `
       FUNCTION_BLOCK Scheduler
         VAR_INPUT
@@ -473,7 +507,11 @@ int main() {
     // C++ compiles — not that the include list changed shape.
     expect(result.headerCode).toContain('#include "iec_std_lib.hpp"');
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'iec_time_date_dt_tod_arith');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "iec_time_date_dt_tod_arith",
+    );
     expect(cppResult.success).toBe(true);
     if (!cppResult.success) {
       // Surface the g++ diagnostic so the failure mode is obvious if
@@ -485,7 +523,7 @@ int main() {
   // UDT syntax-only tests (struct, enum, array, multi-dim) removed —
   // covered by st-validation/data_types/ behavioral tests.
 
-  it('should compile a non-zero-based array type (ARRAY[3..7])', () => {
+  it("should compile a non-zero-based array type (ARRAY[3..7])", () => {
     const source = `
       TYPE
         OffsetArray : ARRAY[3..7] OF INT;
@@ -499,13 +537,17 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify the generated code uses Array1D with correct bounds
-    expect(result.headerCode).toContain('Array1D<IEC_INT, 3, 7>');
+    expect(result.headerCode).toContain("Array1D<IEC_INT, 3, 7>");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'offset_array');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "offset_array",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile a 1-based array type (IEC convention)', () => {
+  it("should compile a 1-based array type (IEC convention)", () => {
     const source = `
       TYPE
         OneBasedArray : ARRAY[1..10] OF REAL;
@@ -519,13 +561,17 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify the generated code uses Array1D with 1-based bounds
-    expect(result.headerCode).toContain('Array1D<IEC_REAL, 1, 10>');
+    expect(result.headerCode).toContain("Array1D<IEC_REAL, 1, 10>");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'one_based_array');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "one_based_array",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile a multi-dimensional non-zero-based array', () => {
+  it("should compile a multi-dimensional non-zero-based array", () => {
     const source = `
       TYPE
         OffsetMatrix : ARRAY[1..3, 5..8] OF DINT;
@@ -539,13 +585,17 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify the generated code uses Array2D with correct bounds
-    expect(result.headerCode).toContain('Array2D<IEC_DINT, 1, 3, 5, 8>');
+    expect(result.headerCode).toContain("Array2D<IEC_DINT, 1, 3, 5, 8>");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'offset_matrix');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "offset_matrix",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile a 3D non-zero-based array', () => {
+  it("should compile a 3D non-zero-based array", () => {
     const source = `
       TYPE
         Cube3D : ARRAY[1..2, 3..5, 10..12] OF SINT;
@@ -559,13 +609,19 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify the generated code uses Array3D with correct bounds
-    expect(result.headerCode).toContain('Array3D<IEC_SINT, 1, 2, 3, 5, 10, 12>');
+    expect(result.headerCode).toContain(
+      "Array3D<IEC_SINT, 1, 2, 3, 5, 10, 12>",
+    );
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'cube_3d');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "cube_3d",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile 2D array element access with subscripts', () => {
+  it("should compile 2D array element access with subscripts", () => {
     const source = `
       TYPE
         Matrix3x3 : ARRAY[0..2, 0..2] OF REAL;
@@ -586,17 +642,21 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify 2D access uses operator() syntax, not chained brackets
-    expect(result.cppCode).toContain('M.at(0, 0)');
-    expect(result.cppCode).toContain('M.at(1, 2)');
-    expect(result.cppCode).toContain('M.at(I, J)');
+    expect(result.cppCode).toContain("M.at(0, 0)");
+    expect(result.cppCode).toContain("M.at(1, 2)");
+    expect(result.cppCode).toContain("M.at(I, J)");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'array_2d_access');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "array_2d_access",
+    );
     expect(cppResult.success).toBe(true);
   });
 
   // "2D array access in a loop" removed — covered by st-validation/data_types/multidim_arrays.
 
-  it('should compile mixed 1D bracket and 2D call-syntax access', () => {
+  it("should compile mixed 1D bracket and 2D call-syntax access", () => {
     const source = `
       TYPE
         Row5 : ARRAY[1..5] OF INT;
@@ -621,11 +681,15 @@ int main() {
     expect(result.success).toBe(true);
 
     // 1D uses brackets, 2D uses parenthesized call syntax
-    expect(result.cppCode).toContain('ROW.at(1)');
-    expect(result.cppCode).toContain('GRID.at(1, 1)');
-    expect(result.cppCode).toContain('GRID.at(I, I)');
+    expect(result.cppCode).toContain("ROW.at(1)");
+    expect(result.cppCode).toContain("GRID.at(1, 1)");
+    expect(result.cppCode).toContain("GRID.at(I, I)");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'mixed_1d_2d_access');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "mixed_1d_2d_access",
+    );
     expect(cppResult.success).toBe(true);
   });
 
@@ -636,7 +700,7 @@ int main() {
   // Function VAR_OUTPUT Call-Site Tests (Phase 4.3)
   // =============================================================================
 
-  it('should compile a function with VAR_OUTPUT and => call syntax', () => {
+  it("should compile a function with VAR_OUTPUT and => call syntax", () => {
     const source = `
       FUNCTION Divide : INT
         VAR_INPUT dividend : INT; divisor : INT; END_VAR
@@ -654,17 +718,23 @@ int main() {
     expect(result.success).toBe(true);
 
     // The output is a pointer parameter; the call site passes r's address
-    expect(result.headerCode).toContain('IEC_INT* REMAINDER__out');
-    expect(result.cppCode).toContain('DIVIDE(10, 3, strucpp::out_ptr<IEC_INT>(R))');
+    expect(result.headerCode).toContain("IEC_INT* REMAINDER__out");
+    expect(result.cppCode).toContain(
+      "DIVIDE(10, 3, strucpp::out_ptr<IEC_INT>(R))",
+    );
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'func_var_output');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "func_var_output",
+    );
     expect(cppResult.success).toBe(true);
   });
 
   // Nested comment syntax-only tests removed — comments are exercised
   // by all st-validation tests. Error case kept below.
 
-  it('should fail to compile with unclosed nested comment', () => {
+  it("should fail to compile with unclosed nested comment", () => {
     const source = `
       PROGRAM UnclosedComment
         (* This comment (* has a nested part but is not closed properly
@@ -674,14 +744,20 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors.some(e => e.message.toLowerCase().includes('unclosed') || e.message.toLowerCase().includes('comment'))).toBe(true);
+    expect(
+      result.errors.some(
+        (e) =>
+          e.message.toLowerCase().includes("unclosed") ||
+          e.message.toLowerCase().includes("comment"),
+      ),
+    ).toBe(true);
   });
 
   // =============================================================================
   // Variable Modifiers Tests (Phase 2.6)
   // =============================================================================
 
-  it('should compile a program with CONSTANT variables', () => {
+  it("should compile a program with CONSTANT variables", () => {
     const source = `
       PROGRAM ConstantVars
         VAR CONSTANT
@@ -694,15 +770,19 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify const qualifier is generated
-    expect(result.headerCode).toContain('const IEC_REAL PI');
-    expect(result.headerCode).toContain('const IEC_INT MAX_SIZE');
+    expect(result.headerCode).toContain("const IEC_REAL PI");
+    expect(result.headerCode).toContain("const IEC_INT MAX_SIZE");
     // Note: PI and MAX_SIZE are already uppercase in ST source
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'constant_vars');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "constant_vars",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile a program with RETAIN variables', () => {
+  it("should compile a program with RETAIN variables", () => {
     const source = `
       PROGRAM RetainVars
         VAR RETAIN
@@ -720,13 +800,17 @@ int main() {
     // guards is that a program declaring RETAIN produces C++ that COMPILES;
     // the retain table's own contents and round-trip are covered in
     // debug-table-gen.test.ts and the retain round-trip test below.
-    expect(result.headerCode).not.toContain('__retain_vars');
+    expect(result.headerCode).not.toContain("__retain_vars");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'retain_vars');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "retain_vars",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile a program with mixed CONSTANT and RETAIN variables', () => {
+  it("should compile a program with mixed CONSTANT and RETAIN variables", () => {
     const source = `
       PROGRAM MixedModifiers
         VAR CONSTANT
@@ -744,18 +828,22 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify const qualifier
-    expect(result.headerCode).toContain('const IEC_INT MAX_VALUE');
+    expect(result.headerCode).toContain("const IEC_INT MAX_VALUE");
     // Both members are plain declarations now: CONSTANT is a `const`
     // qualifier, and RETAIN adds nothing to the class — the retained leaf is
     // listed in generated_debug.cpp instead.
-    expect(result.headerCode).toContain('IEC_DINT ACCUMULATED;');
-    expect(result.headerCode).not.toContain('__retain_vars');
+    expect(result.headerCode).toContain("IEC_DINT ACCUMULATED;");
+    expect(result.headerCode).not.toContain("__retain_vars");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'mixed_modifiers');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "mixed_modifiers",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should fail semantic validation for CONSTANT without initializer', () => {
+  it("should fail semantic validation for CONSTANT without initializer", () => {
     const source = `
       PROGRAM NoInitializer
         VAR CONSTANT
@@ -765,14 +853,19 @@ int main() {
     `;
     const result = compile(source);
     expect(result.success).toBe(false);
-    expect(result.errors.some(e => e.message.includes('CONSTANT') && e.message.includes('initializer'))).toBe(true);
+    expect(
+      result.errors.some(
+        (e) =>
+          e.message.includes("CONSTANT") && e.message.includes("initializer"),
+      ),
+    ).toBe(true);
   });
 
   // =============================================================================
   // Namespace Tests (Phase 2.7)
   // =============================================================================
 
-  it('should compile a program with correct namespace wrapping', () => {
+  it("should compile a program with correct namespace wrapping", () => {
     const source = `
       PROGRAM NamespaceTest
         VAR
@@ -785,18 +878,22 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify namespace structure in header
-    expect(result.headerCode).toContain('namespace strucpp {');
-    expect(result.headerCode).toContain('}  // namespace strucpp');
+    expect(result.headerCode).toContain("namespace strucpp {");
+    expect(result.headerCode).toContain("}  // namespace strucpp");
 
     // Verify namespace structure in source
-    expect(result.cppCode).toContain('namespace strucpp {');
-    expect(result.cppCode).toContain('}  // namespace strucpp');
+    expect(result.cppCode).toContain("namespace strucpp {");
+    expect(result.cppCode).toContain("}  // namespace strucpp");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'namespace_test');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "namespace_test",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile user-defined types in namespace', () => {
+  it("should compile user-defined types in namespace", () => {
     const source = `
       TYPE
         MotorState : (Stopped, Running, Error);
@@ -817,15 +914,19 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify types are in namespace
-    expect(result.headerCode).toContain('namespace strucpp {');
-    expect(result.headerCode).toContain('enum class MOTORSTATE');
-    expect(result.headerCode).toContain('struct POINT');
+    expect(result.headerCode).toContain("namespace strucpp {");
+    expect(result.headerCode).toContain("enum class MOTORSTATE");
+    expect(result.headerCode).toContain("struct POINT");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'types_in_namespace');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "types_in_namespace",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile function blocks in namespace', () => {
+  it("should compile function blocks in namespace", () => {
     // Note: FB instance variables not tested here due to pre-existing
     // type mapping issue (IEC_ prefix applied to user types).
     // That will be addressed in Phase 3+ expression/type handling.
@@ -846,19 +947,23 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify FB is in namespace
-    expect(result.headerCode).toContain('namespace strucpp {');
-    expect(result.headerCode).toContain('class COUNTER {');
+    expect(result.headerCode).toContain("namespace strucpp {");
+    expect(result.headerCode).toContain("class COUNTER {");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'fb_in_namespace');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "fb_in_namespace",
+    );
     if (!cppResult.success) {
-      console.log('C++ compile error:', cppResult.error);
-      console.log('Header code:\n', result.headerCode);
-      console.log('CPP code:\n', result.cppCode);
+      console.log("C++ compile error:", cppResult.error);
+      console.log("Header code:\n", result.headerCode);
+      console.log("CPP code:\n", result.cppCode);
     }
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile complete configuration in namespace', () => {
+  it("should compile complete configuration in namespace", () => {
     const source = `
       PROGRAM MainProg
         VAR
@@ -877,10 +982,14 @@ int main() {
     expect(result.success).toBe(true);
 
     // Verify configuration is in namespace
-    expect(result.headerCode).toContain('namespace strucpp {');
-    expect(result.headerCode).toContain('class Configuration_TESTCONFIG');
+    expect(result.headerCode).toContain("namespace strucpp {");
+    expect(result.headerCode).toContain("class Configuration_TESTCONFIG");
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'config_in_namespace');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "config_in_namespace",
+    );
     expect(cppResult.success).toBe(true);
   });
 
@@ -888,7 +997,7 @@ int main() {
   // External Code Pragma Tests (Phase 2.8)
   // =============================================================================
 
-  it('should compile a program with simple external pragma', () => {
+  it("should compile a program with simple external pragma", () => {
     const source = `
       PROGRAM ExternalSimple
         {external
@@ -900,11 +1009,15 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'external_simple');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "external_simple",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile a program with external pragma using C++ stdlib', () => {
+  it("should compile a program with external pragma using C++ stdlib", () => {
     const source = `
       PROGRAM ExternalStdLib
         {external
@@ -916,11 +1029,15 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'external_stdlib');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "external_stdlib",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile a program with multiple external pragmas', () => {
+  it("should compile a program with multiple external pragmas", () => {
     const source = `
       PROGRAM ExternalMultiple
         {external int a = 1; }
@@ -931,11 +1048,15 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'external_multiple');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "external_multiple",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile external pragma in function block', () => {
+  it("should compile external pragma in function block", () => {
     const source = `
       FUNCTION_BLOCK ExternalFB
         VAR_INPUT enable : BOOL; END_VAR
@@ -950,11 +1071,15 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'external_fb');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "external_fb",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile external pragma in function', () => {
+  it("should compile external pragma in function", () => {
     const source = `
       FUNCTION ExternalFunc : INT
         VAR_INPUT x : INT; END_VAR
@@ -967,11 +1092,15 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'external_func');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "external_func",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile external pragma with struct definition', () => {
+  it("should compile external pragma with struct definition", () => {
     const source = `
       PROGRAM ExternalStruct
         {external
@@ -989,11 +1118,15 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'external_struct');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "external_struct",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile external pragma with lambda', () => {
+  it("should compile external pragma with lambda", () => {
     const source = `
       PROGRAM ExternalLambda
         {external
@@ -1005,11 +1138,15 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'external_lambda');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "external_lambda",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('should compile external pragma with C++ comments and preprocessor', () => {
+  it("should compile external pragma with C++ comments and preprocessor", () => {
     const source = `
       PROGRAM ExternalComments
         {external
@@ -1025,7 +1162,11 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'external_comments');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "external_comments",
+    );
     expect(cppResult.success).toBe(true);
   });
 
@@ -1033,7 +1174,7 @@ int main() {
   // References (REF_TO / REFERENCE TO)
   // ---------------------------------------------------------------------------
 
-  it('compiles REF_TO: declare, := REF(), and ^ read/write', () => {
+  it("compiles REF_TO: declare, := REF(), and ^ read/write", () => {
     const source = `
       PROGRAM Main
         VAR
@@ -1048,13 +1189,17 @@ int main() {
     `;
     const result = compile(source);
     expect(result.success).toBe(true);
-    expect(result.headerCode).toContain('IEC_REF_TO<INT_t>');
+    expect(result.headerCode).toContain("IEC_REF_TO<INT_t>");
     expect(result.headerCode).toContain('#include "iec_pointer.hpp"');
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'ref_to_basic');
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "ref_to_basic",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('compiles REFERENCE_TO: declare, REF= bind, implicit read/write', () => {
+  it("compiles REFERENCE_TO: declare, REF= bind, implicit read/write", () => {
     const source = `
       PROGRAM Main
         VAR
@@ -1070,12 +1215,16 @@ int main() {
     `;
     const result = compile(source);
     expect(result.success).toBe(true);
-    expect(result.headerCode).toContain('IEC_REFERENCE_TO<INT_t>');
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'reference_to_basic');
+    expect(result.headerCode).toContain("IEC_REFERENCE_TO<INT_t>");
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "reference_to_basic",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('compiles a FUNCTION_BLOCK with a REF_TO input rebound via REF= (link_reference)', () => {
+  it("compiles a FUNCTION_BLOCK with a REF_TO input rebound via REF= (link_reference)", () => {
     // Regression: a REF_TO target lowers REF= to `= REF(src)` (IEC_REF_TO has
     // no bind()), not `.bind()`. Previously emitted IEC_INT + .bind() -> error.
     const source = `
@@ -1089,12 +1238,16 @@ int main() {
     `;
     const result = compile(source);
     expect(result.success).toBe(true);
-    expect(result.headerCode).toContain('IEC_REF_TO<INT_t>');
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'fb_ref_to_input');
+    expect(result.headerCode).toContain("IEC_REF_TO<INT_t>");
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "fb_ref_to_input",
+    );
     expect(cppResult.success).toBe(true);
   });
 
-  it('compiles the REF_LINK block (assignment + graphical EN/IN/ENO call forms)', () => {
+  it("compiles the REF_LINK block (assignment + graphical EN/IN/ENO call forms)", () => {
     // REF_LINK is the callable form of the REF() operator (REF is a reserved
     // token and cannot take the EN/IN/ENO block-call form). It lowers to
     // REF(x); assigning to a REF_TO variable binds it.
@@ -1115,15 +1268,19 @@ int main() {
     `;
     const result = compile(source);
     expect(result.success).toBe(true);
-    expect(result.cppCode).toContain('REF(ANOTHER_VAR)');
-    const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'ref_link_block');
+    expect(result.cppCode).toContain("REF(ANOTHER_VAR)");
+    const cppResult = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "ref_link_block",
+    );
     expect(cppResult.success).toBe(true);
   });
 
   // Regression: codegen/runtime gaps surfaced compiling the full OSCAT building
   // library all the way to a binary.
 
-  it('compiles STRING_TO_TIME / TOD / DATE / DT (string-parse conversions)', () => {
+  it("compiles STRING_TO_TIME / TOD / DATE / DT (string-parse conversions)", () => {
     // OSCAT's TIMER_EVENT_DECODE parses time/tod literals out of a string; the
     // runtime previously only had numeric TO_TIME (static_cast<long long>(string)
     // failed to compile).
@@ -1141,11 +1298,15 @@ int main() {
     `;
     const result = compile(source);
     expect(result.errors).toHaveLength(0);
-    const cpp = compileWithGpp(result.headerCode, result.cppCode, 'string_to_time');
+    const cpp = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "string_to_time",
+    );
     expect(cpp.success, cpp.error).toBe(true);
   });
 
-  it('compiles a 2D array with an aggregate initializer', () => {
+  it("compiles a 2D array with an aggregate initializer", () => {
     // OSCAT's WATER_CP/WATER_ENTHALPY use `ARRAY[1..3,0..1] OF REAL := [..]`;
     // IEC_ARRAY_2D needed a flat (row-major) initializer-list constructor.
     const source = `
@@ -1158,11 +1319,15 @@ int main() {
     `;
     const result = compile(source);
     expect(result.errors).toHaveLength(0);
-    const cpp = compileWithGpp(result.headerCode, result.cppCode, 'array2d_init');
+    const cpp = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "array2d_init",
+    );
     expect(cpp.success, cpp.error).toBe(true);
   });
 
-  it('compiles an FB member whose type is shadowed by a sibling member', () => {
+  it("compiles an FB member whose type is shadowed by a sibling member", () => {
     // OSCAT's F_LAMP has both `ONTIME : UDINT` and `RUNTIME : ONTIME` (an FB);
     // the data member ONTIME hides the type, so the declaration needs an
     // elaborated `class` specifier.
@@ -1179,11 +1344,15 @@ int main() {
     `;
     const result = compile(source);
     expect(result.errors).toHaveLength(0);
-    const cpp = compileWithGpp(result.headerCode, result.cppCode, 'member_shadows_type');
+    const cpp = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "member_shadows_type",
+    );
     expect(cpp.success, cpp.error).toBe(true);
   });
 
-  it('compiles an ST identifier that collides with a C stdlib macro', () => {
+  it("compiles an ST identifier that collides with a C stdlib macro", () => {
     // OSCAT's T_AVG24 declares `TMP_MAX`, which <cstdio> #defines.
     const source = `
       FUNCTION_BLOCK MacroName
@@ -1193,11 +1362,15 @@ int main() {
     `;
     const result = compile(source);
     expect(result.errors).toHaveLength(0);
-    const cpp = compileWithGpp(result.headerCode, result.cppCode, 'macro_collision');
+    const cpp = compileWithGpp(
+      result.headerCode,
+      result.cppCode,
+      "macro_collision",
+    );
     expect(cpp.success, cpp.error).toBe(true);
   });
 
-  it('scopes each CASE branch, so a shared-global write in one compiles and runs (threaded + non-threaded)', () => {
+  it("scopes each CASE branch, so a shared-global write in one compiles and runs (threaded + non-threaded)", () => {
     // A global write declares a temporary; directly under `case N:` a later
     // label would jump over it ("jump to case label"). A function parameter
     // named like its own type is renamed in the signature as in the body.
@@ -1230,30 +1403,36 @@ int main() {
     const result = compile(source);
     expect(result.success, JSON.stringify(result.errors)).toBe(true);
     expect(result.cppCode).toMatch(/case 3: \{/);
-    expect(result.cppCode).toContain('default: {');
-    expect(result.cppCode).toContain('TWICE(R R_)');
+    expect(result.cppCode).toContain("default: {");
+    expect(result.cppCode).toContain("TWICE(R R_)");
 
-    const runtimeInclude = path.resolve(__dirname, '../../src/runtime/include');
-    const hpp = path.join(tempDir, 'generated.hpp');
-    const cpp = path.join(tempDir, 'case_scope.cpp');
+    const runtimeInclude = path.resolve(__dirname, "../../src/runtime/include");
+    const hpp = path.join(tempDir, "generated.hpp");
+    const cpp = path.join(tempDir, "case_scope.cpp");
     fs.writeFileSync(hpp, result.headerCode);
     fs.writeFileSync(
       cpp,
       `${result.cppCode}\n\nint main(){ strucpp::Configuration_CFG cfg; cfg.INST.run(); return strucpp::G.value.X == 20 && strucpp::G.value.N == 40 ? 0 : 1; }\n`,
     );
     for (const threaded of [false, true]) {
-      const flag = threaded ? '-DSTRUCPP_THREADED' : '';
+      const flag = threaded ? "-DSTRUCPP_THREADED" : "";
       const out = path.join(tempDir, `case_scope_${threaded}.out`);
       let ok = true;
-      let diag = '';
+      let diag = "";
       try {
-        execSync(`g++ -std=${CXX_STD} -pthread ${flag} -I"${runtimeInclude}" -I"${tempDir}" "${cpp}" -o "${out}"`, { stdio: 'pipe' });
-        execSync(`"${out}"`, { stdio: 'pipe' });
+        execSync(
+          `g++ -std=${CXX_STD} -pthread ${flag} -I"${runtimeInclude}" -I"${tempDir}" "${cpp}" -o "${out}"`,
+          { stdio: "pipe" },
+        );
+        execSync(`"${out}"`, { stdio: "pipe" });
       } catch (e) {
         ok = false;
         diag = (e as { stderr?: Buffer }).stderr?.toString() ?? String(e);
       }
-      expect(ok, `g++/run ${threaded ? 'threaded' : 'non-threaded'} failed:\n${diag}`).toBe(true);
+      expect(
+        ok,
+        `g++/run ${threaded ? "threaded" : "non-threaded"} failed:\n${diag}`,
+      ).toBe(true);
     }
   });
 });
@@ -1267,12 +1446,12 @@ int main() {
  * - Program run() methods are called at the correct intervals
  * - Multiple tasks with different intervals work correctly
  */
-describeIfGpp('C++ Runtime Behavior Tests', () => {
+describeIfGpp("C++ Runtime Behavior Tests", () => {
   let tempDir: string;
   let pchPath: string;
 
   beforeAll(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'strucpp-runtime-test-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-runtime-test-"));
     pchPath = createPCH(tempDir);
   });
 
@@ -1290,12 +1469,20 @@ describeIfGpp('C++ Runtime Behavior Tests', () => {
   ): { success: boolean; output?: string; error?: string } {
     try {
       const output = compileAndRunHelper({
-        tempDir, pchPath, headerCode, cppCode, testName, mainCode,
+        tempDir,
+        pchPath,
+        headerCode,
+        cppCode,
+        testName,
+        mainCode,
       });
       return { success: true, output };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes('Compilation failed') || msg.includes('g++ compilation failed')) {
+      if (
+        msg.includes("Compilation failed") ||
+        msg.includes("g++ compilation failed")
+      ) {
         return { success: false, error: msg };
       }
       // Execution failure
@@ -1303,7 +1490,7 @@ describeIfGpp('C++ Runtime Behavior Tests', () => {
     }
   }
 
-  it('should execute programs at correct task intervals with simulated time', () => {
+  it("should execute programs at correct task intervals with simulated time", () => {
     // Configuration with two tasks: FastTask at 50ms and SlowTask at 100ms
     // Over 250ms of simulated time:
     // - FastTask should run at t=0, 50, 100, 150, 200 (5 times)
@@ -1399,7 +1586,12 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'runtime_test');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "runtime_test",
+    );
     expect(runResult.success).toBe(true);
     expect(runResult.output).toBeDefined();
 
@@ -1426,7 +1618,7 @@ int main() {
     expect(slowCalls).toBe(3);
   });
 
-  it('should handle three tasks with different intervals', () => {
+  it("should handle three tasks with different intervals", () => {
     // Configuration with three tasks at 20ms, 40ms, and 100ms
     // Over 200ms of simulated time:
     // - Task20ms should run at t=0, 20, 40, 60, 80, 100, 120, 140, 160, 180 (10 times)
@@ -1525,7 +1717,12 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'multi_task_test');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "multi_task_test",
+    );
     expect(runResult.success).toBe(true);
     expect(runResult.output).toBeDefined();
 
@@ -1538,12 +1735,12 @@ int main() {
     expect(match100).not.toBeNull();
 
     // Verify call counts
-    expect(Number(match20![1])).toBe(10);  // 20ms task over 200ms
-    expect(Number(match40![1])).toBe(5);   // 40ms task over 200ms
-    expect(Number(match100![1])).toBe(2);  // 100ms task over 200ms
+    expect(Number(match20![1])).toBe(10); // 20ms task over 200ms
+    expect(Number(match40![1])).toBe(5); // 40ms task over 200ms
+    expect(Number(match100![1])).toBe(2); // 100ms task over 200ms
   });
 
-  it('should correctly extract task intervals from configuration', () => {
+  it("should correctly extract task intervals from configuration", () => {
     // Test that verifies task interval extraction is correct
     const source = `
       CONFIGURATION IntervalTestConfig
@@ -1595,7 +1792,12 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'interval_extract_test');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "interval_extract_test",
+    );
     expect(runResult.success).toBe(true);
     expect(runResult.output).toBeDefined();
 
@@ -1611,12 +1813,12 @@ int main() {
     expect(match500).not.toBeNull();
     expect(match1s).not.toBeNull();
 
-    expect(Number(match10![1])).toBe(10000000);      // 10ms in ns
-    expect(Number(match500![1])).toBe(500000000);   // 500ms in ns
-    expect(Number(match1s![1])).toBe(1000000000);   // 1s in ns
+    expect(Number(match10![1])).toBe(10000000); // 10ms in ns
+    expect(Number(match500![1])).toBe(500000000); // 500ms in ns
+    expect(Number(match1s![1])).toBe(1000000000); // 1s in ns
   });
 
-  it('should execute function with omitted VAR_OUTPUT using temp variable', () => {
+  it("should execute function with omitted VAR_OUTPUT using temp variable", () => {
     const source = `
       FUNCTION Divide : INT
         VAR_INPUT dividend : INT; divisor : INT; END_VAR
@@ -1635,7 +1837,7 @@ int main() {
     expect(result.success).toBe(true);
 
     // An omitted output is NULL: the function writes a slot of its own
-    expect(result.cppCode).toContain('DIVIDE(10, 3, nullptr)');
+    expect(result.cppCode).toContain("DIVIDE(10, 3, nullptr)");
 
     const mainCode = `
 #include <iostream>
@@ -1652,15 +1854,20 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'var_output_omitted');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "var_output_omitted",
+    );
     expect(runResult.success).toBe(true);
     expect(runResult.output).toBeDefined();
 
     // 10 / 3 = 3
-    expect(runResult.output).toContain('q=3');
+    expect(runResult.output).toContain("q=3");
   });
 
-  it('should execute function with VAR_OUTPUT and => call-site syntax correctly', () => {
+  it("should execute function with VAR_OUTPUT and => call-site syntax correctly", () => {
     const source = `
       FUNCTION Divide : INT
         VAR_INPUT dividend : INT; divisor : INT; END_VAR
@@ -1694,13 +1901,18 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'var_output_runtime');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "var_output_runtime",
+    );
     expect(runResult.success).toBe(true);
     expect(runResult.output).toBeDefined();
 
     // 10 / 3 = 3, 10 MOD 3 = 1
-    expect(runResult.output).toContain('q=3');
-    expect(runResult.output).toContain('r=1');
+    expect(runResult.output).toContain("q=3");
+    expect(runResult.output).toContain("r=1");
   });
 
   // Regression: NOT() over a comparison expression. IECVar's `==` returns
@@ -1710,7 +1922,7 @@ int main() {
   // `true` regardless of inputs, so any IF NOT(a = b) THEN body fired
   // unconditionally. Fixed by adding a raw-bool specialization that uses
   // logical `!`.
-  it('NOT(comparison) returns the correct boolean', () => {
+  it("NOT(comparison) returns the correct boolean", () => {
     const source = `
       PROGRAM Main
         VAR a : INT := 5; END_VAR
@@ -1736,10 +1948,15 @@ int main() {
     return 0;
 }
 `;
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'not_comparison');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "not_comparison",
+    );
     expect(runResult.success).toBe(true);
-    expect(runResult.output).toContain('pos=0');
-    expect(runResult.output).toContain('neg=1');
+    expect(runResult.output).toContain("pos=0");
+    expect(runResult.output).toContain("neg=1");
   });
 });
 
@@ -1749,12 +1966,12 @@ int main() {
  * These tests verify that external C/C++ code embedded via {external ...}
  * pragmas actually compiles, links, and executes correctly.
  */
-describeIfGpp('External Code Pragma Runtime Tests', () => {
+describeIfGpp("External Code Pragma Runtime Tests", () => {
   let tempDir: string;
   let pchPath: string;
 
   beforeAll(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'strucpp-external-test-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-external-test-"));
     pchPath = createPCH(tempDir);
   });
 
@@ -1772,19 +1989,27 @@ describeIfGpp('External Code Pragma Runtime Tests', () => {
   ): { success: boolean; output?: string; error?: string } {
     try {
       const output = compileAndRunHelper({
-        tempDir, pchPath, headerCode, cppCode, testName, mainCode,
+        tempDir,
+        pchPath,
+        headerCode,
+        cppCode,
+        testName,
+        mainCode,
       });
       return { success: true, output };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes('Compilation failed') || msg.includes('g++ compilation failed')) {
+      if (
+        msg.includes("Compilation failed") ||
+        msg.includes("g++ compilation failed")
+      ) {
         return { success: false, error: msg };
       }
       return { success: false, error: `Execution failed: ${msg}` };
     }
   }
 
-  it('should execute external pragma code that prints output', () => {
+  it("should execute external pragma code that prints output", () => {
     const source = `
       PROGRAM PrintTest
         {external
@@ -1805,12 +2030,17 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'external_print');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "external_print",
+    );
     expect(runResult.success).toBe(true);
-    expect(runResult.output).toContain('EXTERNAL_OK');
+    expect(runResult.output).toContain("EXTERNAL_OK");
   });
 
-  it('should execute external pragma that reads and writes IEC variables', () => {
+  it("should execute external pragma that reads and writes IEC variables", () => {
     const source = `
       PROGRAM VarAccessTest
         VAR
@@ -1840,13 +2070,18 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'external_var_access');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "external_var_access",
+    );
     expect(runResult.success).toBe(true);
-    expect(runResult.output).toContain('counter=20');
-    expect(runResult.output).toContain('flag=1');
+    expect(runResult.output).toContain("counter=20");
+    expect(runResult.output).toContain("flag=1");
   });
 
-  it('should execute external pragma with control flow and nested braces', () => {
+  it("should execute external pragma with control flow and nested braces", () => {
     const source = `
       PROGRAM ControlFlowTest
         VAR result : INT; END_VAR
@@ -1876,12 +2111,17 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'external_control_flow');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "external_control_flow",
+    );
     expect(runResult.success).toBe(true);
-    expect(runResult.output).toContain('result=6');
+    expect(runResult.output).toContain("result=6");
   });
 
-  it('should execute multiple external pragmas in sequence', () => {
+  it("should execute multiple external pragmas in sequence", () => {
     const source = `
       PROGRAM MultiPragmaTest
         VAR x : INT; END_VAR
@@ -1905,9 +2145,14 @@ int main() {
 }
 `;
 
-    const runResult = compileAndRun(result.headerCode, result.cppCode, mainCode, 'external_multi_pragma');
+    const runResult = compileAndRun(
+      result.headerCode,
+      result.cppCode,
+      mainCode,
+      "external_multi_pragma",
+    );
     expect(runResult.success).toBe(true);
-    expect(runResult.output).toContain('x=10');
+    expect(runResult.output).toContain("x=10");
   });
 });
 
@@ -1923,12 +2168,12 @@ int main() {
  * static_assert), these expectations flip and the change becomes a
  * deliberate one rather than a silent behavior shift.
  */
-describeIfGpp('iec_std_lib comparison sign-class semantics', () => {
+describeIfGpp("iec_std_lib comparison sign-class semantics", () => {
   let tempDir: string;
   let pchPath: string;
 
   beforeAll(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'strucpp-cmpsign-test-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-cmpsign-test-"));
     pchPath = createPCH(tempDir);
   });
 
@@ -1938,7 +2183,7 @@ describeIfGpp('iec_std_lib comparison sign-class semantics', () => {
     }
   });
 
-  it('mixed-sign comparisons follow C++ usual arithmetic conversions', () => {
+  it("mixed-sign comparisons follow C++ usual arithmetic conversions", () => {
     // Wrapping is only observable when the unsigned operand has rank >=
     // int, since otherwise both sides promote up to int and the compare
     // happens in signed land. Use UDINT (uint32_t) where the rank ties
@@ -1971,18 +2216,18 @@ int main() {
     const stdout = compileAndRunHelper({
       tempDir,
       pchPath,
-      headerCode: '',
-      cppCode: '',
-      testName: 'cmp_sign_class',
+      headerCode: "",
+      cppCode: "",
+      testName: "cmp_sign_class",
       mainCode,
     });
     // Wrapping cases (UDINT vs signed)
-    expect(stdout).toContain('eq_max_neg=1');
-    expect(stdout).toContain('ne_max_neg=0');
-    expect(stdout).toContain('lt_zero_neg=1');
-    expect(stdout).toContain('gt_zero_neg=0');
+    expect(stdout).toContain("eq_max_neg=1");
+    expect(stdout).toContain("ne_max_neg=0");
+    expect(stdout).toContain("lt_zero_neg=1");
+    expect(stdout).toContain("gt_zero_neg=0");
     // Non-wrapping case (UINT vs INT — both promote to int)
-    expect(stdout).toContain('eq_uint_neg=0');
+    expect(stdout).toContain("eq_uint_neg=0");
   });
 });
 
@@ -1993,8 +2238,8 @@ int main() {
  * POUs. These tests pin the split shape so it doesn't regress and so
  * the legacy `cppCode` concatenation stays consistent with `cppFiles`.
  */
-describe('Multi-file codegen output', () => {
-  it('emits one TU per POU plus configuration.cpp', () => {
+describe("Multi-file codegen output", () => {
+  it("emits one TU per POU plus configuration.cpp", () => {
     const source = `
       FUNCTION_BLOCK FB_A
         VAR_INPUT x : INT; END_VAR
@@ -2028,20 +2273,30 @@ describe('Multi-file codegen output', () => {
     // file names because the codegen uppercases them in declarations).
     const names = result.cppFiles.map((f) => f.name).sort();
     expect(names).toEqual(
-      ['configuration.cpp', 'pou_FB_A.cpp', 'pou_FB_B.cpp', 'pou_MAIN.cpp', 'pou_SQUARE.cpp'].sort(),
+      [
+        "configuration.cpp",
+        "pou_FB_A.cpp",
+        "pou_FB_B.cpp",
+        "pou_MAIN.cpp",
+        "pou_SQUARE.cpp",
+      ].sort(),
     );
 
     // Every TU must include the shared header and open the strucpp
     // namespace — splitting must not leak orphan code outside.
     for (const f of result.cppFiles) {
       expect(f.content).toContain(`#include "generated.hpp"`);
-      expect(f.content).toContain('namespace strucpp {');
+      expect(f.content).toContain("namespace strucpp {");
       expect(f.content).toMatch(/}\s+\/\/\s+namespace strucpp/);
     }
 
     // Each POU's body lives in its own TU, not in any other.
-    const fbAContent = result.cppFiles.find((f) => f.name === 'pou_FB_A.cpp')!.content;
-    const fbBContent = result.cppFiles.find((f) => f.name === 'pou_FB_B.cpp')!.content;
+    const fbAContent = result.cppFiles.find(
+      (f) => f.name === "pou_FB_A.cpp",
+    )!.content;
+    const fbBContent = result.cppFiles.find(
+      (f) => f.name === "pou_FB_B.cpp",
+    )!.content;
     expect(fbAContent).toMatch(/FB_A::/);
     expect(fbAContent).not.toMatch(/FB_B::/);
     expect(fbBContent).toMatch(/FB_B::/);
@@ -2049,19 +2304,21 @@ describe('Multi-file codegen output', () => {
 
     // Configuration TU owns the located-vars table and the
     // configuration class implementation; per-POU TUs do not.
-    const configContent = result.cppFiles.find((f) => f.name === 'configuration.cpp')!.content;
-    expect(configContent).toContain('locatedVars');
-    expect(fbAContent).not.toContain('LocatedVar locatedVars');
+    const configContent = result.cppFiles.find(
+      (f) => f.name === "configuration.cpp",
+    )!.content;
+    expect(configContent).toContain("locatedVars");
+    expect(fbAContent).not.toContain("LocatedVar locatedVars");
 
     // Legacy `cppCode` is the concatenation in emit order, with the
     // configuration TU first so consumers that scan for the
     // configuration class (REPL, library compiler) still find it.
     expect(result.cppCode.startsWith(configContent)).toBe(true);
-    const concatenated = result.cppFiles.map((f) => f.content).join('\n');
+    const concatenated = result.cppFiles.map((f) => f.content).join("\n");
     expect(result.cppCode).toBe(concatenated);
   });
 
-  it('emits pouIncludes after the shared header in every per-POU TU', () => {
+  it("emits pouIncludes after the shared header in every per-POU TU", () => {
     // The editor uses this to plumb c_blocks.h through so generated POU
     // bodies that reference user-defined `<NAME>_VARS` structs and
     // `<name>_setup` / `<name>_loop` extern functions resolve at C++
@@ -2078,10 +2335,10 @@ describe('Multi-file codegen output', () => {
         END_RESOURCE
       END_CONFIGURATION
     `;
-    const result = compile(source, { pouIncludes: ['c_blocks.h', 'extras.h'] });
+    const result = compile(source, { pouIncludes: ["c_blocks.h", "extras.h"] });
     expect(result.success).toBe(true);
 
-    const pouFiles = result.cppFiles.filter((f) => f.name.startsWith('pou_'));
+    const pouFiles = result.cppFiles.filter((f) => f.name.startsWith("pou_"));
     expect(pouFiles.length).toBeGreaterThan(0);
     for (const f of pouFiles) {
       expect(f.content).toContain('#include "generated.hpp"');
@@ -2090,13 +2347,13 @@ describe('Multi-file codegen output', () => {
       // Order must be: shared header first, then extras, before namespace open.
       const headerIdx = f.content.indexOf('#include "generated.hpp"');
       const cBlocksIdx = f.content.indexOf('#include "c_blocks.h"');
-      const nsIdx = f.content.indexOf('namespace strucpp');
+      const nsIdx = f.content.indexOf("namespace strucpp");
       expect(headerIdx).toBeLessThan(cBlocksIdx);
       expect(cBlocksIdx).toBeLessThan(nsIdx);
     }
   });
 
-  it('omits pouIncludes by default', () => {
+  it("omits pouIncludes by default", () => {
     const source = `
       PROGRAM Main
         VAR x : INT; END_VAR
@@ -2110,7 +2367,7 @@ describe('Multi-file codegen output', () => {
       END_CONFIGURATION
     `;
     const result = compile(source);
-    const pouFile = result.cppFiles.find((f) => f.name.startsWith('pou_'))!;
-    expect(pouFile.content).not.toContain('c_blocks.h');
+    const pouFile = result.cppFiles.find((f) => f.name.startsWith("pou_"))!;
+    expect(pouFile.content).not.toContain("c_blocks.h");
   });
 });

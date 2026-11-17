@@ -30,10 +30,10 @@ FUNCTION_BLOCK FB_Node
     sTag := CONCAT(sTag, '+');
     Hit := nHits;
   END_METHOD
-  METHOD PUBLIC Add : DINT
+  METHOD PUBLIC Bump : DINT
     VAR_INPUT n : DINT; END_VAR
     nHits := nHits + n;
-    Add := nHits;
+    Bump := nHits;
   END_METHOD
 END_FUNCTION_BLOCK
 
@@ -41,13 +41,13 @@ FUNCTION_BLOCK FB_Ota
   METHOD PUBLIC Report : DINT
     VAR_IN_OUT fbNode : FB_Node; END_VAR
     VAR_OUTPUT nSeen : DINT; END_VAR
-    nSeen := fbNode.Add(n := 10);
+    nSeen := fbNode.Bump(n := 10);
     Report := 1;
   END_METHOD
   METHOD PUBLIC Both
     VAR_IN_OUT a : FB_Node; b : FB_Node; END_VAR
-    a.Add(n := 100);
-    b.Add(n := 1000);
+    a.Bump(n := 100);
+    b.Bump(n := 1000);
   END_METHOD
 END_FUNCTION_BLOCK
 

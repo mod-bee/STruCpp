@@ -9,13 +9,13 @@
  * task uses that key, so a project without them compiles to the C++ it did.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { compile } from '../../src/index.js';
-import { hasGpp, CXX_STD, RUNTIME_INCLUDE_PATH } from './test-helpers.js';
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import { compile } from "../../src/index.js";
+import { hasGpp, CXX_STD, RUNTIME_INCLUDE_PATH } from "./test-helpers.js";
 
 const program = `
   PROGRAM Main
@@ -24,7 +24,7 @@ const program = `
   END_PROGRAM
 `;
 
-function config(tasks: string, extraResource = ''): string {
+function config(tasks: string, extraResource = ""): string {
   return `${program}
   CONFIGURATION Cfg
     RESOURCE Res ON PLC
@@ -49,94 +49,112 @@ const ALL = `
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {STACK := 8192};
       TASK slow(INTERVAL := T#50ms, PRIORITY := 1) {CORE := 0, STOP_ON_STUCK := FALSE, STACK := 16384};`;
 
-const errors = (r: { errors: { message: string }[] }) => r.errors.map((e) => e.message).join('\n');
+const errors = (r: { errors: { message: string }[] }) =>
+  r.errors.map((e) => e.message).join("\n");
 
-describe('TASK settings pragma', () => {
-  it('emits neither symbol for a project without the settings', () => {
+describe("TASK settings pragma", () => {
+  it("emits neither symbol for a project without the settings", () => {
     for (const tasks of [PLAIN, CORE_ONLY]) {
       const result = compile(config(tasks));
       expect(result.success).toBe(true);
       for (const code of [result.cppCode, result.headerCode]) {
-        expect(code).not.toContain('strucpp_task_stop_on_stuck');
-        expect(code).not.toContain('strucpp_task_stack');
+        expect(code).not.toContain("strucpp_task_stop_on_stuck");
+        expect(code).not.toContain("strucpp_task_stack");
       }
     }
   });
 
-  it('leaves a core-only project exactly as the core alone made it', () => {
+  it("leaves a core-only project exactly as the core alone made it", () => {
     const coreOnly = compile(config(CORE_ONLY));
     const withSettings = compile(config(ALL));
-    expect(coreOnly.cppCode).toContain('// Task CPU cores');
+    expect(coreOnly.cppCode).toContain("// Task CPU cores");
     // The same TaskInstance table with or without the settings.
-    const tasks = (cpp: string) => cpp.split('\n').filter((l) => l.includes('TaskInstance(')).join('\n');
+    const tasks = (cpp: string) =>
+      cpp
+        .split("\n")
+        .filter((l) => l.includes("TaskInstance("))
+        .join("\n");
     expect(tasks(withSettings.cppCode)).toBe(tasks(coreOnly.cppCode));
-    expect(coreOnly.cppCode).toContain('cores[2] = {-1, 1};');
-    expect(withSettings.cppCode).toContain('cores[2] = {-1, 0};');
+    expect(coreOnly.cppCode).toContain("cores[2] = {-1, 1};");
+    expect(withSettings.cppCode).toContain("cores[2] = {-1, 0};");
   });
 
-  it('emits each symbol only when a task uses its key', () => {
-    const stuck = compile(config(`
+  it("emits each symbol only when a task uses its key", () => {
+    const stuck = compile(
+      config(`
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0);
-      TASK slow(INTERVAL := T#50ms, PRIORITY := 1) {STOP_ON_STUCK := FALSE};`));
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1) {STOP_ON_STUCK := FALSE};`),
+    );
     expect(stuck.success).toBe(true);
-    expect(stuck.cppCode).toContain('strucpp_task_stop_on_stuck');
-    expect(stuck.cppCode).not.toContain('strucpp_task_stack');
-    expect(stuck.cppCode).not.toContain('strucpp_task_core');
+    expect(stuck.cppCode).toContain("strucpp_task_stop_on_stuck");
+    expect(stuck.cppCode).not.toContain("strucpp_task_stack");
+    expect(stuck.cppCode).not.toContain("strucpp_task_core");
 
-    const stack = compile(config(`
+    const stack = compile(
+      config(`
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {STACK := 8192};
-      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`));
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`),
+    );
     expect(stack.success).toBe(true);
-    expect(stack.cppCode).toContain('strucpp_task_stack');
-    expect(stack.cppCode).not.toContain('strucpp_task_stop_on_stuck');
-    expect(stack.cppCode).not.toContain('strucpp_task_core');
+    expect(stack.cppCode).toContain("strucpp_task_stack");
+    expect(stack.cppCode).not.toContain("strucpp_task_stop_on_stuck");
+    expect(stack.cppCode).not.toContain("strucpp_task_core");
   });
 
-  it('accepts the keys in any order, spacing and case, in one pragma or several', () => {
-    const result = compile(config(`
+  it("accepts the keys in any order, spacing and case, in one pragma or several", () => {
+    const result = compile(
+      config(`
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0){ stack:=4096 ,core:=1 }{Stop_On_Stuck := false};
       TASK slow(INTERVAL := T#50ms, PRIORITY := 1)
         {STOP_ON_STUCK := TRUE}
-      ;`));
-    expect(errors(result)).toBe('');
+      ;`),
+    );
+    expect(errors(result)).toBe("");
     expect(result.success).toBe(true);
-    expect(result.cppCode).toContain('strucpp_task_core');
-    expect(result.cppCode).toContain('strucpp_task_stop_on_stuck');
-    expect(result.cppCode).toContain('strucpp_task_stack');
+    expect(result.cppCode).toContain("strucpp_task_core");
+    expect(result.cppCode).toContain("strucpp_task_stop_on_stuck");
+    expect(result.cppCode).toContain("strucpp_task_stack");
   });
 
   it.each([
-    ['STOP_ON_STUCK as a number', '{STOP_ON_STUCK := 0}'],
-    ['STOP_ON_STUCK as a name', '{STOP_ON_STUCK := maybe}'],
-    ['STOP_ON_STUCK with no value', '{STOP_ON_STUCK := }'],
-    ['a zero stack', '{STACK := 0}'],
-    ['a stack below 1024 bytes', '{STACK := 512}'],
-    ['a stack past 64 MiB', '{STACK := 67108865}'],
-    ['a negative stack', '{STACK := -1}'],
-    ['a fractional stack', '{STACK := 1.5}'],
-    ['a stack given as a name', '{STACK := big}'],
-    ['an unknown key beside a good one', '{CORE := 0, PRIO := 1}'],
-    ['a missing assignment', '{STACK 8192}'],
-    ['a key given twice in one pragma', '{STACK := 8192, STACK := 4096}'],
-    ['a key given twice in two pragmas', '{STOP_ON_STUCK := FALSE} {STOP_ON_STUCK := TRUE}'],
-  ])('refuses %s, naming the task', (_what, pragma) => {
-    const result = compile(config(`
+    ["STOP_ON_STUCK as a number", "{STOP_ON_STUCK := 0}"],
+    ["STOP_ON_STUCK as a name", "{STOP_ON_STUCK := maybe}"],
+    ["STOP_ON_STUCK with no value", "{STOP_ON_STUCK := }"],
+    ["a zero stack", "{STACK := 0}"],
+    ["a stack below 1024 bytes", "{STACK := 512}"],
+    ["a stack past 64 MiB", "{STACK := 67108865}"],
+    ["a negative stack", "{STACK := -1}"],
+    ["a fractional stack", "{STACK := 1.5}"],
+    ["a stack given as a name", "{STACK := big}"],
+    ["an unknown key beside a good one", "{CORE := 0, PRIO := 1}"],
+    ["a missing assignment", "{STACK 8192}"],
+    ["a key given twice in one pragma", "{STACK := 8192, STACK := 4096}"],
+    [
+      "a key given twice in two pragmas",
+      "{STOP_ON_STUCK := FALSE} {STOP_ON_STUCK := TRUE}",
+    ],
+  ])("refuses %s, naming the task", (_what, pragma) => {
+    const result = compile(
+      config(`
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0);
-      TASK slow(INTERVAL := T#50ms, PRIORITY := 1) ${pragma};`));
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1) ${pragma};`),
+    );
     expect(result.success).toBe(false);
     expect(errors(result)).toMatch(/SLOW|slow/);
   });
 
-  it('accepts the smallest and largest stack', () => {
+  it("accepts the smallest and largest stack", () => {
     for (const n of [1024, 67108864]) {
-      const result = compile(config(`
+      const result = compile(
+        config(`
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {STACK := ${n}};
-      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`));
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`),
+      );
       expect(result.success).toBe(true);
     }
   });
 
-  it('refuses task settings in more than one configuration', () => {
+  it("refuses task settings in more than one configuration", () => {
     const result = compile(`${program}
   CONFIGURATION A
     RESOURCE R ON PLC
@@ -156,40 +174,44 @@ describe('TASK settings pragma', () => {
   });
 });
 
-describe('TASK RESTART_ON_FAULT pragma', () => {
+describe("TASK RESTART_ON_FAULT pragma", () => {
   const RESTART = `
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {RESTART_ON_FAULT := 60};
       TASK slow(INTERVAL := T#50ms, PRIORITY := 1) {STOP_ON_STUCK := FALSE, RESTART_ON_FAULT := 30};`;
 
-  it('is not emitted for a project without it', () => {
+  it("is not emitted for a project without it", () => {
     for (const tasks of [PLAIN, CORE_ONLY, ALL]) {
       const result = compile(config(tasks));
       expect(result.success).toBe(true);
-      expect(result.cppCode).not.toContain('strucpp_task_restart_on_fault');
+      expect(result.cppCode).not.toContain("strucpp_task_restart_on_fault");
     }
   });
 
-  it('is emitted with each task\'s seconds', () => {
+  it("is emitted with each task's seconds", () => {
     const result = compile(config(RESTART));
     expect(result.success).toBe(true);
-    expect(result.cppCode).toContain('strucpp_task_restart_on_fault');
-    expect(result.cppCode).toContain('delays[2] = {60u, 30u}');
+    expect(result.cppCode).toContain("strucpp_task_restart_on_fault");
+    expect(result.cppCode).toContain("delays[2] = {60u, 30u}");
   });
 
-  it('refuses a delay that is not 1..86400 whole seconds', () => {
-    for (const bad of ['0', '86401', 'T#1m', '1.5', 'TRUE']) {
-      const result = compile(config(`
+  it("refuses a delay that is not 1..86400 whole seconds", () => {
+    for (const bad of ["0", "86401", "T#1m", "1.5", "TRUE"]) {
+      const result = compile(
+        config(`
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {RESTART_ON_FAULT := ${bad}};
-      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`));
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`),
+      );
       expect(result.success).toBe(false);
       expect(errors(result)).toMatch(/not a restart delay/);
     }
   });
 
-  it('refuses it twice', () => {
-    const result = compile(config(`
+  it("refuses it twice", () => {
+    const result = compile(
+      config(`
       TASK fast(INTERVAL := T#10ms, PRIORITY := 0) {RESTART_ON_FAULT := 5, RESTART_ON_FAULT := 6};
-      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`));
+      TASK slow(INTERVAL := T#50ms, PRIORITY := 1);`),
+    );
     expect(result.success).toBe(false);
     expect(errors(result)).toMatch(/more than once/);
   });
@@ -197,29 +219,32 @@ describe('TASK RESTART_ON_FAULT pragma', () => {
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
-describeIfGpp('TASK settings pragma, compiled', () => {
+describeIfGpp("TASK settings pragma, compiled", () => {
   let tempDir: string;
 
   beforeAll(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'strucpp-task-settings-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-task-settings-"));
   });
 
   afterAll(() => {
-    if (tempDir && fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+    if (tempDir && fs.existsSync(tempDir))
+      fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('reports each task setting by resource and task index, the defaults elsewhere', () => {
+  it("reports each task setting by resource and task index, the defaults elsewhere", () => {
     const second = `
     RESOURCE Res2 ON PLC
       TASK other(INTERVAL := T#20ms, PRIORITY := 0) {STOP_ON_STUCK := FALSE, RESTART_ON_FAULT := 45};
       PROGRAM c WITH other : Main;
     END_RESOURCE`;
-    const result = compile(config(ALL, second), { headerFileName: 'generated.hpp' });
+    const result = compile(config(ALL, second), {
+      headerFileName: "generated.hpp",
+    });
     expect(result.success).toBe(true);
-    fs.writeFileSync(path.join(tempDir, 'generated.hpp'), result.headerCode);
-    fs.writeFileSync(path.join(tempDir, 'generated.cpp'), result.cppCode);
+    fs.writeFileSync(path.join(tempDir, "generated.hpp"), result.headerCode);
+    fs.writeFileSync(path.join(tempDir, "generated.cpp"), result.cppCode);
     fs.writeFileSync(
-      path.join(tempDir, 'main.cpp'),
+      path.join(tempDir, "main.cpp"),
       `#include <cstdint>
 #include <cstdio>
 extern "C" int32_t strucpp_task_core(uint32_t resource, uint32_t task);
@@ -238,16 +263,16 @@ int main() {
 }
 `,
     );
-    const exe = path.join(tempDir, 'settings');
+    const exe = path.join(tempDir, "settings");
     execSync(
-      `g++ -std=${CXX_STD} -I"${RUNTIME_INCLUDE_PATH}" -I"${tempDir}" "${path.join(tempDir, 'generated.cpp')}" "${path.join(tempDir, 'main.cpp')}" -o "${exe}"`,
-      { stdio: 'pipe' },
+      `g++ -std=${CXX_STD} -I"${RUNTIME_INCLUDE_PATH}" -I"${tempDir}" "${path.join(tempDir, "generated.cpp")}" "${path.join(tempDir, "main.cpp")}" -o "${exe}"`,
+      { stdio: "pipe" },
     );
-    expect(execSync(`"${exe}"`).toString().trim().split('\n')).toEqual([
-      'core -1 0 -1',
-      'stop 1 0 0 1 1',
-      'stack 8192 16384 0 0 0',
-      'restart 0 0 45 0',
+    expect(execSync(`"${exe}"`).toString().trim().split("\n")).toEqual([
+      "core -1 0 -1",
+      "stop 1 0 0 1 1",
+      "stack 8192 16384 0 0 0",
+      "restart 0 0 45 0",
     ]);
   });
 });

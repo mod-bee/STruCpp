@@ -264,8 +264,21 @@ END_FUNCTION_BLOCK
   it("are in the manifest, implemented and used by a consumer", () => {
     const archive = lib();
     expect(archive.manifest.interfaces?.[0]?.properties).toEqual([
-      { type: { name: "NVAL", type: "INT" }, get: true, set: true },
-      { type: { name: "BREADY", type: "BOOL" }, get: true, set: false },
+      {
+        name: "NVAL",
+        displayName: "nVal",
+        type: { type: "INT" },
+        visibility: "PUBLIC",
+        getter: true,
+        setter: true,
+      },
+      {
+        name: "BREADY",
+        displayName: "bReady",
+        type: { type: "BOOL" },
+        visibility: "PUBLIC",
+        getter: true,
+      },
     ]);
     const source = `
 FUNCTION_BLOCK FB_Mine IMPLEMENTS I_Part
@@ -331,7 +344,9 @@ PROGRAM P
 END_PROGRAM
 `;
   it("refuses a property of the wrong type, own, inherited or through an interface", () => {
-    expect(errorsOf(SRC("k := q.sName; f.nVal := 'text'; i.nVal := s;"))).toEqual([
+    expect(
+      errorsOf(SRC("k := q.sName; f.nVal := 'text'; i.nVal := s;")),
+    ).toEqual([
       "Cannot assign STRING to INT",
       "Cannot assign STRING to INT",
       "Cannot assign STRING to INT",

@@ -82,7 +82,9 @@ describe("analyze() API", () => {
 
     // Should resolve MyFB from the additional source — no "undeclared" error for the FB type
     const fbTypeErrors = result.errors.filter(
-      (e) => e.message.includes("MyFB") && e.message.toLowerCase().includes("undeclared"),
+      (e) =>
+        e.message.includes("MyFB") &&
+        e.message.toLowerCase().includes("undeclared"),
     );
     expect(fbTypeErrors).toHaveLength(0);
     expect(result.ast).toBeDefined();
@@ -108,7 +110,9 @@ describe("analyze() API", () => {
     `);
 
     expect(
-      result.errors.some((e) => /DOUBLE_IT.*missing required input.*IN/i.test(e.message)),
+      result.errors.some((e) =>
+        /DOUBLE_IT.*missing required input.*IN/i.test(e.message),
+      ),
     ).toBe(true);
   });
 
@@ -172,7 +176,9 @@ describe("analyze() API", () => {
           {
             name: "BIT_COUNT",
             returnType: "INT",
-            parameters: [{ name: "IN", type: "DWORD", direction: "input" as const }],
+            parameters: [
+              { name: "IN", type: "DWORD", direction: "input" as const },
+            ],
           },
         ],
         functionBlocks: [],
@@ -195,7 +201,9 @@ describe("analyze() API", () => {
     );
 
     expect(
-      result.errors.some((e) => /BIT_COUNT.*missing required input.*IN/i.test(e.message)),
+      result.errors.some((e) =>
+        /BIT_COUNT.*missing required input.*IN/i.test(e.message),
+      ),
     ).toBe(true);
   });
 
@@ -243,7 +251,9 @@ describe("analyze() API", () => {
     );
 
     // MAXV has a manifest default → optional; IN is provided.
-    expect(result.errors.some((e) => /missing required input/i.test(e.message))).toBe(false);
+    expect(
+      result.errors.some((e) => /missing required input/i.test(e.message)),
+    ).toBe(false);
   });
 
   it("returns a defined result for empty/whitespace input", () => {

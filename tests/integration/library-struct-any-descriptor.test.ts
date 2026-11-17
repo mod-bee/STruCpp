@@ -63,12 +63,14 @@ describe("a library STRUCT on an ANY pin", () => {
     const lines = (result.cppCode ?? "")
       .split("\n")
       .filter((l) => l.includes("strucpp::IEC_ANY{"));
-    const scalar = lines.find((l) => l.includes("TYPE_CLASS::TYPE_USERDEF, reinterpret_cast"));
+    const scalar = lines.find((l) =>
+      l.includes("TYPE_CLASS::TYPE_USERDEF, reinterpret_cast"),
+    );
     const array = lines.find((l) => l.includes("TYPE_CLASS::TYPE_ARRAY"));
     expect(scalar, lines.join("\n")).toBeDefined();
     expect(array, lines.join("\n")).toBeDefined();
     expect(scalar).toMatch(/&LIBSETTING__TYPEDESC/i);
     expect(array).toMatch(/&LIBSETTING__TYPEDESC/i);
-    expect(scalar).not.toContain("nullptr, \"one\"");
+    expect(scalar).not.toContain('nullptr, "one"');
   });
 });

@@ -17,7 +17,12 @@ import * as path from "path";
 import * as os from "os";
 import { compile } from "../../src/index.js";
 import { discoverStlibs } from "../../src/node/library-loader.js";
-import { hasGpp, RUNTIME_INCLUDE_PATH, CXX_STD, cxxEnv } from "./test-helpers.js";
+import {
+  hasGpp,
+  RUNTIME_INCLUDE_PATH,
+  CXX_STD,
+  cxxEnv,
+} from "./test-helpers.js";
 
 const LIBRARIES = discoverStlibs(path.resolve(__dirname, "../../libs"));
 
@@ -268,17 +273,17 @@ int main() {
       `
       FUNCTION_BLOCK Counter
         VAR n : DINT; END_VAR
-        METHOD PUBLIC Add : DINT
+        METHOD PUBLIC Bump : DINT
           VAR_INPUT d : DINT; END_VAR
           n := n + d;
-          Add := n;
+          Bump := n;
         END_METHOD
       END_FUNCTION_BLOCK
       PROGRAM Main
         VAR_EXTERNAL gC : Counter; gD : DINT; END_VAR
         VAR r : DINT; END_VAR
-        r := gC.Add(gD);
-        gC.Add(1);
+        r := gC.Bump(gD);
+        gC.Bump(1);
       END_PROGRAM
       CONFIGURATION Cfg
         VAR_GLOBAL gC : Counter; gD : DINT; END_VAR
@@ -293,10 +298,10 @@ int main() {
     expect(result.errors.map((e) => e.message)).toEqual([]);
     // The argument is read first; the call runs under the instance's lock.
     expect(result.cppCode).toMatch(
-      /\[&\]\{ auto (__gma\d+) = GD->read\(\); return GC->with_lock\(\[&\]\(auto\* __glk\)\{ return \(\*__glk\)\.ADD\(\1\); \}\); \}\(\)/,
+      /\[&\]\{ auto (__gma\d+) = GD->read\(\); return GC->with_lock\(\[&\]\(auto\* __glk\)\{ return \(\*__glk\)\.BUMP\(\1\); \}\); \}\(\)/,
     );
     expect(result.cppCode).toContain(
-      "GC->with_lock([&](auto* __glk){ return (*__glk).ADD(1); })",
+      "GC->with_lock([&](auto* __glk){ return (*__glk).BUMP(1); })",
     );
   });
 

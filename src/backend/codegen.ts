@@ -8196,9 +8196,16 @@ export class CodeGenerator {
       return `strucpp::iec_to_enum<${this.enumCppName(conv.target)}>(${value})`;
     }
     const argType = this.inferExprType(arg);
+    // To a number only: TO_STRING of an enumeration names its member
+    // ({attribute 'to_string'}), handled by the standard function.
+    const numeric =
+      conv.target !== "STRING" &&
+      conv.target !== "WSTRING" &&
+      isElementaryType(conv.target);
     if (
-      (conv.source !== undefined && isEnum(conv.source)) ||
-      (conv.source === undefined && isEnum(argType))
+      numeric &&
+      ((conv.source !== undefined && isEnum(conv.source)) ||
+        (conv.source === undefined && isEnum(argType)))
     ) {
       return `TO_${conv.target}(strucpp::iec_enum_int(${value}))`;
     }

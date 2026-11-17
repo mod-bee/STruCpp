@@ -43,21 +43,23 @@ CONFIGURATION Config0
   END_RESOURCE
 END_CONFIGURATION`;
 
-describeIfGpp("an enumeration's default when another enumeration shares its member names", () => {
-  let tempDir: string;
-  beforeAll(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-enumdef-"));
-  });
-  afterAll(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+describeIfGpp(
+  "an enumeration's default when another enumeration shares its member names",
+  () => {
+    let tempDir: string;
+    beforeAll(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "strucpp-enumdef-"));
+    });
+    afterAll(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
-  it("starts every declaration at its own type's default", () => {
-    const result = compile(SOURCE, { headerFileName: "generated.hpp" });
-    expect(result.errors.map((e) => e.message)).toEqual([]);
-    fs.writeFileSync(path.join(tempDir, "generated.hpp"), result.headerCode);
-    fs.writeFileSync(path.join(tempDir, "generated.cpp"), result.cppCode);
-    fs.writeFileSync(
-      path.join(tempDir, "main.cpp"),
-      `#include "generated.hpp"
+    it("starts every declaration at its own type's default", () => {
+      const result = compile(SOURCE, { headerFileName: "generated.hpp" });
+      expect(result.errors.map((e) => e.message)).toEqual([]);
+      fs.writeFileSync(path.join(tempDir, "generated.hpp"), result.headerCode);
+      fs.writeFileSync(path.join(tempDir, "generated.cpp"), result.cppCode);
+      fs.writeFileSync(
+        path.join(tempDir, "main.cpp"),
+        `#include "generated.hpp"
 #include <cstdio>
 strucpp::Configuration_CONFIG0 g_config;
 int main() {
@@ -69,13 +71,14 @@ int main() {
   return ok ? 0 : 1;
 }
 `,
-    );
-    const bin = path.join(tempDir, "enumdef");
-    execSync(
-      `g++ -std=${CXX_STD} -I"${RUNTIME_INCLUDE_PATH}" -I"${tempDir}" -o "${bin}" ` +
-        `"${path.join(tempDir, "main.cpp")}" "${path.join(tempDir, "generated.cpp")}"`,
-      { encoding: "utf-8", env: cxxEnv },
-    );
-    expect(execSync(`"${bin}"`, { encoding: "utf-8" }).trim()).toBe("ALL_OK");
-  });
-});
+      );
+      const bin = path.join(tempDir, "enumdef");
+      execSync(
+        `g++ -std=${CXX_STD} -I"${RUNTIME_INCLUDE_PATH}" -I"${tempDir}" -o "${bin}" ` +
+          `"${path.join(tempDir, "main.cpp")}" "${path.join(tempDir, "generated.cpp")}"`,
+        { encoding: "utf-8", env: cxxEnv },
+      );
+      expect(execSync(`"${bin}"`, { encoding: "utf-8" }).trim()).toBe("ALL_OK");
+    });
+  },
+);

@@ -10,7 +10,12 @@ import * as path from "path";
 import * as os from "os";
 import { execSync } from "child_process";
 import { compile } from "../../src/index.js";
-import { hasGpp, RUNTIME_INCLUDE_PATH, cxxEnv, CXX_STD } from "./test-helpers.js";
+import {
+  hasGpp,
+  RUNTIME_INCLUDE_PATH,
+  cxxEnv,
+  CXX_STD,
+} from "./test-helpers.js";
 
 const describeIfGpp = hasGpp ? describe : describe.skip;
 
