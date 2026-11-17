@@ -570,6 +570,20 @@ iec_named_base(const T& v) noexcept {
     return IECVar<U>(static_cast<U>(iec_enum_value(v)));
 }
 
+/** The integer value of an enumeration member: `<E>_TO_<T>(e)`, `TO_<T>(e)` (CODESYS). */
+template<typename T, std::enable_if_t<is_iec_enum_operand_v<std::decay_t<T>>, int> = 0>
+inline IECVar<typename std::underlying_type<iec_enum_of_t<std::decay_t<T>>>::type>
+iec_enum_int(const T& v) noexcept {
+    using U = typename std::underlying_type<iec_enum_of_t<std::decay_t<T>>>::type;
+    return IECVar<U>(static_cast<U>(iec_enum_value(v)));
+}
+
+/** The member of enumeration E whose integer value is `v`: `TO_<E>(x)`, `<T>_TO_<E>(x)` (CODESYS). */
+template<typename E, typename T>
+inline IEC_ENUM_Value<E> iec_to_enum(const T& v) noexcept {
+    return IEC_ENUM_Value<E>(static_cast<E>(iec_unwrap(v)));
+}
+
 /** A value already of the base type (a call that computed one) passes through. */
 template<typename T, std::enable_if_t<!is_iec_enum_operand_v<std::decay_t<T>>, int> = 0>
 inline const T& iec_named_base(const T& v) noexcept {

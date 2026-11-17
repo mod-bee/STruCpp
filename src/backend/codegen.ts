@@ -89,6 +89,7 @@ import {
   interfaceClosure,
 } from "../semantic/interface-utils.js";
 import { walkAST } from "../ast-utils.js";
+import { parseConversionName } from "../semantic/type-utils.js";
 import {
   arrayElementTypeName,
   buildEnumMemberMap,
@@ -8162,6 +8163,46 @@ export class CodeGenerator {
     }
   }
 
+  /** C++ of a conversion to or from an enumeration (see generateFunctionCallExpression), or undefined. */
+  private enumConversionCall(
+    expr: FunctionCallExpression,
+    nameUpper: string,
+  ): string | undefined {
+    if (
+      this.ast?.functions.some((f) => f.name.toUpperCase() === nameUpper) ===
+        true ||
+      this.libraryFunctionParams.has(nameUpper)
+    ) {
+      return undefined;
+    }
+    const conv = parseConversionName(nameUpper);
+    const arg = expr.arguments[0]?.value;
+    if (conv === undefined || arg === undefined) return undefined;
+    const isEnum = (name: string | undefined): boolean =>
+      name !== undefined && this.enumTypeMembers.has(name.toUpperCase());
+    const value = this.generateExpression(arg);
+    if (isEnum(conv.target)) {
+      return `strucpp::iec_to_enum<${this.enumCppName(conv.target)}>(${value})`;
+    }
+    const argType = this.inferExprType(arg);
+    if (
+      (conv.source !== undefined && isEnum(conv.source)) ||
+      (conv.source === undefined && isEnum(argType))
+    ) {
+      return `TO_${conv.target}(strucpp::iec_enum_int(${value}))`;
+    }
+    return undefined;
+  }
+
+  /** The C++ name of an enumeration type as its declaration spells it. */
+  private enumCppName(upper: string): string {
+    const local = this.ast?.types.find((t) => t.name.toUpperCase() === upper);
+    if (local !== undefined) return local.name;
+    return (
+      this.libraryEnumNames.find((n) => n.toUpperCase() === upper) ?? upper
+    );
+  }
+
   /**
    * Generate C++ for a function call expression.
    * Handles: dotted method calls (THIS.method, SUPER.method, instance.method),
@@ -8262,6 +8303,12 @@ export class CodeGenerator {
       );
       return `${this.currentFBExtends}::operator()(${args.join(", ")})`;
     }
+
+    // 0. A conversion to or from an enumeration (CODESYS), unless a function
+    // of the unit takes the name: TO_<E>(x) / <T>_TO_<E>(x) is the member
+    // whose integer value is x; <E>_TO_<T>(e) and TO_<T>(e) the value of e.
+    const enumConversion = this.enumConversionCall(expr, nameUpper);
+    if (enumConversion !== undefined) return enumConversion;
 
     // 0. ADR(x) → &(x) (CODESYS address-of operator)
     if (nameUpper === "ADR") {

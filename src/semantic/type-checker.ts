@@ -63,6 +63,7 @@ import {
   namedValuesBase,
   type AccessLookup,
   type AccessType,
+  parseConversionName,
 } from "./type-utils.js";
 import { stripEnEno } from "../ast-utils.js";
 import {
@@ -336,6 +337,22 @@ export class TypeChecker {
       errors: this.errors,
       warnings: this.warnings,
     };
+  }
+
+  /** The result type of a conversion to or from an enumeration, or undefined. */
+  enumConversionType(nameUpper: string): IECType | undefined {
+    const conv = parseConversionName(nameUpper);
+    if (conv === undefined) return undefined;
+    const enumOf = (name: string): IECType | undefined => {
+      const t = this.symbolTables.lookupType(name)?.resolvedType;
+      return t?.typeKind === "enum" ? t : undefined;
+    };
+    const target = enumOf(conv.target);
+    if (target !== undefined) return target;
+    if (conv.source !== undefined && enumOf(conv.source) !== undefined) {
+      return ELEMENTARY_TYPES[conv.target];
+    }
+    return undefined;
   }
 
   /**
@@ -1587,6 +1604,16 @@ export class TypeChecker {
       const retType = this.methodReturnType(ownMethod);
       if (retType) expr.resolvedType = retType;
       return retType;
+    }
+
+    // A conversion to or from an enumeration (CODESYS): `TO_<E>(x)` and
+    // `<T>_TO_<E>(x)` give the member whose integer value is x; `<E>_TO_<T>(e)`
+    // the member's integer value.
+    const enumConversion = this.enumConversionType(nameUpper);
+    if (enumConversion !== undefined) {
+      for (const arg of expr.arguments) this.resolveExprType(arg.value, scope);
+      expr.resolvedType = enumConversion;
+      return enumConversion;
     }
 
     // A registry entry proves the function exists even when the checks above
