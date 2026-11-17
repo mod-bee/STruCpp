@@ -227,6 +227,12 @@ export interface FunctionBlockDeclaration extends ASTNode {
    * block), upper-case name → C++ name, from the manifest's `cppName`.
    */
   libraryCppNames?: Record<string, string>;
+  /**
+   * Library blocks only: the upper-case names of its variables (pins and VAR
+   * members, inherited ones included) from the manifest; a library block's
+   * synthetic declaration has no variable blocks.
+   */
+  libraryVariables?: string[];
 }
 
 /**

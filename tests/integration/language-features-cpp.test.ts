@@ -764,7 +764,7 @@ FUNCTION_BLOCK L EXTENDS K METHOD Stop : BOOL Stop := TRUE; END_METHOD END_FUNCT
       { libraries: [lib.archive] },
     );
     expect(result.errors.map((e) => e.message)).toEqual([
-      "METHOD 'START' in FUNCTION_BLOCK 'D' has the same name as variable 'START' inherited from library FUNCTION_BLOCK 'LIBB'; rename the method",
+      "Method 'START' has the name of variable 'START' of base 'LIBB' (IEC 61131-3 6.6.5.5.5 rule 2)",
     ]);
   });
 

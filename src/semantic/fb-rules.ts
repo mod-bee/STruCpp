@@ -123,7 +123,9 @@ class Family {
   findProperty(
     fb: FunctionBlockDeclaration,
     name: string,
-  ): { owner: FunctionBlockDeclaration; prop: PropertyDeclaration } | undefined {
+  ):
+    | { owner: FunctionBlockDeclaration; prop: PropertyDeclaration }
+    | undefined {
     const upper = name.toUpperCase();
     for (const owner of this.lineage(fb)) {
       const prop = owner.properties.find((p) => p.name.toUpperCase() === upper);
@@ -422,6 +424,17 @@ function checkDeclarations(
           method.sourceSpan,
         );
       }
+      const libraryBase = bases.find(
+        (b) =>
+          family.fromLibrary.has(b) &&
+          (b.libraryVariables ?? []).includes(method.name.toUpperCase()),
+      );
+      if (!asVar && libraryBase !== undefined) {
+        err(
+          `Method '${method.name}' has the name of variable '${method.name}' of base '${libraryBase.name.toUpperCase()}' (IEC 61131-3 6.6.5.5.5 rule 2)`,
+          method.sourceSpan,
+        );
+      }
 
       const inherited = bases
         .map((b) => family.findMethod(b, method.name))
@@ -676,7 +689,9 @@ function checkMemberAccess(
                 reportVar(hit, `${v.name}.${field}`, v.sourceSpan, outside);
               // A property's access specifier (6.6.5.9 applies to it as to
               // a method): read and written through its accessors.
-              const found = hit ? undefined : family.findProperty(target, field);
+              const found = hit
+                ? undefined
+                : family.findProperty(target, field);
               if (
                 found !== undefined &&
                 !allowed(caller, found.owner, found.prop.visibility)

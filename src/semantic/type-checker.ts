@@ -2091,7 +2091,9 @@ export class TypeChecker {
     const pointee = this.declaredTypeRefOf(target, scope)?.name;
     const operand = value.arguments[0]?.value;
     const source =
-      operand !== undefined ? this.declaredTypeRefOf(operand, scope) : undefined;
+      operand !== undefined
+        ? this.declaredTypeRefOf(operand, scope)
+        : undefined;
     if (pointee === undefined || source === undefined) return;
     if (source.referenceKind !== undefined && source.referenceKind !== "none") {
       return;

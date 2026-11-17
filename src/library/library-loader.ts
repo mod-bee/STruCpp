@@ -873,6 +873,12 @@ export function libraryFunctionBlockDeclaration(
 
     body: [],
     ...(Object.keys(cppNames).length > 0 ? { libraryCppNames: cppNames } : {}),
+    libraryVariables: [
+      ...fb.inputs,
+      ...fb.outputs,
+      ...fb.inouts,
+      ...(fb.locals ?? []),
+    ].map((v) => v.name.toUpperCase()),
   };
 }
 
@@ -934,15 +940,8 @@ export function libraryOopDeclarations(manifests: readonly LibraryManifest[]): {
     for (const fb of manifest.functionBlocks) {
       const key = fb.name.toUpperCase();
       if (seen.has(key)) continue;
-      if (
-        fb.extends === undefined &&
-        (fb.implements ?? []).length === 0 &&
-        (fb.methods ?? []).length === 0 &&
-        fb.fbInit === undefined &&
-        fb.fbExit === undefined
-      ) {
-        continue;
-      }
+      // Every block: any may be a base of the unit's blocks, whose rules
+      // read its variables, methods and properties.
       seen.add(key);
       functionBlocks.push(libraryFunctionBlockDeclaration(fb));
     }
