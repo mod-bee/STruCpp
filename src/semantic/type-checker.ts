@@ -739,6 +739,43 @@ export class TypeChecker {
   /**
    * The IEC type a method returns, or undefined for a method with no result.
    */
+  /**
+   * A formal call (named arguments, or none) of a method may omit an input,
+   * which then takes its declared default (IEC 61131-3 Ed.3 6.6.1.4.2), but
+   * not one whose default reads a variable of the block rather than a
+   * constant: the call cannot evaluate it. A positional call is checked
+   * elsewhere.
+   */
+  private checkOmittedArguments(
+    callee: { name: string; varBlocks: VarBlock[] },
+    args: ReadonlyArray<{ name?: string }>,
+    at: Expression,
+  ): void {
+    if (args.length > 0 && args.some((a) => a.name === undefined)) return;
+    const given = new Set(
+      args
+        .map((a) => a.name?.toUpperCase())
+        .filter((n): n is string => n !== undefined),
+    );
+    const name = callee.name.toUpperCase();
+    for (const block of callee.varBlocks) {
+      if (block.blockType !== "VAR_INPUT") continue;
+      for (const decl of block.declarations) {
+        if (decl.defaultNotConstant !== true) continue;
+        for (const param of decl.names) {
+          const upper = param.toUpperCase();
+          if (given.has(upper)) continue;
+          this.addError(
+            `'${name}' is missing input '${upper}': its default is not constant`,
+            at.sourceSpan.startLine,
+            at.sourceSpan.startCol,
+            at.sourceSpan.file,
+          );
+        }
+      }
+    }
+  }
+
   private methodReturnType(method: MethodDeclaration): IECType | undefined {
     if (!method.returnType) return undefined;
     return (
@@ -1487,6 +1524,7 @@ export class TypeChecker {
         expr.functionName.slice(dot + 1),
       );
       if (dotted) {
+        this.checkOmittedArguments(dotted, expr.arguments, expr);
         const retType = this.methodReturnType(dotted);
         if (retType) expr.resolvedType = retType;
         return retType;
@@ -1520,6 +1558,7 @@ export class TypeChecker {
       expr.functionName,
     );
     if (ownMethod) {
+      this.checkOmittedArguments(ownMethod, expr.arguments, expr);
       const retType = this.methodReturnType(ownMethod);
       if (retType) expr.resolvedType = retType;
       return retType;
@@ -1627,6 +1666,7 @@ export class TypeChecker {
       }
     }
     if (method) {
+      this.checkOmittedArguments(method, expr.arguments, expr);
       this.validateInterfaceArguments(
         expr.arguments,
         method.varBlocks,

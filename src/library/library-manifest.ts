@@ -99,8 +99,10 @@ export interface LibraryVarType {
   referenceChain?: ReferenceKind[];
   /**
    * An input's declared default, as an ST expression string (e.g. "TRUE",
-   * "T#10s"). Present only on `inputs` declared with an initial value, the way
-   * a function parameter's `initialValue` is: such a pin may be left unwired.
+   * "T#10s"). Present on `inputs` declared with an initial value, the way
+   * a function parameter's `initialValue` is: such a pin may be left unwired;
+   * and on `locals` marked `readOnly` (a block's constants), which a method
+   * default naming them is evaluated with.
    */
   initialValue?: string;
   /**

@@ -13,6 +13,8 @@
 
 import { describe, it, expect } from "vitest";
 import { compileStlib } from "../../src/library/library-compiler.js";
+import { compile } from "../../src/index.js";
+import type { StlibArchive } from "../../src/library/library-manifest.js";
 
 function fnParams(source: string, fnName: string) {
   const result = compileStlib([{ source, fileName: "lib.st" }], {
@@ -158,5 +160,63 @@ describe("library manifest: function-block VAR_INPUT initial values", () => {
     expect("initialValue" in byName.HOST!).toBe(false);
     // Only inputs carry it: an output's initial value is not a call-site default.
     expect("initialValue" in fb!.outputs[0]!).toBe(false);
+  });
+});
+
+// release-0.7 (0.7.0-modbee.5): defaults that were dropped, and a block's constants a method default names.
+describe("library manifest: defaults recorded as written", () => {
+  const lib = `
+    TYPE
+      {attribute 'qualified_only'}
+      E_U : (None, Bar) := None;
+      ST_C : STRUCT eU : E_U; n : INT; END_STRUCT;
+    END_TYPE
+    FUNCTION F_D : INT
+      VAR_INPUT
+        a : E_U := E_U.Bar;
+        s : ST_C := (eU := E_U.Bar, n := 2);
+        arr : ARRAY[1..2] OF INT := [3, 4];
+      END_VAR
+      F_D := s.n;
+    END_FUNCTION
+    FUNCTION_BLOCK FB_P
+      VAR CONSTANT cPort : INT := 1883; END_VAR
+      METHOD PUBLIC Port : INT
+        VAR_INPUT n : INT := cPort; e : E_U := E_U.Bar; END_VAR
+        Port := n;
+      END_METHOD
+    END_FUNCTION_BLOCK
+  `;
+  const built = () =>
+    compileStlib([{ source: lib, fileName: "lib.st" }], { name: "d-lib", version: "1.0.0", namespace: "d" });
+
+  it("records a qualified enumeration value, a struct literal and an array literal", () => {
+    const result = built();
+    expect(result.success).toBe(true);
+    const fn = result.archive!.manifest.functions.find((f) => f.name === "F_D")!;
+    const by = Object.fromEntries(fn.parameters.map((p) => [p.name, p.initialValue]));
+    expect(by.A).toMatch(/^E_U\.BAR$/i);
+    expect(by.S).toMatch(/^\(EU := E_U\.BAR, N := 2\)$/i);
+    expect(by.ARR).toBe("[3, 4]");
+    const fb = result.archive!.manifest.functionBlocks.find((b) => b.name === "FB_P")!;
+    const m = fb.methods!.find((x) => x.name === "PORT")!;
+    expect(m.inputs.find((i) => i.name === "E")!.initialValue).toMatch(/^E_U\.BAR$/i);
+  });
+
+  it("records a block's constants with their values", () => {
+    const fb = built().archive!.manifest.functionBlocks.find((b) => b.name === "FB_P")!;
+    expect(fb.locals?.find((l) => l.name === "CPORT")).toMatchObject({ readOnly: true, initialValue: "1883" });
+  });
+
+  it("a consumer resolves a method default naming the block's constant", () => {
+    // An archive whose method default names the constant (as 0.8 records it)
+    const archive = JSON.parse(JSON.stringify(built().archive)) as StlibArchive;
+    const fb = archive.manifest.functionBlocks.find((b) => b.name === "FB_P")!;
+    fb.methods!.find((x) => x.name === "PORT")!.inputs.find((i) => i.name === "N")!.initialValue = "cPort";
+    const r = compile(`PROGRAM P VAR p : FB_P; x : INT; END_VAR x := p.Port(); END_PROGRAM`, {
+      libraries: [archive],
+    });
+    expect(r.errors).toEqual([]);
+    expect(r.cppCode).toMatch(/P\.PORT\(\(1883\), E_U::BAR\)/);
   });
 });

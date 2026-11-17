@@ -65,6 +65,16 @@ function serializeInitialValue(expr: Expression): string | undefined {
       ) {
         return `${expr.name}#${expr.fieldAccess[0]}`;
       }
+      // A qualified one, `E.Member` (or a constant's member), as written: it
+      // was dropped, so a function call omitting the input was refused and a
+      // method call passed the type's zero value.
+      if (
+        expr.subscripts.length === 0 &&
+        expr.fieldAccess.length === 1 &&
+        !expr.isDereference
+      ) {
+        return `${expr.name}.${expr.fieldAccess[0]}`;
+      }
       // A bare named constant/enum used as a default (no subscripts/fields).
       return expr.subscripts.length === 0 &&
         expr.fieldAccess.length === 0 &&
@@ -88,6 +98,22 @@ function serializeInitialValue(expr: Expression): string | undefined {
       return left === undefined || right === undefined
         ? undefined
         : `${left} ${expr.operator} ${right}`;
+    }
+    // `(field := value, ...)` and `[a, b]`: dropped for the same reason.
+    case "StructInitializerExpression": {
+      const parts = expr.elements.map((el) => {
+        const v = serializeInitialValue(el.value);
+        return v === undefined ? undefined : `${el.name} := ${v}`;
+      });
+      return parts.some((p) => p === undefined)
+        ? undefined
+        : `(${parts.join(", ")})`;
+    }
+    case "ArrayLiteralExpression": {
+      const parts = expr.elements.map((el) => serializeInitialValue(el));
+      return parts.some((p) => p === undefined)
+        ? undefined
+        : `[${parts.join(", ")}]`;
     }
     default:
       return undefined;
@@ -165,7 +191,16 @@ function serializeLocal(
   };
   const cppName = mangledMemberName(name, decl.type.name, ctx);
   if (cppName !== name) entry.cppName = cppName;
-  if (block.isConstant) entry.readOnly = true;
+  if (block.isConstant) {
+    entry.readOnly = true;
+    // Its value, as written: a consumer evaluates a method default that
+    // names it in the block's terms.
+    const value =
+      decl.initialValue !== undefined
+        ? serializeInitialValue(decl.initialValue)
+        : undefined;
+    if (value !== undefined) entry.initialValue = value;
+  }
   if (block.isRetain) entry.retain = true;
   if (block.isNonRetain) entry.nonRetain = true;
   return entry;

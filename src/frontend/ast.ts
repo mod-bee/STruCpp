@@ -340,6 +340,12 @@ export interface VarDeclaration extends ASTNode {
   kind: "VarDeclaration";
   names: string[];
   /**
+   * An input whose default reads a variable of the block rather than a
+   * constant: a call that omits the input cannot evaluate it there, so it
+   * must pass it (set by the loader for a library method).
+   */
+  defaultNotConstant?: true;
+  /**
    * The same names, spelled as they were declared.
    *
    * `names` is folded (IEC 61131-3 §6.1.2) and everything that resolves,

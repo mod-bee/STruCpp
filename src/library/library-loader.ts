@@ -34,9 +34,11 @@ import type {
   VarBlock,
   VarBlockType,
   VarDeclaration,
+  VariableExpression,
 } from "../frontend/ast.js";
 import { createDefaultSourceSpan } from "../frontend/ast.js";
 import { parseInitialValueText } from "../frontend/expression-text.js";
+import { walkAST } from "../ast-utils.js";
 import { qualifiedEnumValue } from "../frontend/type-defaults.js";
 import { ELEMENTARY_TYPES } from "../semantic/type-utils.js";
 
@@ -386,6 +388,8 @@ function makeVarDeclaration(v: LibraryVarType): VarDeclaration {
 function makeVarBlock(
   blockType: VarBlockType,
   vars: readonly LibraryVarType[],
+  constants?: ReadonlyMap<string, Expression>,
+  variables?: ReadonlySet<string>,
 ): VarBlock {
   return {
     kind: "VarBlock",
@@ -394,8 +398,123 @@ function makeVarBlock(
     isConstant: false,
     isRetain: false,
     isNonRetain: false,
-    declarations: vars.map(makeVarDeclaration),
+    declarations: vars.map((v) => {
+      const decl = makeVarDeclaration(v);
+      // An input's default, which a call that omits the input passes (IEC
+      // 61131-3 6.6.1.4.2), resolved in the callee's terms: the block's
+      // constants it names are replaced by their values. A library method's
+      // defaults were not read at all, so an omitted input got its type's
+      // zero value.
+      if (blockType === "VAR_INPUT" && v.initialValue !== undefined) {
+        const value = parseInitialValueText(v.initialValue);
+        if (value !== undefined) {
+          decl.initialValue = substituteConstants(value, constants);
+          // One that reads a variable of the block cannot be evaluated by
+          // the call: such a call must pass the input.
+          let reads = false;
+          walkAST(decl.initialValue, (node) => {
+            if (
+              node.kind === "VariableExpression" &&
+              variables?.has((node as VariableExpression).name.toUpperCase())
+            ) {
+              reads = true;
+            }
+          });
+          if (reads) decl.defaultNotConstant = true;
+        }
+      }
+      return decl;
+    }),
   } as VarBlock;
+}
+
+/**
+ * `expr` with every plain name of `constants` replaced by its value (itself
+ * resolved the same way), parenthesised so the operator precedence holds.
+ */
+function substituteConstants(
+  expr: Expression,
+  constants: ReadonlyMap<string, Expression> | undefined,
+  depth = 0,
+): Expression {
+  if (constants === undefined || constants.size === 0 || depth > 16) {
+    return expr;
+  }
+  const visit = (e: Expression): Expression => {
+    if (
+      e.kind === "VariableExpression" &&
+      e.fieldAccess.length === 0 &&
+      e.subscripts.length === 0 &&
+      !e.isDereference
+    ) {
+      const value = constants.get(e.name.toUpperCase());
+      if (value !== undefined) {
+        return {
+          kind: "ParenthesizedExpression",
+          sourceSpan: e.sourceSpan,
+          expression: substituteConstants(value, constants, depth + 1),
+        } as Expression;
+      }
+      return e;
+    }
+    const copy = { ...e } as Record<string, unknown>;
+    for (const [key, child] of Object.entries(e)) {
+      if (key === "sourceSpan" || key === "parent") continue;
+      if (Array.isArray(child)) {
+        copy[key] = child.map((c) =>
+          isExpressionNode(c)
+            ? visit(c)
+            : isElement(c)
+              ? { ...c, value: visit(c.value) }
+              : c,
+        );
+      } else if (isExpressionNode(child)) {
+        copy[key] = visit(child);
+      }
+    }
+    return copy as unknown as Expression;
+  };
+  return visit(expr);
+}
+
+function isExpressionNode(v: unknown): v is Expression {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as { kind?: unknown }).kind === "string" &&
+    /Expression$/.test((v as { kind: string }).kind)
+  );
+}
+
+/** A call argument or a structure element: a node holding one value. */
+function isElement(v: unknown): v is { value: Expression } {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    ((v as { kind?: unknown }).kind === "Argument" ||
+      (v as { kind?: unknown }).kind === "StructElementInitializer") &&
+    isExpressionNode((v as { value?: unknown }).value)
+  );
+}
+
+/** Upper-case names of a library block's variables that are not constants. */
+function blockVariables(fb: LibraryFBEntry): Set<string> {
+  return new Set(
+    [...fb.inputs, ...fb.outputs, ...fb.inouts, ...(fb.locals ?? [])]
+      .filter((v) => v.readOnly !== true)
+      .map((v) => v.name.toUpperCase()),
+  );
+}
+
+/** A library block's constants by upper-case name: its `locals` marked `readOnly` with a value. */
+function blockConstants(fb: LibraryFBEntry): Map<string, Expression> {
+  const out = new Map<string, Expression>();
+  for (const v of fb.locals ?? []) {
+    if (v.readOnly !== true || v.initialValue === undefined) continue;
+    const value = parseInitialValueText(v.initialValue);
+    if (value !== undefined) out.set(v.name.toUpperCase(), value);
+  }
+  return out;
 }
 
 /**
@@ -403,9 +522,15 @@ function makeVarBlock(
  * all a consumer type-checks a call against and generates it from. The body
  * lives in the library's C++ chunk.
  */
-function makeMethodDeclaration(m: LibraryMethodEntry): MethodDeclaration {
+function makeMethodDeclaration(
+  m: LibraryMethodEntry,
+  constants?: ReadonlyMap<string, Expression>,
+  variables?: ReadonlySet<string>,
+): MethodDeclaration {
   const varBlocks: VarBlock[] = [];
-  if (m.inputs.length > 0) varBlocks.push(makeVarBlock("VAR_INPUT", m.inputs));
+  if (m.inputs.length > 0) {
+    varBlocks.push(makeVarBlock("VAR_INPUT", m.inputs, constants, variables));
+  }
   if (m.outputs.length > 0) {
     varBlocks.push(makeVarBlock("VAR_OUTPUT", m.outputs));
   }
@@ -448,7 +573,7 @@ export function libraryInterfaceDeclaration(
     ...(entry.extends !== undefined && entry.extends.length > 0
       ? { extends: [...entry.extends] }
       : {}),
-    methods: entry.methods.map(makeMethodDeclaration),
+    methods: entry.methods.map((m) => makeMethodDeclaration(m)),
     ...((entry.properties ?? []).length > 0
       ? {
           properties: (entry.properties ?? []).map(
@@ -491,7 +616,9 @@ export function libraryFunctionBlockDeclaration(
       : {}),
     varBlocks: [],
     methods: [
-      ...(fb.methods ?? []).map(makeMethodDeclaration),
+      ...(fb.methods ?? []).map((m) =>
+        makeMethodDeclaration(m, blockConstants(fb), blockVariables(fb)),
+      ),
       ...lifecyclePrototypes(fb),
     ],
     properties: [],
@@ -883,11 +1010,14 @@ export function registerLibrarySymbols(
   // are skipped, first-wins), a program importing several libraries can see all
   // of their globals together at the same place — globals are additive.
   for (const g of manifest.globals ?? []) {
-    const varType: ElementaryType = ELEMENTARY_TYPES[g.type.toUpperCase()] ?? {
-      typeKind: "elementary",
-      name: g.type,
-      sizeBits: 0,
-    };
+    // A global of a declared type (an enumeration, a struct the library or
+    // one it depends on exports) takes that type, registered above: a
+    // placeholder made it a distinct type, so passing the global to the
+    // library's own function of that type was refused.
+    const varType: IECType =
+      ELEMENTARY_TYPES[g.type.toUpperCase()] ??
+      symbolTables.lookupType(g.type)?.resolvedType ??
+      ({ typeKind: "elementary", name: g.type, sizeBits: 0 } as ElementaryType);
     try {
       symbolTables.globalScope.define({
         name: g.name,
