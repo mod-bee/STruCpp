@@ -17,8 +17,8 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | DATE_AND_TIME | Supported | |
 | LTIME, LTOD, LDT | Supported | 64-bit nanoseconds, sharing TIME/TOD/DT storage. Literals `LT#`, `LTIME#`, `LTOD#`, `LDT#`; implicit TIME→LTIME, TOD→LTOD, DT→LDT |
 | LDATE | Not implemented | Needs nanoseconds; DATE stores whole days, so it cannot share DATE's representation |
-| STRING | Supported | Parameterized length: STRING(N), default 254 |
-| WSTRING | Supported | Parameterized length: WSTRING(N) |
+| STRING | Supported | Parameterized length: STRING(N) (CODESYS) or STRING[N] (IEC 61131-3 Ed.3), default 254 |
+| WSTRING | Supported | Parameterized length: WSTRING(N) or WSTRING[N] |
 | CHAR, WCHAR | Supported | |
 
 ### Derived Types
@@ -27,7 +27,7 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 |------|--------|-------|
 | TYPE ... END_TYPE | Supported | Type aliases |
 | STRUCT ... END_STRUCT | Supported | With nested structs. An access path naming an element its type does not declare (`s.nosuch`, `arr[1].inner.nosuch`, `fb.nosuch`) is an error at the ST line (§6.4.4.6.1; Table 41 features 6a, 7) — for structures, local or from a library manifest, and user function blocks. A library block's members are not judged: its manifest omits what it inherits, its methods and its properties |
-| Enumerations | Supported | §6.4.4.2, Table 11 feature 1: stored as INT. Compared only with a value of its own type; Table 38 admits SEL, MUX, EQ and NE, and a value of one is not converted to or from an integer in an assignment or a parameter (§6.6.1.6, Figure 11). `TO_*` yields its number. `<`, `>`, `<=` and `>=` between two values of one enumeration also compile, outside Table 38 |
+| Enumerations | Supported | §6.4.4.2, Table 11 feature 1: stored as INT. Compared only with a value of its own type; Table 38 admits SEL, MUX, EQ and NE, and a value of one is not converted to or from an integer in an assignment or a parameter (§6.6.1.6, Figure 11). `TO_*` yields its number. `<`, `>`, `<=` and `>=` between two values of one enumeration also compile, outside Table 38 CODESYS conversions `TO_<E>(x)` / `<T>_TO_<E>(x)` give the member of integer value x, `<E>_TO_<T>(e)` / `TO_<T>(e)` its value |
 | Data types with named values | Supported | §6.4.4.3, Table 11 feature 2: `T : USINT (A := 0, B := 1) := B`. The base is an integer or bit-string type, and stored at its width; every value must fit it. Its values are values of the base type: a constant or calculation may be assigned (`x := 27`, `x := A + 1`), they compare and compute as the base, and convert implicitly as the base does (Figure 12) in assignments and input/output parameters, not in-outs. Standard functions other than SEL, MUX, EQ and NE (`ADD`, `MAX`, `LIMIT`, …) do not take one |
 | One declaration per type name | Supported | A `TYPE` name declared twice in one compilation (one file or several) is an error at the second declaration (§6.4.4.1.1, §6.9.1: one name, one element of the global namespace). A project type of the same name as a library type replaces the library's |
 | Initialized type declarations | Supported | A type may carry its own default (`Setpoint : REAL := 25.0;`, `Origin : Point := (x := 0.0);`), inherited by every declaration of the type that has no initializer |
@@ -39,7 +39,7 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | Subranges | Supported | Runtime validation |
 | REF_TO | Supported | IEC reference type (explicit dereference) |
 | REFERENCE_TO | Supported | CODESYS reference type (implicit dereference), to an elementary type, a STRING / WSTRING, a structure, an array or a block instance (`r.n`, `r()`); `REF_TO` likewise (`p^.n`). A `REFERENCE TO` input of a block or method is bound by the call (`fb(refData := d)`, CODESYS "Data Type: REFERENCE TO"): the argument is a variable of the referenced type or a REFERENCE TO one. `r REF= other` with `other` a REFERENCE TO binds to what it refers to |
-| POINTER TO | Supported | CODESYS pointer type with dereference via ^ |
+| POINTER TO | Supported | CODESYS pointer type with dereference via ^; initialised in its declaration with `ADR(v)` of a global or a variable of the same POU (a REF_TO with `REF(v)`, 6.4.4.10.2) |
 
 ### Not Implemented
 
@@ -124,7 +124,7 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | Reference | `REF()` | Supported |
 | Parentheses | `( )` | Supported |
 | Function call | `name(args)` | Supported (positional + named). A formal call maps its arguments by name in any order, and an omitted input takes its declared initial value (§6.6.1.4.2), for a library function too; a `VAR_OUTPUT` is written back with `=>` (§6.6.2.2) |
-| Method call | `obj.method(args)` | Supported |
+| Method call | `obj.method(args)` | Supported. Calls with side effects that are operands of one operator, or arguments of one call, are evaluated left to right (7.3.2) |
 | Array access | `arr[i]`, `arr[i, j]` | Supported — the index count is validated against the declared rank |
 | Field access | `struct.field` | Supported |
 | Partial access | `var.0`, `var.%X0`, `var.%B1`, `var.%W0`, `var.%D1` | Supported — read and write. Also accepted on the integer types, which warns, as CODESYS's SA0148 does |
