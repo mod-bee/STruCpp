@@ -3731,17 +3731,40 @@ export class CodeGenerator {
           }
         }
       } else if (block.blockType === "VAR_OUTPUT") {
+        // By pointer, NULL for an output the call omits: the function binds
+        // its own slot then (functionOutputBindings), so a call site builds
+        // no temporary for it — as a method's outputs.
         for (const decl of block.declarations) {
           for (const name of decl.names) {
-            // Same metadata-aware lookup as VAR_IN_OUT — see the comment above.
             params.push(
-              `${this.mapTypeRefToCpp(this.toParamTypeRef(decl.type))}& ${this.functionVarName(name, decl.type.name)}`,
+              `${this.mapTypeRefToCpp(this.toParamTypeRef(decl.type))}* ${this.functionVarName(name, decl.type.name)}${METHOD_OUTPUT_SUFFIX}`,
             );
           }
         }
       }
     }
     return params;
+  }
+
+  /** The opening lines of a function body: each VAR_OUTPUT bound by its own
+   *  name to the caller's variable, or to a slot built only when omitted. */
+  private functionOutputBindings(
+    func: CompilationUnit["functions"][0],
+  ): string[] {
+    const lines: string[] = [];
+    for (const block of func.varBlocks) {
+      if (block.blockType !== "VAR_OUTPUT") continue;
+      for (const decl of block.declarations) {
+        for (const name of decl.names) {
+          const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(decl.type));
+          const cppName = this.functionVarName(name, decl.type.name);
+          lines.push(
+            `    strucpp::OutSlot<${cppType}> ${cppName}__slot; ${cppType}& ${cppName} = ${cppName}__slot.bind(${cppName}${METHOD_OUTPUT_SUFFIX}); (void)${cppName};`,
+          );
+        }
+      }
+    }
+    return lines;
   }
 
   /** The C++ name of a function parameter or local: `<name>_` when it is
@@ -4465,6 +4488,7 @@ export class CodeGenerator {
 
     // Helper to emit local variable declarations (VAR/VAR_TEMP) and body
     const emitFunctionBody = (funcName: string) => {
+      for (const line of this.functionOutputBindings(func)) this.emit(line);
       this.emit(`    ${retType} ${funcName}_result;`);
       this.currentFunctionName = func.name;
       this.enterScope(func.varBlocks);
@@ -4558,10 +4582,18 @@ export class CodeGenerator {
   ): string[] {
     const names: string[] = [];
     for (const block of func.varBlocks) {
-      if (block.blockType === "VAR_INPUT" || block.blockType === "VAR_IN_OUT") {
+      if (
+        block.blockType === "VAR_INPUT" ||
+        block.blockType === "VAR_IN_OUT" ||
+        block.blockType === "VAR_OUTPUT"
+      ) {
+        const suffix =
+          block.blockType === "VAR_OUTPUT" ? METHOD_OUTPUT_SUFFIX : "";
         for (const decl of block.declarations) {
           for (const name of decl.names) {
-            names.push(this.functionVarName(name, decl.type.name));
+            names.push(
+              `${this.functionVarName(name, decl.type.name)}${suffix}`,
+            );
           }
         }
       }
@@ -6988,6 +7020,14 @@ export class CodeGenerator {
    * actual of any length binds: `strucpp::by_ref` is the actual itself when
    * its type is the parameter's, else a copy assigned back after the call.
    */
+  /** A function's VAR_OUTPUT argument: the bound variable's address (the
+   *  parameter is a pointer, NULL when omitted). Anything else as it is. */
+  private outputArgument(param: CallParam | undefined, code: string): string {
+    if (param?.kind !== "VAR_OUTPUT") return code;
+    const cppType = this.mapTypeRefToCpp(this.toParamTypeRef(param.type));
+    return `strucpp::out_ptr<${cppType}>(${code})`;
+  }
+
   private byRefStringArg(param: CallParam | undefined, code: string): string {
     if (
       param === undefined ||
@@ -7345,6 +7385,8 @@ export class CodeGenerator {
     const exprCount = argExprs.length;
     for (let i = 0; i < args.length && i < paramTypes.length; i++) {
       if (i >= exprCount) break; // padded temp vars have no expr to infer from
+      // An output is the bound variable's address, never a converted value.
+      if (args[i]!.startsWith("strucpp::out_ptr<")) continue;
       const expr = argExprs[i]!.value;
       const argType = this.inferExprType(expr);
       if (!argType) continue;
@@ -7925,13 +7967,16 @@ export class CodeGenerator {
       const generated =
         this.generateGenericArgument(generics, paramName, arg.value) ??
         this.referenceInputArgument(param, arg.value) ??
-        this.byRefStringArg(
+        this.outputArgument(
           param,
-          this.dereferenceArgument(
-            param?.kind,
-            param?.type,
-            arg.value,
-            this.generateExpression(arg.value),
+          this.byRefStringArg(
+            param,
+            this.dereferenceArgument(
+              param?.kind,
+              param?.type,
+              arg.value,
+              this.generateExpression(arg.value),
+            ),
           ),
         );
       if (arg.isOutput && arg.value.kind !== "VariableExpression") {
@@ -7967,10 +8012,9 @@ export class CodeGenerator {
         }
         while (args.length < paramInfo.length) {
           const param = paramInfo[args.length]!;
-          if (
-            param.blockType === "VAR_OUTPUT" ||
-            param.blockType === "VAR_IN_OUT"
-          ) {
+          if (param.blockType === "VAR_OUTPUT") {
+            args.push("nullptr");
+          } else if (param.blockType === "VAR_IN_OUT") {
             args.push(this.emitOutputTempVarOfType(param.type));
           } else {
             args.push(this.getTypeDefaultValue(param.type.name));
@@ -7986,7 +8030,11 @@ export class CodeGenerator {
           if (param.direction !== "output" && param.direction !== "inout") {
             break;
           }
-          args.push(this.emitOutputTempVarOfType(libraryParamTypeRef(param)));
+          args.push(
+            param.direction === "output"
+              ? "nullptr"
+              : this.emitOutputTempVarOfType(libraryParamTypeRef(param)),
+          );
         }
       }
     }
@@ -8307,16 +8355,22 @@ export class CodeGenerator {
             value,
           )
         : undefined) ??
-      this.byRefStringArg(
-        param.typeRef &&
-          (param.blockType === "VAR_IN_OUT" || param.blockType === "VAR_OUTPUT")
+      this.outputArgument(
+        param.typeRef && param.blockType === "VAR_OUTPUT"
           ? { name: param.name, kind: param.blockType, type: param.typeRef }
           : undefined,
-        this.dereferenceArgument(
-          param.blockType,
-          param.typeRef,
-          value,
-          this.generateExpression(value),
+        this.byRefStringArg(
+          param.typeRef &&
+            (param.blockType === "VAR_IN_OUT" ||
+              param.blockType === "VAR_OUTPUT")
+            ? { name: param.name, kind: param.blockType, type: param.typeRef }
+            : undefined,
+          this.dereferenceArgument(
+            param.blockType,
+            param.typeRef,
+            value,
+            this.generateExpression(value),
+          ),
         ),
       );
 
@@ -8350,10 +8404,9 @@ export class CodeGenerator {
     for (let i = 0; i < params.length; i++) {
       if (result[i] === undefined) {
         const param = params[i]!;
-        if (
-          param.blockType === "VAR_OUTPUT" ||
-          param.blockType === "VAR_IN_OUT"
-        ) {
+        if (param.blockType === "VAR_OUTPUT") {
+          result[i] = "nullptr";
+        } else if (param.blockType === "VAR_IN_OUT") {
           result[i] = param.typeRef
             ? this.emitOutputTempVarOfType(param.typeRef)
             : this.emitOutputTempVar(param.typeName);
@@ -8367,10 +8420,8 @@ export class CodeGenerator {
     return result.map((v, i) => {
       if (v !== undefined) return v;
       const param = params[i]!;
-      if (
-        param.blockType === "VAR_OUTPUT" ||
-        param.blockType === "VAR_IN_OUT"
-      ) {
+      if (param.blockType === "VAR_OUTPUT") return "nullptr";
+      if (param.blockType === "VAR_IN_OUT") {
         return param.typeRef
           ? this.emitOutputTempVarOfType(param.typeRef)
           : this.emitOutputTempVar(param.typeName);

@@ -315,7 +315,7 @@ describe("Codegen - Function Calls", () => {
   });
 
   describe("function with VAR_OUTPUT", () => {
-    it("should generate VAR_OUTPUT as reference parameter", () => {
+    it("should generate VAR_OUTPUT as a pointer parameter", () => {
       const result = compileAndCheck(`
         FUNCTION Divide : INT
           VAR_INPUT dividend : INT; divisor : INT; END_VAR
@@ -331,12 +331,12 @@ describe("Codegen - Function Calls", () => {
       `);
 
       // The function header should have remainder as a reference
-      expect(result.headerCode).toContain("IEC_INT& REMAINDER");
+      expect(result.headerCode).toContain("IEC_INT* REMAINDER__out");
     });
   });
 
   describe("VAR_OUTPUT call-site codegen", () => {
-    it("should pass variable as-is for output argument at call site", () => {
+    it("should pass the variable's address for an output argument", () => {
       const result = compileAndCheck(`
         FUNCTION Divide : INT
           VAR_INPUT dividend : INT; divisor : INT; END_VAR
@@ -352,7 +352,9 @@ describe("Codegen - Function Calls", () => {
       `);
 
       // The output argument r should be passed directly (no copies or temporaries)
-      expect(result.cppCode).toMatch(/DIVIDE\(10, 3, R\)/);
+      expect(result.cppCode).toMatch(
+        /DIVIDE\(10, 3, strucpp::out_ptr<IEC_INT>\(R\)\)/,
+      );
     });
 
     it("should handle mixed input/output with reordering", () => {
@@ -371,7 +373,9 @@ describe("Codegen - Function Calls", () => {
       `);
 
       // Named args should be reordered to declaration order: (dividend, divisor, remainder)
-      expect(result.cppCode).toMatch(/DIVIDE\(10, 3, R\)/);
+      expect(result.cppCode).toMatch(
+        /DIVIDE\(10, 3, strucpp::out_ptr<IEC_INT>\(R\)\)/,
+      );
     });
 
     it("should warn when output argument is not a variable", () => {
@@ -436,8 +440,9 @@ describe("Codegen - Function Calls", () => {
       `);
 
       // Should emit a temp variable declaration and pass it
-      expect(result.cppCode).toContain("IEC_INT __output_tmp_0;");
-      expect(result.cppCode).toMatch(/DIVIDE\(10, 3, __output_tmp_0\)/);
+      // An omitted output is NULL: no temporary at the call site.
+      expect(result.cppCode).not.toContain("__output_tmp_");
+      expect(result.cppCode).toMatch(/DIVIDE\(10, 3, nullptr\)/);
     });
 
     it("should generate temp variable for named call omitting VAR_OUTPUT", () => {
@@ -456,8 +461,9 @@ describe("Codegen - Function Calls", () => {
       `);
 
       // Should emit a temp variable declaration and pass it
-      expect(result.cppCode).toContain("IEC_INT __output_tmp_0;");
-      expect(result.cppCode).toMatch(/DIVIDE\(10, 3, __output_tmp_0\)/);
+      // An omitted output is NULL: no temporary at the call site.
+      expect(result.cppCode).not.toContain("__output_tmp_");
+      expect(result.cppCode).toMatch(/DIVIDE\(10, 3, nullptr\)/);
     });
 
     it("should generate multiple temp variables for multiple omitted VAR_OUTPUT", () => {
@@ -476,12 +482,9 @@ describe("Codegen - Function Calls", () => {
         END_PROGRAM
       `);
 
-      // Should emit two temp variables
-      expect(result.cppCode).toContain("IEC_INT __output_tmp_0;");
-      expect(result.cppCode).toContain("IEC_REAL __output_tmp_1;");
-      expect(result.cppCode).toMatch(
-        /MULTIOUT\(5, __output_tmp_0, __output_tmp_1\)/,
-      );
+      // Two omitted outputs: NULL each, no temporaries
+      expect(result.cppCode).not.toContain("__output_tmp_");
+      expect(result.cppCode).toMatch(/MULTIOUT\(5, nullptr, nullptr\)/);
     });
 
     it("should handle partial omit — some VAR_OUTPUT provided, some not", () => {
@@ -501,8 +504,10 @@ describe("Codegen - Function Calls", () => {
       `);
 
       // quotient is provided (q), remainder should get a temp
-      expect(result.cppCode).toContain("IEC_INT __output_tmp_0;");
-      expect(result.cppCode).toMatch(/DIVMOD\(10, 3, Q, __output_tmp_0\)/);
+      expect(result.cppCode).not.toContain("__output_tmp_");
+      expect(result.cppCode).toMatch(
+        /DIVMOD\(10, 3, strucpp::out_ptr<IEC_INT>\(Q\), nullptr\)/,
+      );
     });
   });
 

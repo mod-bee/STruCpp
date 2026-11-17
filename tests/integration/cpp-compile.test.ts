@@ -653,11 +653,9 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    // Verify the function signature has reference parameter
-    expect(result.headerCode).toContain('IEC_INT& REMAINDER');
-
-    // Verify the call site passes r directly
-    expect(result.cppCode).toContain('DIVIDE(10, 3, R)');
+    // The output is a pointer parameter; the call site passes r's address
+    expect(result.headerCode).toContain('IEC_INT* REMAINDER__out');
+    expect(result.cppCode).toContain('DIVIDE(10, 3, strucpp::out_ptr<IEC_INT>(R))');
 
     const cppResult = compileWithGpp(result.headerCode, result.cppCode, 'func_var_output');
     expect(cppResult.success).toBe(true);
@@ -1636,8 +1634,8 @@ int main() {
     const result = compile(source);
     expect(result.success).toBe(true);
 
-    // Verify a temp variable is emitted
-    expect(result.cppCode).toContain('__output_tmp_');
+    // An omitted output is NULL: the function writes a slot of its own
+    expect(result.cppCode).toContain('DIVIDE(10, 3, nullptr)');
 
     const mainCode = `
 #include <iostream>
