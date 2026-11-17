@@ -100,6 +100,12 @@ FUNCTION_BLOCK FB_Conv
     END_VAR
     Conv := INT_TO_DINT(F_Code(e := eU) * 100 + F_Code(e := eV) * 10 + F_Code(e := eW));
   END_METHOD
+  METHOD PUBLIC ConvM : INT
+    VAR_INPUT
+      mM : E_Mode2;                   // the type's default is Low, not its first value
+    END_VAR
+    ConvM := F_MCode(m := mM);
+  END_METHOD
   nOut := F_Code(e := eIn) * 10 + F_Code(e := eIn2);
 END_FUNCTION_BLOCK
 `;
@@ -107,13 +113,14 @@ END_FUNCTION_BLOCK
 const SOURCE = `
 PROGRAM P
   VAR
-    r1 : DINT; r2 : DINT; r3 : DINT; r4 : DINT; r5 : INT; r6 : INT;
+    r1 : DINT; r2 : DINT; r3 : DINT; r4 : DINT; r5 : INT; r6 : INT; r7 : INT;
     fb : FB_Conv;
   END_VAR
   r1 := F_UnitConv(fIn := 5.0);
   r2 := F_Explicit();
   r3 := F_Struct();
   r4 := fb.Conv(eU := E_Unit.Bar);
+  r7 := fb.ConvM();
   fb();
   r5 := fb.nOut;
   r6 := F_Code(e := gUnit) * 100 + F_Code(e := gUnit2) * 10 + F_MCode(m := gMode);
@@ -133,6 +140,7 @@ const EXPECT: Array<[string, number]> = [
   ["R4", 120],   // Bar given, KPa default, None (type default)
   ["R5", 1],     // the block's inputs: None (type default), Bar
   ["R6", 201],   // GLOBALs: KPa, None, Low
+  ["R7", 1],     // a METHOD input: E_Mode2's type default Low
 ];
 
 describeIfGpp("enumeration defaults from a library reach every call site qualified", () => {
