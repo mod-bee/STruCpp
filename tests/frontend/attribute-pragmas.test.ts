@@ -233,12 +233,12 @@ END_CONFIGURATION`;
 TYPE Pt : STRUCT {attribute 'on_field'} x : DINT; END_STRUCT; END_TYPE
 VAR_GLOBAL {attribute 'on_global'} Gain : DINT; END_VAR
 {attribute 'on_interface'}
-INTERFACE IRun {attribute 'on_imethod'} METHOD Run : BOOL END_METHOD END_INTERFACE
+INTERFACE IRun {attribute 'on_imethod'} METHOD Run : BOOL VAR_INPUT Fast : BOOL; END_VAR END_METHOD END_INTERFACE
 {attribute 'on_function'}
 FUNCTION Twice : DINT VAR_INPUT {attribute 'on_fparam'} V : DINT; END_VAR Twice := V * 2; END_FUNCTION
 FUNCTION_BLOCK B IMPLEMENTS IRun
   {attribute 'on_method'}
-  METHOD Run : BOOL VAR_INPUT {attribute 'on_mparam'} Fast : BOOL; END_VAR Run := Fast; END_METHOD
+  METHOD PUBLIC Run : BOOL VAR_INPUT {attribute 'on_mparam'} Fast : BOOL; END_VAR Run := Fast; END_METHOD
   {attribute 'on_property'}
   PROPERTY Size : DINT GET Size := 1; END_GET END_PROPERTY
 END_FUNCTION_BLOCK`,

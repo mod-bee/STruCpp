@@ -178,6 +178,14 @@ function serializeLocal(
  * does not (see `LibraryVarType.declaredName`), so an all-caps library adds
  * nothing to its manifest.
  */
+/** A declaration's initial value as ST text, when it has one the manifest can carry. */
+function initialValueOf(expr: Expression | undefined): {
+  initialValue?: string;
+} {
+  const text = expr !== undefined ? serializeInitialValue(expr) : undefined;
+  return text !== undefined ? { initialValue: text } : {};
+}
+
 /** The attribute pragmas of a declaration, as the manifest records them. */
 function attributesOf(node: {
   attributes?: ReadonlyArray<{ name: string; value?: string }>;
@@ -651,14 +659,29 @@ function compileNativeEntries(
     };
   };
 
+  const userTypes = userDefinedTypeNames(result.ast);
+  const ifaceMethods = fbMethodNamesByBlock(result.ast);
   return {
     functionBlocks: result.ast.functionBlocks.map((fb) => {
       // A native block's methods are declared in its header, like an ST
       // block's; their bodies are native too.
       const methods = publicMethodsOf([fb]);
+      const ctx: MemberManglingContext = {
+        isUserDefinedType: (n) => userTypes.has(n.toUpperCase()),
+        interfaceMethods: ifaceMethods.get(fb.name.toUpperCase()),
+      };
+      // Its VAR members, as an ST block's: retained with a RETAIN instance.
+      const locals = fb.varBlocks
+        .filter((b) => b.blockType === "VAR")
+        .flatMap((b) =>
+          b.declarations.flatMap((d) =>
+            d.names.map((n) => serializeLocal(n, d, b, ctx)),
+          ),
+        );
       return tagNative({
-        ...buildFBEntry(fb),
+        ...buildFBEntry(fb, ctx),
         ...(methods.length > 0 ? { methods } : {}),
+        ...(locals.length > 0 ? { locals } : {}),
       });
     }),
     errors: [],
@@ -1063,6 +1086,7 @@ export function compileLibrary(
               ...declaredNameOf(name, decl.declaredNames?.[i]),
               ...attributesOf(decl),
               type: decl.type.name,
+              ...initialValueOf(decl.initialValue),
               ...(block.isConstant ? { constant: true } : {}),
             },
             catByName,

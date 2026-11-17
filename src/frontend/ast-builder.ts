@@ -1184,9 +1184,11 @@ export class ASTBuilder {
    */
   buildEnumMember(node: CstNode): EnumMember {
     const children = node.children as CstChildren;
-    const nameToken = getAllTokens(children.Identifier)[0];
-    const name = nameToken?.image ?? "";
-    const declaredName = nameToken ? declaredImageOf(nameToken) : "";
+    const nameNode = getFirstNode(children.identifierOrKeyword);
+    const name = nameNode ? getIdentifierOrKeywordImage(nameNode) : "";
+    const declaredName = nameNode
+      ? getIdentifierOrKeywordDeclared(nameNode)
+      : "";
 
     // Check for explicit value: := expression
     let value: Expression | undefined;

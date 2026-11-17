@@ -677,7 +677,20 @@ function checkMemberAccess(
         const found = family.findMethod(target, methodName);
         if (!found) return undefined;
         const { owner, method } = found;
-        if (allowed(caller, owner, method.visibility)) return undefined;
+        // Through another instance (not THIS or SUPER), a PROTECTED method is
+        // the caller's only on an instance of its own block or one derived
+        // from it: an instance of a base is outside (IEC 61131-3 6.6.5.9, as
+        // C++ protected access, which the generated call is).
+        const viaOther =
+          objName.toUpperCase() !== "THIS" && objName.toUpperCase() !== "SUPER";
+        const protectedViaBase =
+          method.visibility === "PROTECTED" &&
+          viaOther &&
+          caller !== undefined &&
+          !family.isOrDerives(target, caller);
+        if (!protectedViaBase && allowed(caller, owner, method.visibility)) {
+          return undefined;
+        }
         err(
           method.visibility === "PRIVATE"
             ? `Cannot call PRIVATE method '${methodName}' of '${owner.name.toUpperCase()}' from outside '${owner.name.toUpperCase()}'.`

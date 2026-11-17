@@ -192,6 +192,95 @@ function validateHeaders(headers: unknown): string[] {
 }
 
 /**
+ * Refuses malformed descriptive fields along every exported declaration of a
+ * raw manifest: `attributes` must be a list of named attribute pragmas, and
+ * `declaredName` and `initialValue` strings.
+ */
+function validateDescriptions(obj: Record<string, unknown>): void {
+  const isRecord = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v);
+  const one = (owner: unknown, where: string): void => {
+    if (!isRecord(owner)) return;
+    for (const key of ["declaredName", "initialValue"] as const) {
+      if (owner[key] !== undefined && typeof owner[key] !== "string") {
+        throw new LibraryManifestError(
+          `Invalid library manifest: ${where}.${key} must be a string`,
+        );
+      }
+    }
+    if (owner.attributes === undefined) return;
+    if (!Array.isArray(owner.attributes)) {
+      throw new LibraryManifestError(
+        `Invalid library manifest: ${where}.attributes must be an array`,
+      );
+    }
+    owner.attributes.forEach((a: unknown, k) => {
+      if (
+        !isRecord(a) ||
+        typeof a.name !== "string" ||
+        a.name === "" ||
+        (a.value !== undefined && typeof a.value !== "string")
+      ) {
+        throw new LibraryManifestError(
+          `Invalid library manifest: ${where}.attributes[${k}] must have a non-empty string name and an optional string value`,
+        );
+      }
+    });
+  };
+  const list = (owner: unknown, key: string, where: string): void => {
+    if (!isRecord(owner) || !Array.isArray(owner[key])) return;
+    (owner[key] as unknown[]).forEach((e, k) =>
+      one(e, `${where}.${key}[${k}]`),
+    );
+  };
+  const method = (m: unknown, where: string): void => {
+    one(m, where);
+    for (const key of ["inputs", "outputs", "inouts"]) list(m, key, where);
+  };
+  const each = (key: string, fn: (e: unknown, where: string) => void): void => {
+    if (!Array.isArray(obj[key])) return;
+    (obj[key] as unknown[]).forEach((e, i) => fn(e, `${key}[${i}]`));
+  };
+  each("functions", (fn, where) => {
+    one(fn, where);
+    list(fn, "parameters", where);
+  });
+  each("functionBlocks", (fb, where) => {
+    one(fb, where);
+    for (const key of ["inputs", "outputs", "inouts", "locals"]) {
+      list(fb, key, where);
+    }
+    if (isRecord(fb) && Array.isArray(fb.methods)) {
+      fb.methods.forEach((m: unknown, j) =>
+        method(m, `${where}.methods[${j}]`),
+      );
+    }
+    if (isRecord(fb) && fb.fbInit !== undefined) {
+      method(fb.fbInit, `${where}.fbInit`);
+    }
+  });
+  each("types", (t, where) => {
+    one(t, where);
+    list(t, "fields", where);
+  });
+  each("globals", (g, where) => one(g, where));
+  each("interfaces", (iface, where) => {
+    one(iface, where);
+    if (isRecord(iface) && Array.isArray(iface.methods)) {
+      iface.methods.forEach((m: unknown, j) =>
+        method(m, `${where}.methods[${j}]`),
+      );
+    }
+    if (isRecord(iface) && Array.isArray(iface.properties)) {
+      iface.properties.forEach((p: unknown, j) => {
+        one(p, `${where}.properties[${j}]`);
+        if (isRecord(p)) one(p.type, `${where}.properties[${j}].type`);
+      });
+    }
+  });
+}
+
+/**
  * Load a library manifest from a JSON object.
  * Validates required fields and structure.
  * (In production, this would read from a .stlib.json file on disk.)
@@ -206,6 +295,7 @@ export function loadLibraryManifest(json: unknown): LibraryManifest {
   }
 
   const obj = json as Record<string, unknown>;
+  validateDescriptions(obj);
 
   // Validate required top-level fields
   const name = obj.name;

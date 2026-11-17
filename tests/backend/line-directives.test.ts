@@ -278,7 +278,7 @@ END_PROGRAM
     it('should emit #line for interface declaration in header', () => {
       const source = `
 INTERFACE IMovable
-  METHOD Drive : BOOL
+  METHOD Move : BOOL
     VAR_INPUT
       distance : INT;
     END_VAR
@@ -295,7 +295,7 @@ FUNCTION_BLOCK Robot IMPLEMENTS IMovable
       distance : INT;
     END_VAR
     position := position + distance;
-    Drive := TRUE;
+    Move := TRUE;
   END_METHOD
 END_FUNCTION_BLOCK
 

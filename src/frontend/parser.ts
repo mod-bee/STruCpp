@@ -819,7 +819,9 @@ export class STParser extends CstParser {
    * Enumeration member: NAME or NAME := value
    */
   public enumMember = this.RULE("enumMember", () => {
-    this.CONSUME(tokens.Identifier);
+    // A word ST reserves only in another context (`ON` of RESOURCE ... ON)
+    // names a member too, as CODESYS allows: `(Off, On)`.
+    this.SUBRULE(this.identifierOrKeyword);
     this.OPTION(() => {
       this.CONSUME(tokens.Assign);
       this.SUBRULE(this.expression);

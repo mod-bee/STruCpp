@@ -6171,7 +6171,8 @@ export class CodeGenerator {
     const value =
       (stmt.target.kind === "VariableExpression"
         ? this.interfaceArrayLiteral(stmt.value, this.accessType(stmt.target))
-        : undefined) ?? this.generateExpression(stmt.value);
+        : undefined) ??
+      this.generateRealOperand(stmt.value, this.inferExprType(stmt.target));
 
     this.emit(`${indent}${target} = ${value};`);
   }
@@ -7135,13 +7136,16 @@ export class CodeGenerator {
    * Generate C++ for a binary expression.
    */
   private generateBinaryExpression(expr: BinaryExpression): string {
-    const left = this.generateExpression(expr.left);
-    const right = this.generateExpression(expr.right);
+    const left = this.generateRealOperand(
+      expr.left,
+      this.realLiteralContext(expr.right),
+    );
+    const right = this.generateRealOperand(
+      expr.right,
+      this.realLiteralContext(expr.left),
+    );
 
-    // Power operator needs special handling
-    if (expr.operator === "**") {
-      return `std::pow(static_cast<double>(${left}), static_cast<double>(${right}))`;
-    }
+    if (expr.operator === "**") return this.powerCpp(expr, left, right);
 
     const cppOp = CodeGenerator.BINARY_OP_MAP[expr.operator] ?? expr.operator;
 
@@ -7167,6 +7171,76 @@ export class CodeGenerator {
     }
 
     return `${left} ${cppOp} ${right}`;
+  }
+
+  /**
+   * C++ for `left ** right`. A REAL or LREAL result goes through EXPT with
+   * both operands of that type, so REAL computes in single precision exactly
+   * like EXPT (IEC 61131-3 Ed.3 6.6.2.5.4: `**` is EXPT); other results keep
+   * a double `pow`.
+   */
+  private powerCpp(
+    expr: BinaryExpression,
+    left: string,
+    right: string,
+  ): string {
+    const result = this.inferExprType(expr)?.toUpperCase();
+    if (result === "REAL" || result === "LREAL") {
+      const t = result === "REAL" ? "REAL_t" : "LREAL_t";
+      return `EXPT(static_cast<${t}>(${left}), static_cast<${t}>(${right}))`;
+    }
+    return `std::pow(static_cast<double>(${left}), static_cast<double>(${right}))`;
+  }
+
+  /**
+   * An untyped real literal (`1.5`, not `LREAL#1.5`) takes the type of its
+   * context (IEC 61131-3 Ed.3 6.3.2: a literal without a type prefix is typed
+   * by its use): in a REAL context it is emitted as a float (`1.5f`), so REAL
+   * arithmetic stays in single precision, which REAL is (Table 10: 32 bits)
+   * and a microcontroller without double-precision hardware needs;
+   * otherwise as a double.
+   */
+  private generateRealOperand(
+    expr: Expression,
+    contextType: string | undefined,
+  ): string {
+    const generated = this.generateExpression(expr);
+    if (contextType?.toUpperCase() !== "REAL") return generated;
+    if (
+      this.isUntypedRealLiteral(expr) &&
+      /^[-+]?[\d.eE+-]+$/.test(generated)
+    ) {
+      return `${generated}f`;
+    }
+    if (
+      expr.kind === "UnaryExpression" &&
+      expr.operator === "-" &&
+      this.isUntypedRealLiteral(expr.operand)
+    ) {
+      const inner = this.generateExpression(expr.operand);
+      if (/^[\d.eE+-]+$/.test(inner)) return `-${inner}f`;
+    }
+    return generated;
+  }
+
+  private isUntypedRealLiteral(expr: Expression): boolean {
+    return (
+      expr.kind === "LiteralExpression" &&
+      expr.literalType === "REAL" &&
+      !expr.rawValue.includes("#")
+    );
+  }
+
+  /** Type an operand gives an untyped real literal next to it; none when it is one itself. */
+  private realLiteralContext(expr: Expression): string | undefined {
+    if (this.isUntypedRealLiteral(expr)) return undefined;
+    if (
+      expr.kind === "UnaryExpression" &&
+      this.isUntypedRealLiteral(expr.operand)
+    ) {
+      return undefined;
+    }
+    return this.inferExprType(expr);
   }
 
   /**
