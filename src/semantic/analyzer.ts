@@ -5045,8 +5045,15 @@ export class SemanticAnalyzer {
     // Skip empty or VOID type names
     if (!typeRef.name || typeRef.name.toUpperCase() === "VOID") return;
 
-    // For inline arrays, validate the element type instead
-    const nameToCheck = typeRef.elementTypeName ?? typeRef.name;
+    // For arrays, validate the element type instead. A variable-length array
+    // (`ARRAY [*] OF T`) names T only inside its synthetic `__VLA_<n>D_T`
+    // name, which isKnownType whitelists, so T is taken out of it here: an
+    // unknown T is otherwise an error only g++ reports (IEC 61131-3 6.4.4.1:
+    // a variable's type is an elementary or a declared one).
+    const nameToCheck =
+      typeRef.elementTypeName ??
+      arrayElementTypeName(typeRef.name) ??
+      typeRef.name;
 
     if (!this.isKnownType(nameToCheck)) {
       this.addError(
@@ -5200,6 +5207,12 @@ export class SemanticAnalyzer {
           method.varBlocks,
           `METHOD '${method.name}' of INTERFACE '${iface.name}'`,
           true,
+        );
+      }
+      for (const prop of iface.properties ?? []) {
+        this.validateSingleTypeReference(
+          prop.type,
+          `PROPERTY '${prop.name}' of INTERFACE '${iface.name}'`,
         );
       }
     }
