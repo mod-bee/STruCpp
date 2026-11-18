@@ -11,6 +11,8 @@
 
 import { describe, it, expect } from "vitest";
 import { compile } from "../../src/index.js";
+import { compileStlib } from "../../src/library/library-compiler.js";
+import type { StlibArchive } from "../../src/library/library-manifest.js";
 
 const CFG = `
 CONFIGURATION Config0
@@ -236,5 +238,49 @@ VAR RETAIN s : STRING(${n}); END_VAR
 END_PROGRAM${CFG}`);
     expect(result.errors.map((e) => e.message)).toEqual([]);
     expect(result.debugMap!.retainBlobSize).toBe(65535);
+  });
+});
+
+describe("library archives carry the real string lengths", () => {
+  it("records named lengths as numbers and counts them in the retain size", () => {
+    const lib = compileStlib(
+      [
+        {
+          fileName: "l.st",
+          source: `VAR_GLOBAL CONSTANT LIBLEN : INT := 300; END_VAR
+FUNCTION_BLOCK FB_X
+VAR CONSTANT L : INT := 40; END_VAR
+VAR_INPUT i : STRING(L); END_VAR
+VAR RETAIN note : STRING(LIBLEN); END_VAR
+END_FUNCTION_BLOCK`,
+        },
+      ],
+      { name: "strlen-lib", version: "1.0.0", namespace: "strlenlib" },
+    );
+    expect(lib.errors).toEqual([]);
+    const archive = JSON.parse(JSON.stringify(lib.archive)) as StlibArchive;
+    const fb = archive.manifest.functionBlocks[0]!;
+    expect(fb.inputs.find((v) => v.name === "I")?.maxLength).toBe(40);
+    expect(fb.locals?.find((v) => v.name === "NOTE")?.maxLength).toBe(300);
+
+    const result = compile(
+      `PROGRAM Main
+VAR RETAIN x : FB_X; END_VAR
+END_PROGRAM${CFG}`,
+      { headerFileName: "generated.hpp", libraries: [archive] },
+    );
+    expect(result.errors.map((e) => e.message)).toEqual([]);
+    expect(result.debugMap!.retainVars!.map((v) => v.path)).toEqual([
+      "INSTANCE0.X.I",
+      "INSTANCE0.X.L",
+      "INSTANCE0.X.NOTE",
+    ]);
+    // Format 3: header 14; payload [u16 len] + 40, INT 2, [u16 len] + 300;
+    // trailer 4 + 3 * 7.
+    expect(result.debugMap!.retainFormat).toBe(3);
+    expect(result.debugMap!.retainBlobSize).toBe(14 + 2 + 42 + 302 + 4 + 21);
+    expect(result.debugTableCpp).toMatch(
+      /string_cap<[^>]*NOTE[^>]*>::value == 300/,
+    );
   });
 });
