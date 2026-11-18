@@ -11439,6 +11439,8 @@ export class CodeGenerator {
     declaredType: string,
   ): string | undefined {
     if (arrayElementTypeName(declaredType) !== undefined) return undefined;
+    const literal = this.anyDescriptorForStringLiteral(expr, declaredType);
+    if (literal !== undefined) return literal;
     // A string literal is as long as it is written: the default STRING (254)
     // would cut a longer one.
     const literalLength =
@@ -11469,6 +11471,55 @@ export class CodeGenerator {
     return (
       `strucpp::any_of_temporary(${cppType}(${this.generateExpression(expr)}), ` +
       `[](${cppType}& __anyv) { return ${describe}; })`
+    );
+  }
+
+  /**
+   * The descriptor for a STRING or WSTRING literal: the characters and the
+   * descriptor are static constants made once, so a call copies nothing and
+   * no string type is made per literal length.
+   *
+   * IEC 61131-3:2013 6.4.3 leaves generic types in a user POU to the
+   * implementer; a method's inputs are a function's (6.6.5.4.3 rule 9,
+   * 6.6.2.3), and an input is not assigned inside the POU (6.6.3.4.2,
+   * Figure 13 row 2). So the callee reads the literal (a constant, 6.3.3)
+   * where it lives, as it reads a variable through PVALUE.
+   *
+   * DISIZE stays SIZEOF of the literal's type STRING(n) / WSTRING(n), n at
+   * least 1. The storage is never shorter than that, nor than the text.
+   */
+  private anyDescriptorForStringLiteral(
+    expr: Expression,
+    declaredType: string,
+  ): string | undefined {
+    if (
+      expr.kind !== "LiteralExpression" ||
+      (expr.literalType !== "STRING" && expr.literalType !== "WSTRING") ||
+      typeof expr.value !== "string"
+    ) {
+      return undefined;
+    }
+    const wide = expr.literalType === "WSTRING";
+    const elements = Math.max(1, iecStringLiteralLength(expr.value, wide)) + 1;
+    const text = this.generateExpression(expr);
+    const unit = wide ? "char16_t" : "uint8_t";
+    const count = wide
+      ? `sizeof(${text}) / sizeof(char16_t)`
+      : `sizeof(${text})`;
+    // A STRING's bytes are uint8_t, which keeps the descriptor a constant
+    // expression; a WSTRING's address has to be reinterpreted.
+    const pvalue = wide
+      ? "const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(__anys))"
+      : "const_cast<uint8_t*>(__anys)";
+    const typeClass = wide ? "TYPE_WSTRING" : "TYPE_STRING";
+    const size = `static_cast<int32_t>(${elements} * sizeof(${unit}))`;
+    return (
+      `[]() -> const strucpp::IEC_ANY& { ` +
+      `static const ${unit} __anys[${count} > ${elements} ? ${count} : ${elements}] = ${text}; ` +
+      `static const strucpp::IEC_ANY __anyd{ strucpp::TYPE_CLASS::${typeClass}, ${pvalue}, ` +
+      `${size}, 1, ${size}, strucpp::TYPE_CLASS::${typeClass}, nullptr, ` +
+      `${this.anyIdentityFields(expr, declaredType)} }; ` +
+      `return __anyd; }()`
     );
   }
 

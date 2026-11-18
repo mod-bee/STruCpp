@@ -3,7 +3,8 @@
  * method or a function.
  *
  * It has no storage, so the descriptor points into a temporary of its
- * declared type that lives for the call. The generated code used to call
+ * declared type that lives for the call; a STRING or WSTRING literal points
+ * into read-only static storage instead (any-string-literal-static-cpp). The generated code used to call
  * `.raw_ptr()` on the literal itself (`"y=log".raw_ptr()`), which is not C++.
  * Each call below is run and what the callee received is checked, including
  * a loop condition that must build a fresh temporary every time it is tested.
