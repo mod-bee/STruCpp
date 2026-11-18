@@ -847,6 +847,12 @@ END_PROGRAM${CFG}`;
   strucpp_debug_read_text(${BIG}, 34990, 100, data, 64, &info);
   expect_eq("tail count", info.count, 10);
   expect_eq("tail unit", data[0] | (data[1] << 8), 0x0100 | (uint8_t)pat(34990));
+  // A CONSTANT reads with bit1 set; a writable string without it.
+  strucpp_debug_read_text(${idx(b, "INSTANCE0.C")}, 0, 10, data, 10, &info);
+  expect_eq("constant flag", info.flags, 2);
+  expect_eq("constant text", info.len, 5);
+  strucpp_debug_read_text(${BIG}, 0, 1, data, 10, &info);
+  expect_eq("writable flag", info.flags & 2, 0);
   // Refusals.
   expect_eq("constant", strucpp_debug_write_text(${idx(b, "INSTANCE0.C")}, data, 3), STATUS_READ_ONLY);
   expect_eq("not a string", strucpp_debug_write_text(${idx(b, "INSTANCE0.N")}, data, 3), 0x81);

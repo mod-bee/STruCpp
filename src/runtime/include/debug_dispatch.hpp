@@ -912,7 +912,7 @@ extern "C" {
 typedef struct {
     uint8_t  status;   // 0x7E OK, 0x81 not a string / out of range, 0x83 not loaded
     uint8_t  tag;      // the leaf's debug type tag (STRING or WSTRING)
-    uint8_t  flags;    // bit0 = forced
+    uint8_t  flags;    // bit0 = forced, bit1 = read-only (a CONSTANT)
     uint16_t cap;      // declared length (code units)
     uint16_t len;      // current length (code units)
     uint16_t count;    // code units copied into data
@@ -940,6 +940,8 @@ inline uint8_t handle_read_text_chunk(uint8_t arr, uint16_t elem, uint16_t offse
     const bool text = e.tag == TAG_STRING || e.tag == TAG_WSTRING;
     if (e.ptr != nullptr && text && (e.flags & LEAF_FLAG_RAW) == 0) {
         const bool wide = e.tag == TAG_WSTRING;
+        // bit1: a write would be refused, so a runtime can say so up front.
+        const unsigned readonly = (e.flags & LEAF_FLAG_READONLY) != 0 ? 2u : 0u;
         out.tag = e.tag;
         out.cap = static_cast<uint16_t>(debug_capacity(e.cap));
         // Units that fit in data_cap bytes.
@@ -949,7 +951,7 @@ inline uint8_t handle_read_text_chunk(uint8_t arr, uint16_t elem, uint16_t offse
         if (wide) {
             const auto view = iec_wstring_view(e.ptr, out.cap);
             out.len = *view.length;
-            out.flags = *view.forced ? 1 : 0;
+            out.flags = static_cast<uint8_t>((*view.forced ? 1u : 0u) | readonly);
             n = offset < out.len ? static_cast<uint16_t>(out.len - offset) : 0;
             if (n > max) n = max;
             if (n > room) n = static_cast<uint16_t>(room);
@@ -961,7 +963,7 @@ inline uint8_t handle_read_text_chunk(uint8_t arr, uint16_t elem, uint16_t offse
         } else {
             const auto view = iec_string_view(e.ptr, out.cap);
             out.len = *view.length;
-            out.flags = *view.forced ? 1 : 0;
+            out.flags = static_cast<uint8_t>((*view.forced ? 1u : 0u) | readonly);
             n = offset < out.len ? static_cast<uint16_t>(out.len - offset) : 0;
             if (n > max) n = max;
             if (n > room) n = static_cast<uint16_t>(room);
