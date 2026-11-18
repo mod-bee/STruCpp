@@ -21,6 +21,8 @@
 #include "iec_types.hpp"
 #include "iec_var.hpp"
 #include "iec_std_lib.hpp"
+#include "iec_string.hpp"
+#include "debug_table.hpp"   // debug::string_cap, for a STRING descriptor
 #include "isocline.h"
 #include <string>
 #include <cstring>
@@ -62,6 +64,8 @@ struct VarDescriptor {
     const char* name;
     VarTypeTag type;
     void* var_ptr;
+    /** A STRING's declared length; 0 for other types (and older mains: 254). */
+    uint16_t cap = 0;
 };
 
 struct ProgramDescriptor {
@@ -203,7 +207,7 @@ inline bool var_is_forced(VarTypeTag type, void* ptr) {
     }
 }
 
-inline bool var_set_value(VarTypeTag type, void* ptr, const std::string& val) {
+inline bool var_set_value(VarTypeTag type, void* ptr, const std::string& val, uint16_t cap = 0) {
     try {
         switch (type) {
             case VarTypeTag::BOOL:
@@ -226,21 +230,15 @@ inline bool var_set_value(VarTypeTag type, void* ptr, const std::string& val) {
             case VarTypeTag::LWORD: static_cast<IECVar<LWORD_t>*>(ptr)->set(static_cast<LWORD_t>(std::stoull(val, nullptr, 0))); return true;
             case VarTypeTag::TIME:  static_cast<IECVar<TIME_t>*>(ptr)->set(static_cast<TIME_t>(std::stoll(val))); return true;
             case VarTypeTag::STRING: {
-                // IECStringVar<N> → IECString<N> layout: char data_[N+1]; uint16_t length_;
-                // data_ is at offset 0, length_ follows after data_
-                // We don't know N at runtime, so we read current length to find its position
                 std::string s = val;
                 // Strip surrounding quotes if present
                 if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') s = s.substr(1, s.size() - 2);
-                // Read existing length to locate the length_ field (at offset N+1 from start)
-                // Use strlen on the null-terminated data_ to find current string end
-                char* data_ptr = reinterpret_cast<char*>(ptr);
-                // Find where length_ is stored: we need to know N (max capacity)
-                // Since data_[N] should be '\0' for a shorter string, scan for the capacity
-                // For safety, cap at 254 (default STRING max)
-                uint16_t len = static_cast<uint16_t>(s.size() > 254 ? 254 : s.size());
-                std::memcpy(data_ptr, s.c_str(), len);
-                data_ptr[len] = '\0';
+                // A plain set, cut to the declared length: a no-op while
+                // forced, like IECStringVar::set.
+                const auto view = iec_string_view(ptr, cap == 0 ? size_t{254} : size_t{cap});
+                if (!*view.forced) {
+                    iec_string_store(view.data, view.length, view.capacity, s.data(), s.size());
+                }
                 return true;
             }
             default: return false;
@@ -379,7 +377,7 @@ inline std::string process_command(
         if (!prog) return "ERR: Unknown program: " + pn;
         auto* var = find_var(prog, vn);
         if (!var) return "ERR: Unknown variable: " + vn + " in " + pn;
-        if (var_set_value(var->type, var->var_ptr, val)) {
+        if (var_set_value(var->type, var->var_ptr, val, var->cap)) {
             return std::string("OK: ") + pn + "." + vn + " = " + var_value_to_string(var->type, var->var_ptr);
         }
         return std::string("ERR: Invalid value for ") + var_type_name(var->type) + ": " + val;

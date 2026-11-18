@@ -283,9 +283,13 @@ function emitVarDescriptors(
         // member-mangling.ts). The descriptor's display name stays the ST name,
         // which is what the user types at the REPL prompt.
         const member = mangledMemberName(v.name, v.typeName, ctx);
-        lines.push(
-          `    {"${v.name}", VarTypeTag::${tag}, &${prog.instanceExpr}.${member}},`,
-        );
+        const address = `${prog.instanceExpr}.${member}`;
+        // A STRING carries its declared length, so `set` stays inside it.
+        const cap =
+          tag === "STRING"
+            ? `, strucpp::debug::string_cap<decltype(${address})>::value`
+            : "";
+        lines.push(`    {"${v.name}", VarTypeTag::${tag}, &${address}${cap}},`);
       }
       lines.push("};");
     } else {

@@ -139,6 +139,35 @@ describeIfCompilers("REPL Runner Integration Tests", () => {
     expect(output).toContain("TRUE");
   });
 
+  it("sets a STRING within its declared length, any length", () => {
+    const source = `
+      PROGRAM Test
+        VAR s : STRING(5); n : INT; l : STRING(300); m : INT; guard : DINT := 77; END_VAR
+        n := LEN(s);
+        m := LEN(l);
+      END_PROGRAM
+    `;
+    const long = "x".repeat(280);
+    const commands = [
+      "set TEST.S 'abcdefghij'",
+      `set TEST.L '${long}'`,
+      "run 1",
+      "get TEST.S",
+      "get TEST.N",
+      "get TEST.M",
+      "get TEST.GUARD",
+      "quit",
+    ].join("\n");
+    const output = buildAndRun(source, commands, "set_string_len");
+    // Cut to STRING(5), the length kept with the characters.
+    expect(output).toContain("'abcde'");
+    expect(output).not.toContain("abcdef");
+    expect(output).toMatch(/TEST\.N\b[^\n]*\b5\b/);
+    // A STRING(300) takes all 280 characters.
+    expect(output).toMatch(/TEST\.M\b[^\n]*\b280\b/);
+    expect(output).toMatch(/TEST\.GUARD\b[^\n]*\b77\b/);
+  });
+
   it("should force and unforce variables", () => {
     const source = `
       PROGRAM Test
