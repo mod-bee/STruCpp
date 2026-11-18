@@ -21,6 +21,7 @@ import type { IToken } from "chevrotain";
 import { attachAttributes } from "./frontend/attributes.js";
 import { transpileILSource } from "./il/il-transpiler.js";
 import { buildProjectModel } from "./project-model.js";
+import { resolveDeclaredStringLengths } from "./semantic/string-lengths.js";
 import { SymbolTables } from "./semantic/symbol-table.js";
 import { SemanticAnalyzer } from "./semantic/analyzer.js";
 import { CodeGenerator } from "./backend/codegen.js";
@@ -722,6 +723,32 @@ function runPipeline(
   applyTypeDefaults(
     ast,
     libraryTypeDefaults((mergedOptions.libraries ?? []).map((a) => a.manifest)),
+  );
+
+  // Declared STRING / WSTRING lengths: checked (1 to 65535), and a constant's
+  // name replaced by its value before the project model copies it. The
+  // compiler's constants as the semantic phase merges them: given ones first,
+  // then the libraries'.
+  const lengthConstants: Record<string, number> = {
+    ...(mergedOptions.globalConstants ?? {}),
+  };
+  for (const archive of allArchives) {
+    for (const [key, value] of Object.entries(archive.globalConstants ?? {})) {
+      if (!(key in lengthConstants)) lengthConstants[key] = value;
+    }
+  }
+  resolveDeclaredStringLengths(
+    ast,
+    (message, at) => {
+      errors.push({
+        message,
+        line: at.sourceSpan.startLine,
+        column: at.sourceSpan.startCol,
+        severity: "error",
+        ...(at.sourceSpan.file ? { file: at.sourceSpan.file } : {}),
+      });
+    },
+    lengthConstants,
   );
 
   try {

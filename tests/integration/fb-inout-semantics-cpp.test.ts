@@ -563,7 +563,7 @@ int main() {
   std::printf("dbg=%d,%d,%d,%d ", (int)rd<int16_t>(${leaf("INSTANCE0.T.R.N")}),
               (int)rd<int16_t>(${leaf("INSTANCE0.T.R.CELLS[2].X")}), (int)rd<int32_t>(${leaf("INSTANCE0.T.R.GRID[2][1]")}),
               (int)rd<uint8_t>(${leaf("INSTANCE0.T.R.FLAGS[-1]")}));
-  uint16_t tagLen = 0; const char* tag = static_cast<const char*>(handle_ptr(${leaf("INSTANCE0.T.R.CELLS[3].TAG")}, &tagLen));
+  uint32_t tagLen = 0; const char* tag = static_cast<const char*>(handle_ptr(${leaf("INSTANCE0.T.R.CELLS[3].TAG")}, &tagLen));
   std::printf("tag=%.*s ", (int)tagLen, tag ? tag : "");
   int16_t gn = strucpp::G.with_lock([](strucpp::REC* r) { return (int16_t)r->N; });
   std::printf("g=%d,%d ", (int)gn, (int)rd<int16_t>(${leaf("INSTANCE0.TG.R.N")}));

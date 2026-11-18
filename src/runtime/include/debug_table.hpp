@@ -65,17 +65,25 @@ template<size_t MaxLen> class IECWStringVar;
 
 namespace debug {
 
-// `Entry::cap` read from a STRING / WSTRING leaf's own C++ type, for a leaf
-// whose declared length the table generator could not see. 0 for the 254
-// default and for any other type, matching the table's convention.
-template<typename T> struct string_cap { static constexpr uint8_t value = 0; };
+// The declared length of a STRING / WSTRING leaf's own C++ type, N for every
+// N; 0 for any other type.
+template<typename T> struct string_cap { static constexpr uint16_t value = 0; };
 template<typename T> struct string_cap<T&> : string_cap<T> {};
 template<typename T> struct string_cap<const T> : string_cap<T> {};
 template<size_t N> struct string_cap<IECStringVar<N>> {
-    static constexpr uint8_t value = N >= 254 ? 0 : static_cast<uint8_t>(N);
+    static_assert(N <= 65535, "STRING length over 65535");
+    static constexpr uint16_t value = static_cast<uint16_t>(N);
 };
 template<size_t N> struct string_cap<IECWStringVar<N>> {
-    static constexpr uint8_t value = N >= 254 ? 0 : static_cast<uint8_t>(N);
+    static_assert(N <= 65535, "WSTRING length over 65535");
+    static constexpr uint16_t value = static_cast<uint16_t>(N);
+};
+
+// `Entry::cap` / `RetainLeaf::cap` for a leaf whose declared length the table
+// generator could not see: string_cap in the tables' convention, where 0 means
+// the 254 default.
+template<typename T> struct string_table_cap {
+    static constexpr uint16_t value = string_cap<T>::value == 254 ? 0 : string_cap<T>::value;
 };
 
 } // namespace debug
@@ -179,14 +187,15 @@ struct IndirectRef {
 // ---------------------------------------------------------------------------
 // Debug entry: one per leaf variable.  Layout is ABI; see notes in
 // debug_dispatch.hpp's runtime dispatch for the per-platform size:
-// 6 bytes on 16-bit-pointer AVR, 16 bytes on 64-bit platforms (the trailing
-// bytes absorb alignment).
+// 6 bytes on 16-bit-pointer AVR, 8 on 32-bit targets, 16 on 64-bit ones (the
+// trailing bytes absorb alignment).
 //
-// `flags` took the byte that used to be `_pad`. `cap` follows it, and on AVR
-// that is the one member that costs anything: a 2-byte pointer, three bytes
-// and 2-byte alignment make the entry 6 rather than 4. It is not optional —
-// without it every sized STRING reads as the 254 default and the string ops
-// compute their forced-value offsets past the end of the object.
+// `flags` took the byte that used to be `_pad`. `cap` follows it: a uint16_t,
+// so a STRING(n) of any length up to 65535 records its own length. On AVR it
+// is the one member that costs anything (the entry is 6 bytes rather than 4).
+// It is not optional — without it every sized STRING reads as the 254 default
+// and the string ops compute their forced-value offsets past the end of the
+// object.
 // ---------------------------------------------------------------------------
 struct Entry {
     void* ptr;
@@ -194,12 +203,12 @@ struct Entry {
     uint8_t flags;
 
     /**
-     * Declared capacity of a `STRING(n)` / `WSTRING(n)`; 0 for any other type
-     * and for an unqualified string, where it means the 254 default. The
-     * string ops need it — `type_ops[]` has one row per TypeTag while
-     * `IECStringVar<23>` and `<254>` are distinct types.
+     * Declared capacity of a `STRING(n)` / `WSTRING(n)`, 1 to 65535; 0 for any
+     * other type and for an unqualified string, where it means the 254
+     * default. The string ops need it — `type_ops[]` has one row per TypeTag
+     * while `IECStringVar<23>` and `<254>` are distinct types.
      */
-    uint8_t cap;
+    uint16_t cap;
 };
 
 // The AVR branches of `read_entry` cannot copy an `Entry` out of PROGMEM as a
@@ -210,6 +219,8 @@ static_assert(offsetof(Entry, ptr) == 0, "Entry::ptr must be first");
 static_assert(offsetof(Entry, tag) == sizeof(void*), "Entry::tag follows ptr");
 static_assert(offsetof(Entry, flags) == sizeof(void*) + 1, "Entry::flags follows tag");
 static_assert(offsetof(Entry, cap) == sizeof(void*) + 2, "Entry::cap follows flags");
+static_assert(sizeof(Entry) == (sizeof(void*) == 2 ? 6 : sizeof(void*) == 4 ? 8 : 16),
+              "Entry is 6 / 8 / 16 bytes");
 
 // ---------------------------------------------------------------------------
 // Per-project tables — DECLARED here, DEFINED by generated_debug.cpp.
@@ -292,6 +303,9 @@ extern const uint32_t  retain_layout_hash;
 //          is `id XOR delta` (see `alt`).
 //   index  the declared subscript, or RETAIN_NO_INDEX.
 //   tag    the TypeTag; `cap` the declared STRING/WSTRING length (0 = 254).
+//          `cap` sits before `tag` so the leaf stays 12 bytes; the constructor
+//          keeps the initialiser order { id, index, tag, cap, alt } that
+//          generated tables (old ones included) use.
 //   alt    0, or 1 + the leaf's enumeration in `retain_alt_groups[]`: a value
 //          stored while that enumeration had only its first members (members
 //          appended since, decision 26) is still a value of it and is kept.
@@ -304,10 +318,14 @@ extern const uint32_t  retain_layout_hash;
 struct RetainLeaf {
     uint32_t id;
     int32_t  index;
+    uint16_t cap;
     uint8_t  tag;
-    uint8_t  cap;
     uint8_t  alt;
+
+    constexpr RetainLeaf(uint32_t id_, int32_t index_, uint8_t tag_, uint16_t cap_, uint8_t alt_) noexcept
+        : id(id_), index(index_), cap(cap_), tag(tag_), alt(alt_) {}
 };
+static_assert(sizeof(RetainLeaf) == 12, "RetainLeaf is 12 bytes");
 
 constexpr int32_t RETAIN_NO_INDEX = static_cast<int32_t>(0x80000000u);
 
@@ -334,7 +352,7 @@ struct RetainLeafInfo {
     uint32_t id;
     int32_t  index;
     uint8_t  tag;
-    uint8_t  cap;
+    uint16_t cap;
     uint8_t  alt;
 };
 

@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <type_traits>
 
 #ifdef __AVR__
 // `read_entry` and friends use `pgm_read_word_far` / `pgm_read_byte` /
@@ -73,13 +74,16 @@ constexpr uint8_t STATUS_DATA_TOO_LARGE  = 0x82;
 // caller: the editor's debugger, an OPC-UA client, a plugin, or an older
 // editor build that never learned to hide the control.
 constexpr uint8_t STATUS_READ_ONLY       = 0x87;
+// strucpp_debug_read_text only (FC 0x4F): the program's data block is not
+// built yet. Its own response, so it does not clash with the licensing codes.
+constexpr uint8_t STATUS_NOT_LOADED      = 0x83;
 
 // ---------------------------------------------------------------------------
 // Templated per-type helpers. One instantiation per IEC elementary type;
 // type_ops[] below wires them into a runtime-indexable table.
 // ---------------------------------------------------------------------------
 template <typename T>
-inline void force_impl(void* p, const uint8_t* bytes, uint8_t) noexcept {
+inline void force_impl(void* p, const uint8_t* bytes, uint16_t) noexcept {
     T v;
     std::memcpy(&v, bytes, sizeof(T));
     static_cast<IECVar<T>*>(p)->force(v);
@@ -89,13 +93,13 @@ inline void force_impl(void* p, const uint8_t* bytes, uint8_t) noexcept {
 // values, and some AVR GCC versions have optimizer behavior around bool
 // that can surprise. Normalize explicitly.
 template <>
-inline void force_impl<bool>(void* p, const uint8_t* bytes, uint8_t) noexcept {
+inline void force_impl<bool>(void* p, const uint8_t* bytes, uint16_t) noexcept {
     const bool v = bytes[0] != 0;
     static_cast<IECVar<bool>*>(p)->force(v);
 }
 
 template <typename T>
-inline void unforce_impl(void* p, uint8_t) noexcept {
+inline void unforce_impl(void* p, uint16_t) noexcept {
     static_cast<IECVar<T>*>(p)->unforce();
 }
 
@@ -108,7 +112,7 @@ inline void unforce_impl(void* p, uint8_t) noexcept {
 // Used by external clients (OPC-UA, future BACnet, etc.) that want
 // regular write semantics rather than debugger-style forcing.
 template <typename T>
-inline void write_impl(void* p, const uint8_t* bytes, uint8_t) noexcept {
+inline void write_impl(void* p, const uint8_t* bytes, uint16_t) noexcept {
     T v;
     std::memcpy(&v, bytes, sizeof(T));
     static_cast<IECVar<T>*>(p)->set(v);
@@ -117,13 +121,13 @@ inline void write_impl(void* p, const uint8_t* bytes, uint8_t) noexcept {
 // memcpy-into-bool is technically UB for non-{0,1} byte values; normalize
 // explicitly. Same reasoning as force_impl<bool>.
 template <>
-inline void write_impl<bool>(void* p, const uint8_t* bytes, uint8_t) noexcept {
+inline void write_impl<bool>(void* p, const uint8_t* bytes, uint16_t) noexcept {
     const bool v = bytes[0] != 0;
     static_cast<IECVar<bool>*>(p)->set(v);
 }
 
 template <typename T>
-inline void read_impl(const void* p, uint8_t* dest, uint8_t) noexcept {
+inline void read_impl(const void* p, uint8_t* dest, uint16_t) noexcept {
     T v = static_cast<const IECVar<T>*>(p)->get();
     std::memcpy(dest, &v, sizeof(T));
 }
@@ -148,15 +152,14 @@ inline void read_impl(const void* p, uint8_t* dest, uint8_t) noexcept {
 // pointer refers to. A pointer taken while forced keeps reporting the stale
 // forced value after an unforce, with nothing written to invalidate it.
 template <typename T>
-inline const void* ptr_impl(const void* p, uint8_t, uint16_t* len) noexcept {
-    *len = static_cast<uint16_t>(sizeof(T));
+inline const void* ptr_impl(const void* p, uint16_t, uint32_t* len) noexcept {
+    *len = static_cast<uint32_t>(sizeof(T));
     return static_cast<const IECVar<T>*>(p)->read_ptr();
 }
 
-// STRING / WSTRING live in `IECStringVar<254>` / `IECWStringVar<254>`,
-// the force-aware wrappers around `IECString<254>` / `IECWString<254>`.
-// Both wrappers carry their own length, capped at 254 bytes / 254 wide
-// code units of storage.
+// STRING / WSTRING live in `IECStringVar<N>` / `IECWStringVar<N>`, the
+// force-aware wrappers around `IECString<N>` / `IECWString<N>`, N the declared
+// length (1 to 65535; 254 when unqualified). Both carry their own length.
 //
 // Wire format (matches the editor decoder in
 // `src/frontend/utils/variable-sizes.ts` — `len8-utf8` / `len8-utf16le`):
@@ -195,9 +198,9 @@ constexpr uint8_t DEBUG_WSTRING_WIDTH = 1 + DEBUG_STRING_CAP * 2;     // 253 byt
 // below locate each field from the capacity — see `iec_string.hpp`.
 
 /** Declared capacity, or the unqualified default when the table records none. */
-constexpr size_t debug_capacity(uint8_t cap) noexcept { return cap == 0 ? size_t{254} : size_t{cap}; }
+constexpr size_t debug_capacity(uint16_t cap) noexcept { return cap == 0 ? size_t{254} : size_t{cap}; }
 
-inline void read_string(const void* p, uint8_t* dest, uint8_t cap) noexcept {
+inline void read_string(const void* p, uint8_t* dest, uint16_t cap) noexcept {
     // `force()` writes the forced value into `value_` as well, so reading the
     // value slot already sees a forced variable's value.
     const auto view = iec_string_view(const_cast<void*>(p), debug_capacity(cap));
@@ -230,14 +233,14 @@ inline void read_string(const void* p, uint8_t* dest, uint8_t cap) noexcept {
 // `IECStringVar<n>` of the DECLARED size, and casting it to `<254>` to reach
 // the accessor would read `length_` from the wrong offset. The selection below
 // is exactly what `IECStringVar::c_str()` / `length()` do.
-inline const void* ptr_string(const void* p, uint8_t cap, uint16_t* len) noexcept {
+inline const void* ptr_string(const void* p, uint16_t cap, uint32_t* len) noexcept {
     const auto view = iec_string_view(const_cast<void*>(p), debug_capacity(cap));
     const bool forced = *view.forced;
-    *len = static_cast<uint16_t>(forced ? *view.forced_length : *view.length);
+    *len = forced ? *view.forced_length : *view.length;
     return forced ? view.forced_data : view.data;
 }
 
-inline void write_string(void* p, const uint8_t* bytes, uint8_t cap) noexcept {
+inline void write_string(void* p, const uint8_t* bytes, uint16_t cap) noexcept {
     const auto view = iec_string_view(p, debug_capacity(cap));
     // A no-op while forced, matching `IECStringVar::set`, which carries the same
     // guard: a debugger force stays authoritative until it is explicitly lifted.
@@ -247,7 +250,7 @@ inline void write_string(void* p, const uint8_t* bytes, uint8_t cap) noexcept {
                      reinterpret_cast<const char*>(bytes + 1), wire_len);
 }
 
-inline void force_string(void* p, const uint8_t* bytes, uint8_t cap) noexcept {
+inline void force_string(void* p, const uint8_t* bytes, uint16_t cap) noexcept {
     const auto view = iec_string_view(p, debug_capacity(cap));
     const uint8_t wire_len = bytes[0] < DEBUG_STRING_CAP ? bytes[0] : DEBUG_STRING_CAP;
     const char* src = reinterpret_cast<const char*>(bytes + 1);
@@ -258,13 +261,13 @@ inline void force_string(void* p, const uint8_t* bytes, uint8_t cap) noexcept {
     *view.forced = true;
 }
 
-inline void unforce_string(void* p, uint8_t cap) noexcept {
+inline void unforce_string(void* p, uint16_t cap) noexcept {
     *iec_string_view(p, debug_capacity(cap)).forced = false;
 }
 
 // --- WSTRING (IECWStringVar<N>) ---------------------------------------
 
-inline void read_wstring(const void* p, uint8_t* dest, uint8_t cap) noexcept {
+inline void read_wstring(const void* p, uint8_t* dest, uint16_t cap) noexcept {
     const auto view = iec_wstring_view(const_cast<void*>(p), debug_capacity(cap));
     const size_t actual_len = *view.length;
     const uint8_t wire_len = static_cast<uint8_t>(
@@ -313,21 +316,20 @@ inline uint8_t debug_wstring_decode(const uint8_t* bytes, char16_t* buf) noexcep
 // the old assertion text told them to do anyway.
 #if !defined(__BYTE_ORDER__) || !defined(__ORDER_LITTLE_ENDIAN__) || \
     __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
-inline const void* ptr_wstring(const void*, uint8_t, uint16_t* len) noexcept {
+inline const void* ptr_wstring(const void*, uint16_t, uint32_t* len) noexcept {
     *len = 0;
     return nullptr;   // handle_ptr's contract for "no pointer available"
 }
 #else
-inline const void* ptr_wstring(const void* p, uint8_t cap, uint16_t* len) noexcept {
+inline const void* ptr_wstring(const void* p, uint16_t cap, uint32_t* len) noexcept {
     const auto view = iec_wstring_view(const_cast<void*>(p), debug_capacity(cap));
     const bool forced = *view.forced;
-    *len = static_cast<uint16_t>(
-        (forced ? *view.forced_length : *view.length) * 2u);
+    *len = static_cast<uint32_t>(forced ? *view.forced_length : *view.length) * 2u;
     return forced ? view.forced_data : view.data;
 }
 #endif
 
-inline void write_wstring(void* p, const uint8_t* bytes, uint8_t cap) noexcept {
+inline void write_wstring(void* p, const uint8_t* bytes, uint16_t cap) noexcept {
     const auto view = iec_wstring_view(p, debug_capacity(cap));
     if (*view.forced) return;
     char16_t buf[DEBUG_STRING_CAP];
@@ -335,7 +337,7 @@ inline void write_wstring(void* p, const uint8_t* bytes, uint8_t cap) noexcept {
     iec_wstring_store(view.data, view.length, view.capacity, buf, wire_len);
 }
 
-inline void force_wstring(void* p, const uint8_t* bytes, uint8_t cap) noexcept {
+inline void force_wstring(void* p, const uint8_t* bytes, uint16_t cap) noexcept {
     const auto view = iec_wstring_view(p, debug_capacity(cap));
     char16_t buf[DEBUG_STRING_CAP];
     const uint8_t wire_len = debug_wstring_decode(bytes, buf);
@@ -344,7 +346,7 @@ inline void force_wstring(void* p, const uint8_t* bytes, uint8_t cap) noexcept {
     *view.forced = true;
 }
 
-inline void unforce_wstring(void* p, uint8_t cap) noexcept {
+inline void unforce_wstring(void* p, uint16_t cap) noexcept {
     *iec_wstring_view(p, debug_capacity(cap)).forced = false;
 }
 
@@ -357,17 +359,17 @@ struct TypeOps {
     // Scalars ignore it; a STRING(23) needs it, since `IECStringVar<23>` and
     // `IECStringVar<254>` are different types and this table has one row per
     // TypeTag. 0 means unqualified, the 254 default.
-    void (*force)  (void*, const uint8_t*, uint8_t);
-    void (*unforce)(void*, uint8_t);
-    void (*read)   (const void*, uint8_t*, uint8_t);
-    void (*write)  (void*, const uint8_t*, uint8_t);
+    void (*force)  (void*, const uint8_t*, uint16_t);
+    void (*unforce)(void*, uint16_t);
+    void (*read)   (const void*, uint8_t*, uint16_t);
+    void (*write)  (void*, const uint8_t*, uint16_t);
     uint8_t size;
 };
 
 /** The pointer op, in a table of its own — see ptr_ops[] below. Takes the same
  *  declared capacity every TypeOps op does, and for the same reason. */
 struct PtrOps {
-    const void* (*ptr)(const void*, uint8_t, uint16_t*);
+    const void* (*ptr)(const void*, uint16_t, uint32_t*);
 };
 
 // ---------------------------------------------------------------------------
@@ -554,7 +556,7 @@ inline Entry read_entry(uint8_t arr, uint16_t elem) noexcept {
     // each array < 32 KB. But debug_arrays itself can be far.)
     uintptr_t table_ptr = pgm_read_word_far(arrays_base + arr * sizeof(void*));
 
-    // Read the 4-byte Entry. We assume the array is in the lower 64 KB; if
+    // Read the 6-byte Entry. We assume the array is in the lower 64 KB; if
     // it's past, we would need pgm_read_word_far on the element too. For
     // Phase 4a we accept the <64 KB constraint per entry array.
     const uint8_t* entry_addr = reinterpret_cast<const uint8_t*>(table_ptr) + elem * sizeof(Entry);
@@ -569,10 +571,10 @@ inline Entry read_entry(uint8_t arr, uint16_t elem) noexcept {
     out.flags = pgm_read_byte(entry_addr + sizeof(void*) + 1);
     out.ptr = reinterpret_cast<void*>(ptr_val);
     out.tag = tag_val;
-    // `cap` is the fourth member, one byte past `flags`. Without it every
-    // sized STRING reads as the 254 default and the string ops compute their
-    // forced-value offsets past the end of the object.
-    out.cap = pgm_read_byte(entry_addr + sizeof(void*) + 2);
+    // `cap` is the fourth member, a uint16_t one byte past `flags`. Without it
+    // every sized STRING reads as the 254 default and the string ops compute
+    // their forced-value offsets past the end of the object.
+    out.cap = pgm_read_word(entry_addr + sizeof(void*) + 2);
 #elif defined(__AVR__)
     // AVR without RAMPZ — flash is ≤64 KB on these chips, so every PROGMEM
     // address fits in a 16-bit pointer and near accessors are sufficient.
@@ -586,8 +588,8 @@ inline Entry read_entry(uint8_t arr, uint16_t elem) noexcept {
     out.flags = pgm_read_byte(entry_addr + sizeof(void*) + 1);
     out.ptr = reinterpret_cast<void*>(ptr_val);
     out.tag = tag_val;
-    // `cap` is the fourth member, one byte past `flags`. See the note above.
-    out.cap = pgm_read_byte(entry_addr + sizeof(void*) + 2);
+    // `cap` is the fourth member, a uint16_t. See the note above.
+    out.cap = pgm_read_word(entry_addr + sizeof(void*) + 2);
 #else
     uint16_t count = debug_array_counts[arr];
     if (elem >= count) return out;
@@ -739,13 +741,13 @@ inline uint16_t handle_size(uint8_t arr, uint16_t elem) noexcept {
  *  Returns nullptr with *out_len = 0 when the leaf has no address to give:
  *  an unknown (arr, elem), a tag with no ptr op, or WSTRING on a big-endian
  *  target (see ptr_wstring). */
-inline const void* handle_ptr(uint8_t arr, uint16_t elem, uint16_t* out_len) noexcept {
+inline const void* handle_ptr(uint8_t arr, uint16_t elem, uint32_t* out_len) noexcept {
     Entry e = read_entry(arr, elem);
     if (!e.ptr || e.tag >= TAG__COUNT) {
         if (out_len) *out_len = 0;
         return nullptr;
     }
-    uint16_t len = 0;
+    uint32_t len = 0;
     if (e.flags & LEAF_FLAG_RAW) {
         if (out_len) *out_len = type_ops[e.tag].size;
         return e.ptr;
@@ -793,7 +795,7 @@ inline bool handle_retain_leaf(uint16_t i, RetainLeafInfo* out) noexcept {
     out->id    = STRUCPP_RETAIN_FLASH_U32(l + offsetof(RetainLeaf, id));
     out->index = static_cast<int32_t>(STRUCPP_RETAIN_FLASH_U32(l + offsetof(RetainLeaf, index)));
     out->tag   = STRUCPP_RETAIN_FLASH_U8(l + offsetof(RetainLeaf, tag));
-    out->cap   = STRUCPP_RETAIN_FLASH_U8(l + offsetof(RetainLeaf, cap));
+    out->cap   = STRUCPP_RETAIN_FLASH_U16(l + offsetof(RetainLeaf, cap));
     out->alt   = STRUCPP_RETAIN_FLASH_U8(l + offsetof(RetainLeaf, alt));
 #  undef STRUCPP_RETAIN_FLASH_U8
 #  undef STRUCPP_RETAIN_FLASH_U16
@@ -816,31 +818,37 @@ inline bool handle_retain_leaf(uint16_t i, RetainLeafInfo* out) noexcept {
  * each. Returns the bytes written; 0 for an empty string, an unknown leaf or
  * any other type.
  *
+ * `Size` is the caller's byte-count type: the retain walk (retain::ReadText)
+ * takes it at uint16_t, its blob being at most 65535 bytes; a full-length
+ * caller passes uint32_t or size_t (a WSTRING(65535) is 131070 bytes).
+ *
  * NOT the debugger's wire form: read_string() caps at DEBUG_STRING_CAP (126)
  * because that is the Modbus frame's budget. A retained value has no frame to
  * fit, and a STRING(200) restored from its first 126 characters is not the
  * value the variable had when it was stopped (IEC 61131-3 6.5.6.1 rule 1).
  */
-inline uint16_t handle_read_text(uint8_t arr, uint16_t elem, uint8_t* dest,
-                                 uint16_t cap_bytes) noexcept {
+template <typename Size>
+inline Size handle_read_text(uint8_t arr, uint16_t elem, uint8_t* dest, Size cap_bytes) noexcept {
+    static_assert(std::is_integral<Size>::value, "a byte count is an integer");
     Entry e = read_entry(arr, elem);
-    if (!e.ptr || !dest) return 0;
+    if (!e.ptr || !dest || cap_bytes <= 0) return 0;
+    const size_t room = static_cast<size_t>(cap_bytes);
     if (e.tag == TAG_STRING) {
         const auto view = iec_string_view(e.ptr, debug_capacity(e.cap));
-        uint16_t n = *view.length;
-        if (n > cap_bytes) n = cap_bytes;
+        size_t n = *view.length;
+        if (n > room) n = room;
         if (n > 0) std::memcpy(dest, view.data, n);
-        return n;
+        return static_cast<Size>(n);
     }
     if (e.tag == TAG_WSTRING) {
         const auto view = iec_wstring_view(e.ptr, debug_capacity(e.cap));
-        uint16_t units = *view.length;
-        if (units > cap_bytes / 2u) units = static_cast<uint16_t>(cap_bytes / 2u);
-        for (uint16_t i = 0; i < units; ++i) {
+        size_t units = *view.length;
+        if (units > room / 2u) units = room / 2u;
+        for (size_t i = 0; i < units; ++i) {
             dest[i * 2u]      = static_cast<uint8_t>(view.data[i] & 0xFF);
             dest[i * 2u + 1u] = static_cast<uint8_t>((view.data[i] >> 8) & 0xFF);
         }
-        return static_cast<uint16_t>(units * 2u);
+        return static_cast<Size>(units * 2u);
     }
     return 0;
 }
@@ -854,37 +862,139 @@ inline uint16_t handle_read_text(uint8_t arr, uint16_t elem, uint8_t* dest,
  * that case Implementer specific).
  *
  * Returns STATUS_OK, STATUS_READ_ONLY for a CONSTANT, or STATUS_OUT_OF_BOUNDS
- * for an unknown leaf or one that is not a string.
+ * for an unknown leaf or one that is not a string. `Size` as handle_read_text.
  */
+template <typename Size>
 inline uint8_t handle_write_text(uint8_t arr, uint16_t elem, const uint8_t* src,
-                                 uint16_t nbytes) noexcept {
+                                 Size nbytes) noexcept {
+    static_assert(std::is_integral<Size>::value, "a byte count is an integer");
     Entry e = read_entry(arr, elem);
     if (!e.ptr) return STATUS_OUT_OF_BOUNDS;
     if (e.flags & LEAF_FLAG_READONLY) return STATUS_READ_ONLY;
+    const size_t bytes = src && nbytes > 0 ? static_cast<size_t>(nbytes) : 0u;
     if (e.tag == TAG_STRING) {
         const auto view = iec_string_view(e.ptr, debug_capacity(e.cap));
         if (*view.forced) return STATUS_OK;
         iec_string_store(view.data, view.length, view.capacity,
-                         reinterpret_cast<const char*>(src), src ? nbytes : 0);
+                         reinterpret_cast<const char*>(src), bytes);
         return STATUS_OK;
     }
     if (e.tag == TAG_WSTRING) {
         const auto view = iec_wstring_view(e.ptr, debug_capacity(e.cap));
         if (*view.forced) return STATUS_OK;
-        uint16_t units = src ? static_cast<uint16_t>(nbytes / 2u) : 0;
+        size_t units = bytes / 2u;
         if (units > view.capacity) units = view.capacity;
-        for (uint16_t i = 0; i < units; ++i) {
+        for (size_t i = 0; i < units; ++i) {
             view.data[i] = static_cast<char16_t>(
                 static_cast<uint16_t>(src[i * 2u]) |
                 static_cast<uint16_t>(static_cast<uint16_t>(src[i * 2u + 1u]) << 8));
         }
         view.data[units] = u'\0';
-        *view.length = units;
+        *view.length = static_cast<uint16_t>(units);
         return STATUS_OK;
     }
     return STATUS_OUT_OF_BOUNDS;
 }
 
+
+} } // namespace strucpp::debug
+
+// ---------------------------------------------------------------------------
+// Chunked text read (FC 0x4F DEBUG_GET_TEXT in Runtime v4 and bare-metal).
+//
+// The 126-character window of handle_read() is the FC 0x43/0x44 frame budget.
+// This reads any part of a STRING / WSTRING of any declared length, so a
+// runtime can serve the whole value in chunks that fit its own frame.
+// ---------------------------------------------------------------------------
+#define STRUCPP_SHIM_HAS_DEBUG_TEXT 1
+
+extern "C" {
+typedef struct {
+    uint8_t  status;   // 0x7E OK, 0x81 not a string / out of range, 0x83 not loaded
+    uint8_t  tag;      // the leaf's debug type tag (STRING or WSTRING)
+    uint8_t  flags;    // bit0 = forced
+    uint16_t cap;      // declared length (code units)
+    uint16_t len;      // current length (code units)
+    uint16_t count;    // code units copied into data
+} strucpp_text_chunk;
+}
+
+namespace strucpp { namespace debug {
+
+/**
+ * Copy up to `max` code units of a STRING / WSTRING leaf, from code unit
+ * `offset`, into `data`: STRING as bytes, WSTRING as little-endian code units.
+ * Never writes more than `data_cap` bytes. An offset at or past the current
+ * length copies nothing and is still OK. Takes no lock: the caller holds the
+ * variable's lock. Fills `info` (if given) and returns its status.
+ */
+inline uint8_t handle_read_text_chunk(uint8_t arr, uint16_t elem, uint16_t offset, uint16_t max,
+                                      uint8_t* data, uint16_t data_cap,
+                                      strucpp_text_chunk* info) noexcept {
+    strucpp_text_chunk out = {};
+    out.status = STATUS_OUT_OF_BOUNDS;
+#if defined(STRUCPP_PLC_DATA_BLOCK) && STRUCPP_PLC_DATA_BLOCK
+    if (plc_data == nullptr) out.status = STATUS_NOT_LOADED;
+#endif
+    const Entry e = read_entry(arr, elem);
+    const bool text = e.tag == TAG_STRING || e.tag == TAG_WSTRING;
+    if (e.ptr != nullptr && text && (e.flags & LEAF_FLAG_RAW) == 0) {
+        const bool wide = e.tag == TAG_WSTRING;
+        out.tag = e.tag;
+        out.cap = static_cast<uint16_t>(debug_capacity(e.cap));
+        // Units that fit in data_cap bytes.
+        size_t room = data != nullptr ? static_cast<size_t>(data_cap) : 0u;
+        if (wide) room /= 2u;
+        uint16_t n = 0;
+        if (wide) {
+            const auto view = iec_wstring_view(e.ptr, out.cap);
+            out.len = *view.length;
+            out.flags = *view.forced ? 1 : 0;
+            n = offset < out.len ? static_cast<uint16_t>(out.len - offset) : 0;
+            if (n > max) n = max;
+            if (n > room) n = static_cast<uint16_t>(room);
+            for (size_t i = 0; i < n; ++i) {
+                const char16_t u = view.data[static_cast<size_t>(offset) + i];
+                data[i * 2u]      = static_cast<uint8_t>(u & 0xFF);
+                data[i * 2u + 1u] = static_cast<uint8_t>((u >> 8) & 0xFF);
+            }
+        } else {
+            const auto view = iec_string_view(e.ptr, out.cap);
+            out.len = *view.length;
+            out.flags = *view.forced ? 1 : 0;
+            n = offset < out.len ? static_cast<uint16_t>(out.len - offset) : 0;
+            if (n > max) n = max;
+            if (n > room) n = static_cast<uint16_t>(room);
+            if (n > 0) std::memcpy(data, view.data + offset, n);
+        }
+        out.count = n;
+        out.status = STATUS_OK;
+    }
+    if (info != nullptr) *info = out;
+    return out.status;
+}
+
+/**
+ * Set (never force) a STRING / WSTRING leaf to `count` code units from `data`
+ * (STRING bytes, WSTRING little-endian units), cut to its declared length. A
+ * no-op while the variable is forced, like every plain write. Takes no lock:
+ * the caller holds the variable's lock. Returns STATUS_OK,
+ * STATUS_OUT_OF_BOUNDS (not a string, no such leaf), STATUS_NOT_LOADED, or
+ * STATUS_READ_ONLY for a CONSTANT.
+ */
+inline uint8_t handle_write_text_units(uint8_t arr, uint16_t elem, const uint8_t* data,
+                                       uint16_t count) noexcept {
+#if defined(STRUCPP_PLC_DATA_BLOCK) && STRUCPP_PLC_DATA_BLOCK
+    if (plc_data == nullptr) return STATUS_NOT_LOADED;
+#endif
+    const Entry e = read_entry(arr, elem);
+    if (e.ptr == nullptr || (e.flags & LEAF_FLAG_RAW) != 0) return STATUS_OUT_OF_BOUNDS;
+    if (e.tag == TAG_STRING) return handle_write_text(arr, elem, data, static_cast<uint32_t>(count));
+    if (e.tag == TAG_WSTRING) {
+        return handle_write_text(arr, elem, data, static_cast<uint32_t>(count) * 2u);
+    }
+    return STATUS_OUT_OF_BOUNDS;
+}
 
 /** Total number of arrays. */
 inline uint8_t handle_array_count() noexcept {
@@ -907,6 +1017,26 @@ inline uint16_t handle_elem_count(uint8_t arr) noexcept {
 }
 
 } } // namespace strucpp::debug
+
+// strucpp_debug_read_text: handle_read_text_chunk with C linkage. Inline, so
+// any target can call it at no cost when it does not; a Runtime v4 .so
+// (STRUCPP_V4_DEBUG_EXPORTS_DEFINE) emits and exports it for dlsym.
+#ifdef STRUCPP_V4_DEBUG_EXPORTS_DEFINE
+#define STRUCPP_DEBUG_TEXT_EXPORT __attribute__((used, visibility("default")))
+#else
+#define STRUCPP_DEBUG_TEXT_EXPORT
+#endif
+extern "C" STRUCPP_DEBUG_TEXT_EXPORT inline uint8_t strucpp_debug_read_text(
+    uint8_t arr, uint16_t elem, uint16_t offset, uint16_t max, uint8_t* data,
+    uint16_t data_cap, strucpp_text_chunk* info) {
+    return strucpp::debug::handle_read_text_chunk(arr, elem, offset, max, data, data_cap, info);
+}
+// strucpp_debug_write_text: handle_write_text_units with C linkage, the same way.
+extern "C" STRUCPP_DEBUG_TEXT_EXPORT inline uint8_t strucpp_debug_write_text(
+    uint8_t arr, uint16_t elem, const uint8_t* data, uint16_t count) {
+    return strucpp::debug::handle_write_text_units(arr, elem, data, count);
+}
+#undef STRUCPP_DEBUG_TEXT_EXPORT
 
 // ---------------------------------------------------------------------------
 // C-linkage shims for the OpenPLC Runtime v4 .so interface.

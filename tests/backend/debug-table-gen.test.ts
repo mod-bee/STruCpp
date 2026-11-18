@@ -311,10 +311,10 @@ END_CONFIGURATION
   });
 
   it("keeps each debug array under AVR's 32767-byte object limit", () => {
-    // On AVR an Entry is 5 bytes (2-byte pointer, tag, flags, cap), so 8000
-    // entries made a 40000-byte array and avr-g++ refused the program
-    // ("size of array is too large"). 7000 leaves now split 6000 + 1000, and
-    // each array carries an AVR-only static_assert on its size.
+    // On AVR an Entry is 6 bytes (2-byte pointer, tag, flags, 2-byte cap), so
+    // 8000 entries would make a 48000-byte array and avr-g++ would refuse the
+    // program ("size of array is too large"). 7000 leaves split 5000 + 2000,
+    // and each array carries an AVR-only static_assert on its size.
     const source = `
 PROGRAM main
   VAR
@@ -333,8 +333,8 @@ END_CONFIGURATION
     const result = compile(source);
     expect(result.errors.map((e) => e.message)).toEqual([]);
     const cpp = result.debugTableCpp!;
-    expect(cpp).toContain("const Entry debug_arr_0[6000]");
-    expect(cpp).toContain("const Entry debug_arr_1[1000]");
+    expect(cpp).toContain("const Entry debug_arr_0[5000]");
+    expect(cpp).toContain("const Entry debug_arr_1[2000]");
     expect(cpp).toMatch(
       /#ifdef __AVR__\nstatic_assert\(sizeof\(debug_arr_0\) <= 32767/,
     );

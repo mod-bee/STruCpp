@@ -539,7 +539,7 @@ using namespace strucpp::debug;
 int fails = 0;
 static void chk(const char* what, bool ok) { if (!ok) { printf("FAIL %s\\n", what); ++fails; } }
 int main() {
-  unsigned short len = 0;
+  uint32_t len = 0;
 
   // Scalar: same bytes as handle_read, and the length is the type width.
   const void* p = handle_ptr(${idx("INSTANCE0.N")}, &len);

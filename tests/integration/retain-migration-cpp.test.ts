@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
       printf("FORCED %d\\n", 0);
     } else if (!strcmp(cmd, "forced")) {   // forced <arr> <elem>
       unsigned a = (unsigned)atoi(argv[++i]), e = (unsigned)atoi(argv[++i]);
-      uint16_t n; (void)debug::handle_ptr((uint8_t)a, (uint16_t)e, &n);
+      uint32_t n; (void)debug::handle_ptr((uint8_t)a, (uint16_t)e, &n);
       printf("SIZE %u\\n", n);
     }
   }

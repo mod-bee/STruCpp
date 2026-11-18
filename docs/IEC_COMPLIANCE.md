@@ -17,8 +17,8 @@ STruC++ implements the Structured Text (ST) language from IEC 61131-3. This docu
 | DATE_AND_TIME | Supported | |
 | LTIME, LTOD, LDT | Supported | 64-bit nanoseconds, sharing TIME/TOD/DT storage. Literals `LT#`, `LTIME#`, `LTOD#`, `LDT#`; implicit TIME→LTIME, TOD→LTOD, DT→LDT |
 | LDATE | Not implemented | Needs nanoseconds; DATE stores whole days, so it cannot share DATE's representation |
-| STRING | Supported | Parameterized length: STRING(N) (CODESYS) or STRING[N] (IEC 61131-3 Ed.3), default 254 |
-| WSTRING | Supported | Parameterized length: WSTRING(N) or WSTRING[N] |
+| STRING | Supported | Parameterized length: STRING(N) (CODESYS) or STRING[N] (IEC 61131-3 Ed.3), default 254. N is 1 to 65535 (the maximum is Implementer specific: 6.4.2.2, Table 10 note k); outside that range is a compile error. N may name an integer constant |
+| WSTRING | Supported | Parameterized length: WSTRING(N) or WSTRING[N], N in code units, 1 to 65535 as for STRING |
 | CHAR, WCHAR | Supported | |
 
 ### Derived Types

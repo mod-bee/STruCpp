@@ -143,13 +143,15 @@ class IECWString {
 };
 ```
 
-Fixed-capacity strings matching IEC semantics. `N` defaults to 254 (STruC++'s choice: IEC 61131-3 Table 10 note k and 6.4.2.2 leave the maximum length to the implementer) but can be parameterized via `STRING(100)` declarations. String functions (LEFT, RIGHT, MID, CONCAT, FIND, etc.) have explicit overloads for `IECString<N>` to work around C++ template deduction limitations with implicit conversions.
+Fixed-capacity strings matching IEC semantics. `N` defaults to 254 (STruC++'s choice: IEC 61131-3 Table 10 note k and 6.4.2.2 leave the maximum length to the implementer) but can be parameterized via `STRING(100)` declarations, from 1 to 65535 code units; a declared length outside that range, or one naming a constant whose value is outside it, is a compile error. A length that names a constant is replaced by the constant's value before code generation. String functions (LEFT, RIGHT, MID, CONCAT, FIND, etc.) have explicit overloads for `IECString<N>` to work around C++ template deduction limitations with implicit conversions.
 
 String lengths STruC++ defines where IEC 61131-3 leaves them to the implementer:
 
 - Assigning a longer string to a shorter one (6.6.1.2.2, "Implementer specific") keeps the leading characters.
 - A `CONCAT` result holds the whole joined string (Table 34 feature 5): its capacity is the inputs' declared lengths added, up to `STRUCPP_STRING_MAX_LENGTH` (65535, the longest a `uint16_t` length can describe). Only the target's declared length truncates it. A literal input counts as its own length.
 - `INSERT` and `REPLACE` results hold the whole result too (Table 34 features 6 and 8): their capacity is `IN1`'s and `IN2`'s declared lengths added, capped the same way, and `IN2` is never cut to `IN1`'s length. Only the target's declared length truncates. STRING and WSTRING alike.
+- The debugger reads and writes every declared length. `handle_read` sends the first 126 characters (the FC 0x43/0x44 window) and `handle_set` / `handle_write` take up to 126 (FC 0x42); `strucpp_debug_read_text` reads any part of the value in chunks and `strucpp_debug_write_text` sets the whole value (C linkage, `STRUCPP_SHIM_HAS_DEBUG_TEXT`). `handle_ptr` reports a length in bytes as `uint32_t`: a WSTRING(65535) is 131070 bytes.
+- Retained strings keep their whole value. The retain blob is format 2 while every retained string is 254 or shorter, and format 3 (16-bit lengths) once one is longer; both, and format 1, restore. A retain image over 65535 bytes is a compile error.
 - A position or length outside the string, or a negative one (6.6.2.5.11 calls these errors), is not reported. For example `MID` with `P = 0` gives `''`, `DELETE` and `REPLACE` read `P = 0` as 1, and `REPLACE` at a position past the end leaves `IN1` unchanged.
 
 ## Array Types (`iec_array.hpp`)

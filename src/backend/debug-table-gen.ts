@@ -297,24 +297,45 @@ export function retainIdentityOf(
   return { id: fnv1a32(`${base}${sig}`), index };
 }
 
-/** Format-2 payload width of a leaf: natural width, or 1 + declared length. */
+/** The longest retain image: every length in the blob and the stores is 16-bit. */
+const RETAIN_BLOB_MAX = 65535;
+
+/** A string leaf's declared length: `cap`, or the 254 default for 0. */
+function declaredLength(cap: number): number {
+  return cap === 0 ? 254 : cap;
+}
+
+/** Retain format (iec_retain.hpp): 3 once a retained string is longer than 254. */
+function retainFormatOf(
+  vars: ReadonlyArray<{ tagName: TagName; cap: number }>,
+): 2 | 3 {
+  return vars.some(
+    (v) =>
+      (v.tagName === "STRING" || v.tagName === "WSTRING") &&
+      declaredLength(v.cap) > 254,
+  )
+    ? 3
+    : 2;
+}
+
+/** Payload width of a leaf: natural width, or length prefix + declared length. */
 function retainPayloadWidth(
   tagName: TagName,
   size: number,
   cap: number,
+  format: 2 | 3,
 ): number {
-  const declared = cap >= 1 && cap <= 254 ? cap : 254;
-  if (tagName === "STRING") return 1 + declared;
-  if (tagName === "WSTRING") return 1 + 2 * declared;
+  const prefix = format === 3 ? 2 : 1;
+  if (tagName === "STRING") return prefix + declaredLength(cap);
+  if (tagName === "WSTRING") return prefix + 2 * declaredLength(cap);
   return size;
 }
 
 /**
- * Bytes of this program's format-2 blob: header, exact-width payload and the
- * descriptor trailer (iec_retain.hpp). Mirrors `strucpp::retain::blob_size2()`.
- * A string whose length this generator could not resolve (a symbolic
- * `STRING(N)`) is counted at the 254 maximum, so the figure is an upper bound
- * there and exact everywhere else.
+ * Bytes of this program's format-2 (or format-3) blob: header, exact-width
+ * payload and the descriptor trailer (iec_retain.hpp). Mirrors
+ * `strucpp::retain::blob_size2()`. renderCpp checks the string lengths it
+ * counts against the C++ types with a static_assert.
  */
 function retainBlobSize2Of(
   vars: Array<{
@@ -325,13 +346,16 @@ function retainBlobSize2Of(
     typeSig?: string | EnumSig;
   }>,
 ): number {
+  const format = retainFormatOf(vars);
+  const single = format === 3 ? 7 : 6;
+  const run = format === 3 ? 13 : 12;
   let payload = 0;
   let trailer = 4;
   let open:
     | { id: number; tag: TagName; cap: number; next: number; count: number }
     | undefined;
   for (const v of vars) {
-    payload += retainPayloadWidth(v.tagName, v.size, v.cap);
+    payload += retainPayloadWidth(v.tagName, v.size, v.cap, format);
     const { id, index } = retainIdentityOf(v.path, v.typeSig);
     if (
       open !== undefined &&
@@ -348,10 +372,10 @@ function retainBlobSize2Of(
     }
     if (index === RETAIN_NO_INDEX) {
       open = undefined;
-      trailer += 6;
+      trailer += single;
     } else {
       open = { id, tag: v.tagName, cap: v.cap, next: index + 1, count: 1 };
-      trailer += 12;
+      trailer += run;
     }
   }
   return RETAIN_HEADER_SIZE + payload + trailer;
@@ -424,13 +448,14 @@ function entryFlags(e: Entry, indirectType?: string): string {
 }
 
 /**
- * Render an entry's `cap` byte. A string leaf whose length was not known here
- * (a constant's name, an archive without lengths) takes it from its C++ type,
- * so the runtime never addresses it with the 254 default.
+ * Render an entry's `cap`. A string leaf whose length was not given here (an
+ * unqualified STRING, an archive without lengths) takes it from its C++ type,
+ * in the tables' convention (0 for 254), so the runtime never addresses it
+ * with the wrong length.
  */
 function capLiteral(e: Entry, indirectType?: string): string {
   if (e.cap === 0 && (e.tagName === "STRING" || e.tagName === "WSTRING")) {
-    return `string_cap<${indirectType ?? `decltype(${e.cppExpr})`}>::value`;
+    return `string_table_cap<${indirectType ?? `decltype(${e.cppExpr})`}>::value`;
   }
   return String(e.cap);
 }
@@ -615,6 +640,11 @@ export interface DebugLeaf {
    * variable is then whatever the last call passed.
    */
   target?: string;
+  /**
+   * A STRING / WSTRING leaf's declared length in code units, 254 for an
+   * unqualified one. Only on string leaves. Additive, like `readOnly`.
+   */
+  cap?: number;
 }
 
 export interface DebugMapV2 {
@@ -647,7 +677,8 @@ export interface DebugMapV2 {
    * degrades to NON_RETAIN in silence.
    */
   retainBlobSize?: number;
-  /** Retain blob format the program writes (iec_retain.hpp): 2. Absent = 1. */
+  /** Retain blob format the program writes (iec_retain.hpp): 2, or 3 once a
+   *  retained string is longer than 254. Absent = 1. */
   retainFormat?: number;
   /**
    * Identity of the retain LAYOUT, not of the program.
@@ -683,10 +714,10 @@ export interface DebugTableResult {
 // ---------------------------------------------------------------------------
 
 export interface DebugTableGenOptions {
-  /** Max entries per debug array. Default 6000 — under AVR's 32767-byte
-   *  per-object limit with sizeof(Entry) == 5 there (2-byte pointer, tag,
-   *  flags, cap): 6000 * 5 = 30000. Each array is also static_assert'ed on
-   *  AVR, so a bigger Entry fails the build with a clear message instead of
+  /** Max entries per debug array. Default 5000 — under AVR's 32767-byte
+   *  per-object limit with sizeof(Entry) == 6 there (2-byte pointer, tag,
+   *  flags, 2-byte cap): 5000 * 6 = 30000. Each array is also static_assert'ed
+   *  on AVR, so a bigger Entry fails the build with a clear message instead of
    *  "size of array is too large". */
   maxEntriesPerArray?: number;
   /** Name of the global configuration instance the generated table references.
@@ -701,7 +732,7 @@ export interface DebugTableGenOptions {
 }
 
 const DEFAULTS: Required<Omit<DebugTableGenOptions, "md5" | "plcDataBlock">> = {
-  maxEntriesPerArray: 6000,
+  maxEntriesPerArray: 5000,
   configGlobalName: "g_config",
 };
 
@@ -922,12 +953,13 @@ export function generateDebugTable(
     const bucket = tail();
     const arrIdx = arrays.length - 1;
     const elemIdx = bucket.length;
-    // A symbolic length (`STRING(BUF_MAX)`) is not resolved here: it records 0
-    // and capLiteral takes the length from the member's C++ type.
+    // The analyzer resolved a constant's name to its value; any length left
+    // unknown records 0 and capLiteral takes it from the member's C++ type.
     const cap =
-      typeof maxLength === "number" && maxLength >= 1 && maxLength <= 254
+      typeof maxLength === "number" && maxLength >= 1 && maxLength <= 65535
         ? maxLength
         : 0;
+    const isText = tagName === "STRING" || tagName === "WSTRING";
     const ind = indirectStack[indirectStack.length - 1];
     const entry: Entry = {
       cppExpr,
@@ -962,6 +994,9 @@ export function generateDebugTable(
       ...(rawExpected ? { raw: true as const } : {}),
       ...(ind?.target !== undefined
         ? { target: ind.target + path.slice(ind.path.length) }
+        : {}),
+      ...(isText && typeof maxLength !== "string"
+        ? { cap: declaredLength(cap) }
         : {}),
     });
     if (flags & LEAF_FLAG_RETAIN) {
@@ -1938,6 +1973,17 @@ export function generateDebugTable(
       }
     }
   }
+  // The blob and every store carry 16-bit lengths: a larger image could only
+  // be dropped at run time, so it is refused here.
+  const retainBlobSize = retainBlobSize2Of(retainVars);
+  if (retainVars.length > 0 && retainBlobSize > RETAIN_BLOB_MAX) {
+    retainErrors.push({
+      path: "",
+      reason:
+        `The retained variables need a ${retainBlobSize}-byte retain image, over the ` +
+        `${RETAIN_BLOB_MAX}-byte limit: retain fewer or shorter variables.`,
+    });
+  }
   const debugTableCpp = renderCpp(
     arrays,
     configGlobal,
@@ -1950,6 +1996,7 @@ export function generateDebugTable(
     retainLayoutHash,
     globalRuns,
     plcDataBlock,
+    retainBlobSize,
   );
   const debugMap: DebugMapV2 = {
     version: 2,
@@ -1979,8 +2026,8 @@ export function generateDebugTable(
           // payload, descriptor trailer. Emitted so a build can be refused
           // when the target cannot hold the blob, and so a firmware sizes its
           // buffer from it.
-          retainBlobSize: retainBlobSize2Of(retainVars),
-          retainFormat: 2,
+          retainBlobSize,
+          retainFormat: retainFormatOf(retainVars),
         }
       : {}),
   };
@@ -2305,6 +2352,7 @@ function renderCpp(
   retainLayoutHash: string,
   globalRuns: GlobalLeafRun[],
   plcDataBlock: boolean,
+  retainBlobSize: number,
 ): string {
   // Where an entry points: the variable's address, or with the PLC data block
   // its offset inside PlcData (debug_dispatch.hpp adds the block's address),
@@ -2322,6 +2370,9 @@ function renderCpp(
     plcDataBlock
       ? `(${ptrType})${blockNode(expr).offset}`
       : `(${ptrType})&${expr}`;
+  /** A table row's C++ type for a cap from its type: undefined = decltype. */
+  const cppType = (e: Entry): string | undefined =>
+    plcDataBlock ? blockNode(e.cppExpr).type : undefined;
   const lines: string[] = [];
   lines.push("// SPDX-License-Identifier: GPL-3.0-only");
   lines.push("// Generated by STruC++ debug-table-gen - Do not edit by hand.");
@@ -2369,9 +2420,7 @@ function renderCpp(
       `// address-of expressions — so it must be a real object, not a`,
     );
     lines.push(`// static-local or a pointer.`);
-    lines.push(
-      `extern ::${ns}::Configuration_${configName} ${configGlobal};`,
-    );
+    lines.push(`extern ::${ns}::Configuration_${configName} ${configGlobal};`);
   }
   lines.push("");
   lines.push("namespace strucpp { namespace debug {");
@@ -2568,12 +2617,30 @@ function renderCpp(
       const { id, index } = retainIdentities[i]!;
       const idx = index === RETAIN_NO_INDEX ? "RETAIN_NO_INDEX" : String(index);
       lines.push(
-        `    { 0x${id.toString(16).padStart(8, "0")}u, ${idx}, TAG_${v.tagName}, ${capLiteral(v.entry)}, ${retainAlt[i]!} },  // ${v.path}`,
+        `    { 0x${id.toString(16).padStart(8, "0")}u, ${idx}, TAG_${v.tagName}, ${capLiteral(v.entry, cppType(v.entry))}, ${retainAlt[i]!} },  // ${v.path}`,
       );
     });
   }
   lines.push("};");
   lines.push("");
+  // The string lengths the retain image size (debug map retainBlobSize) was
+  // counted from, checked against the C++ types. A length not given here (an
+  // unqualified STRING, an archive without lengths) was counted as 254: an
+  // upper bound, and the same format, only while the real one is not longer.
+  const texts = retainVars.filter(
+    (v) => v.tagName === "STRING" || v.tagName === "WSTRING",
+  );
+  if (texts.length > 0) {
+    const terms = texts.map((v) => {
+      const cap = `string_cap<${cppType(v.entry) ?? `decltype(${v.entry.cppExpr})`}>::value`;
+      return v.entry.cap === 0 ? `${cap} <= 254` : `${cap} == ${v.entry.cap}`;
+    });
+    lines.push(`static_assert(${terms.join(" &&\n              ")},`);
+    lines.push(
+      `              "a retained string's length differs from the one its ${retainBlobSize}-byte retain image was counted with");`,
+    );
+    lines.push("");
+  }
   // Alternate identities of retained enumerations (decision 26): a value
   // stored while the enumeration was a START of this one is kept.
   lines.push(

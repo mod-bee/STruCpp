@@ -233,7 +233,7 @@ describe("RETAIN inside a block nested in a library block", () => {
     const result = compileProgram(archive);
     expect(result.errors.map((e) => e.message)).toEqual([]);
     expect(result.debugTableCpp!).toContain(
-      "TAG_STRING, LEAF_FLAG_RETAIN, string_cap<decltype(g_config.INSTANCE0.OUTER.PICK.NOTE)>::value },",
+      "TAG_STRING, LEAF_FLAG_RETAIN, string_table_cap<decltype(g_config.INSTANCE0.OUTER.PICK.NOTE)>::value },",
     );
   });
 

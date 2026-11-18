@@ -138,7 +138,7 @@ Programs without an explicit interval default to 20ms.
 | REAL, LREAL | Decimal with precision | Decimal number |
 | BYTE, WORD, DWORD, LWORD | Hex (`16#NN`) | Hex (`16#NN` or `0xNN`) or decimal |
 | TIME | Formatted duration | Nanoseconds as integer |
-| STRING | Text (max 254 chars) | Raw text |
+| STRING | Text, whole declared length | Raw text, at most 254 characters |
 
 ## Interactive Features
 

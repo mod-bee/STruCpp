@@ -161,10 +161,15 @@ struct MemberDesc {
      *  `VAR_INFO::BASETYPECLASS`. */
     TYPE_CLASS BASETYPECLASS;
     /** Declared capacity of a `STRING(n)` / `WSTRING(n)` in characters,
-     *  excluding the NUL; 0 otherwise. An addition: CODESYS's `BitSize` covers
-     *  the whole object, which is not what sizing a buffer needs. */
-    uint8_t CAP;
+     *  excluding the NUL, 1 to 65535; 0 otherwise. An addition: CODESYS's
+     *  `BitSize` covers the whole object, which is not what sizing a buffer
+     *  needs. A uint16_t in the byte that followed BASETYPECLASS and the
+     *  padding after it, so no other member moves and the size is unchanged
+     *  on 32- and 64-bit targets. */
+    uint16_t CAP;
 };
+static_assert(offsetof(MemberDesc, CAP) == offsetof(MemberDesc, BASETYPECLASS) + sizeof(TYPE_CLASS),
+              "MemberDesc::CAP directly follows BASETYPECLASS");
 
 /** The layout of one generated STRUCT type. */
 struct TypeDesc {

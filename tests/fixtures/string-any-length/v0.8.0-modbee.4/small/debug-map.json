@@ -1,0 +1,227 @@
+{
+ "version": 2,
+ "md5": "",
+ "typeTags": {
+  "BOOL": 0,
+  "SINT": 1,
+  "USINT": 2,
+  "INT": 3,
+  "UINT": 4,
+  "DINT": 5,
+  "UDINT": 6,
+  "LINT": 7,
+  "ULINT": 8,
+  "REAL": 9,
+  "LREAL": 10,
+  "BYTE": 11,
+  "WORD": 12,
+  "DWORD": 13,
+  "LWORD": 14,
+  "TIME": 15,
+  "DATE": 16,
+  "TOD": 17,
+  "DT": 18,
+  "STRING": 19,
+  "WSTRING": 20
+ },
+ "arrays": [
+  {
+   "index": 0,
+   "count": 8
+  },
+  {
+   "index": 1,
+   "count": 4
+  }
+ ],
+ "leaves": [
+  {
+   "arrayIdx": 0,
+   "elemIdx": 0,
+   "path": "CFG.NAME",
+   "type": "STRING",
+   "size": 127,
+   "retain": true
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 1,
+   "path": "CFG.NOTE",
+   "type": "STRING",
+   "size": 127,
+   "retain": true
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 2,
+   "path": "CFG.WIDE",
+   "type": "WSTRING",
+   "size": 253,
+   "retain": true
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 3,
+   "path": "CFG.FULL",
+   "type": "STRING",
+   "size": 127,
+   "retain": true
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 4,
+   "path": "CFG.COUNT",
+   "type": "DINT",
+   "size": 4,
+   "retain": true
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 5,
+   "path": "CFG.FLAGS[1]",
+   "type": "INT",
+   "size": 2,
+   "retain": true
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 6,
+   "path": "CFG.FLAGS[2]",
+   "type": "INT",
+   "size": 2,
+   "retain": true
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 7,
+   "path": "CFG.FLAGS[3]",
+   "type": "INT",
+   "size": 2,
+   "retain": true
+  },
+  {
+   "arrayIdx": 1,
+   "elemIdx": 0,
+   "path": "INSTANCE0.SL",
+   "type": "STRING",
+   "size": 127,
+   "retain": true
+  },
+  {
+   "arrayIdx": 1,
+   "elemIdx": 1,
+   "path": "INSTANCE0.S254",
+   "type": "STRING",
+   "size": 127,
+   "retain": true
+  },
+  {
+   "arrayIdx": 1,
+   "elemIdx": 2,
+   "path": "INSTANCE0.W",
+   "type": "WSTRING",
+   "size": 253,
+   "retain": true
+  },
+  {
+   "arrayIdx": 1,
+   "elemIdx": 3,
+   "path": "INSTANCE0.HOURS",
+   "type": "LINT",
+   "size": 8,
+   "retain": true
+  }
+ ],
+ "retainVars": [
+  {
+   "arrayIdx": 0,
+   "elemIdx": 0,
+   "path": "CFG.NAME",
+   "size": 127,
+   "id": "38b26fbe"
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 1,
+   "path": "CFG.NOTE",
+   "size": 127,
+   "id": "6d9196b5"
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 2,
+   "path": "CFG.WIDE",
+   "size": 253,
+   "id": "c1d6d112"
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 3,
+   "path": "CFG.FULL",
+   "size": 127,
+   "id": "ddc7cc34"
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 4,
+   "path": "CFG.COUNT",
+   "size": 4,
+   "id": "58b21f5c"
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 5,
+   "path": "CFG.FLAGS[1]",
+   "size": 2,
+   "id": "ed2912b0",
+   "index": 1
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 6,
+   "path": "CFG.FLAGS[2]",
+   "size": 2,
+   "id": "ed2912b0",
+   "index": 2
+  },
+  {
+   "arrayIdx": 0,
+   "elemIdx": 7,
+   "path": "CFG.FLAGS[3]",
+   "size": 2,
+   "id": "ed2912b0",
+   "index": 3
+  },
+  {
+   "arrayIdx": 1,
+   "elemIdx": 0,
+   "path": "INSTANCE0.SL",
+   "size": 127,
+   "id": "f02fe4c7"
+  },
+  {
+   "arrayIdx": 1,
+   "elemIdx": 1,
+   "path": "INSTANCE0.S254",
+   "size": 127,
+   "id": "edd895f0"
+  },
+  {
+   "arrayIdx": 1,
+   "elemIdx": 2,
+   "path": "INSTANCE0.W",
+   "size": 253,
+   "id": "c608667d"
+  },
+  {
+   "arrayIdx": 1,
+   "elemIdx": 3,
+   "path": "INSTANCE0.HOURS",
+   "size": 8,
+   "id": "d2f48847"
+  }
+ ],
+ "retainLayoutHash": "c6912415",
+ "retainBlobSize": 1453,
+ "retainFormat": 2
+}

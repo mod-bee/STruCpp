@@ -351,6 +351,14 @@ inline LoadResult unpack(const uint8_t* blob,
 //                              run     u32 id, u8 tag | 0x80, u8 cap,
 //                                      i32 first, u16 count                  12 bytes
 //
+// FORMAT 3 is format 2 with 16-bit string lengths, for a declared length over
+// 254 (up to 65535): format byte 3, strings [len u16][C units], and every
+// trailer cap a u16 (single 7 bytes, run 13). It is written only when a
+// retained string is declared longer than 254, so a program whose strings are
+// all 254 or shorter keeps writing format 2, byte for byte. unpack2() reads
+// formats 1, 2 and 3; a value stored with cap 0 (254) restores into a longer
+// string like any other shorter one.
+//
 // A run is `count` consecutive elements of one innermost array of scalars
 // (same id, tag and cap, subscripts first, first+1, ...): a retained
 // ARRAY[1..4000] OF BOOL costs 12 bytes of trailer, not 24 000.
@@ -385,17 +393,22 @@ inline LoadResult unpack(const uint8_t* blob,
 
 constexpr uint8_t  FORMAT_V1        = 1;
 constexpr uint8_t  FORMAT_V2        = 2;
+constexpr uint8_t  FORMAT_V3        = 3;
 constexpr uint8_t  TRAILER_RUN_FLAG = 0x80;
 constexpr uint16_t TRAILER_HEADER   = 4;
 constexpr uint16_t ENTRY_SINGLE     = 6;
 constexpr uint16_t ENTRY_RUN        = 12;
+/** Format 3: the trailer cap is a u16, one byte more per entry. */
+constexpr uint16_t ENTRY_SINGLE3    = 7;
+constexpr uint16_t ENTRY_RUN3       = 13;
 /** Every length in the blob and in the store interface is 16-bit. */
 constexpr size_t   BLOB_MAX         = 65535;
 
 /** The host's flash-safe reader of retained leaf `i` (debug::handle_retain_leaf). */
 using LeafAt = bool (*)(uint16_t i, debug::RetainLeafInfo* out);
 
-/** A string leaf's whole content: characters, or LE code units. Returns bytes. */
+/** A string leaf's whole content: characters, or LE code units. Returns bytes.
+ *  uint16_t: a retained value lies inside a blob of at most BLOB_MAX bytes. */
 using ReadText = uint16_t (*)(uint8_t arr, uint16_t elem, uint8_t* dest, uint16_t cap_bytes);
 
 /** Store a string leaf's content (plain write, truncating). 0x7E on success. */
@@ -442,10 +455,19 @@ inline Report& last_report() noexcept {
 }
 
 /** The declared length of a string leaf: 0 in the tables means the default. */
-inline uint16_t text_capacity(uint8_t cap) noexcept { return cap == 0 ? 254u : cap; }
+inline uint16_t text_capacity(uint16_t cap) noexcept { return cap == 0 ? 254u : cap; }
 
-/** Bytes a leaf occupies in a format-2 payload; 0 for a tag this build does not know. */
-inline uint32_t leaf_width(uint8_t tag, uint8_t cap) noexcept {
+/** Bytes of a string value's length prefix in a format-2 / format-3 payload. */
+inline uint32_t text_prefix(uint8_t format) noexcept { return format >= FORMAT_V3 ? 2u : 1u; }
+
+/** Bytes of one trailer entry. */
+inline uint16_t entry_size(uint8_t format, bool run) noexcept {
+    if (format >= FORMAT_V3) return run ? ENTRY_RUN3 : ENTRY_SINGLE3;
+    return run ? ENTRY_RUN : ENTRY_SINGLE;
+}
+
+/** Bytes a leaf occupies in a format-2 (or 3) payload; 0 for a tag this build does not know. */
+inline uint32_t leaf_width(uint8_t tag, uint16_t cap, uint8_t format = FORMAT_V2) noexcept {
     switch (tag) {
         case debug::TAG_BOOL:    return sizeof(BOOL_t);
         case debug::TAG_SINT:    return sizeof(SINT_t);
@@ -466,8 +488,8 @@ inline uint32_t leaf_width(uint8_t tag, uint8_t cap) noexcept {
         case debug::TAG_DATE:    return sizeof(DATE_t);
         case debug::TAG_TOD:     return sizeof(TOD_t);
         case debug::TAG_DT:      return sizeof(DT_t);
-        case debug::TAG_STRING:  return 1u + text_capacity(cap);
-        case debug::TAG_WSTRING: return 1u + 2u * text_capacity(cap);
+        case debug::TAG_STRING:  return text_prefix(format) + text_capacity(cap);
+        case debug::TAG_WSTRING: return text_prefix(format) + 2u * text_capacity(cap);
         default:                 return 0;
     }
 }
@@ -571,7 +593,7 @@ namespace detail {
 /** Walks the program's leaves once, as trailer entries (runs folded). */
 struct EntryCursor {
     uint8_t  tag   = 0;
-    uint8_t  cap   = 0;
+    uint16_t cap   = 0;
     uint32_t id    = 0;
     int32_t  first = 0;
     uint16_t count = 0;
@@ -588,14 +610,28 @@ struct EntryCursor {
 
 }  // namespace detail
 
-/** Payload and trailer bytes of this program's format-2 blob. */
+/**
+ * The format this program writes: 3 when a retained string is declared longer
+ * than 254, else 2.
+ */
+inline uint8_t blob_format(const Host& host) noexcept {
+    for (uint16_t i = 0; i < debug::retain_var_count; ++i) {
+        debug::RetainLeafInfo l;
+        if (!host.leaf(i, &l)) break;
+        if (is_text(l.tag) && text_capacity(l.cap) > 254u) return FORMAT_V3;
+    }
+    return FORMAT_V2;
+}
+
+/** Payload and trailer bytes of this program's format-2 (or format-3) blob. */
 inline void layout2(const Host& host, uint32_t* payload, uint32_t* trailer) noexcept {
+    const uint8_t format = blob_format(host);
     uint32_t p = 0, t = TRAILER_HEADER;
     detail::EntryCursor e;
     for (uint16_t i = 0; i < debug::retain_var_count; ++i) {
         debug::RetainLeafInfo l;
         if (!host.leaf(i, &l)) break;
-        p += leaf_width(l.tag, l.cap);
+        p += leaf_width(l.tag, l.cap, format);
         if (e.extends(l)) {
             ++e.count;
             continue;
@@ -607,7 +643,7 @@ inline void layout2(const Host& host, uint32_t* payload, uint32_t* trailer) noex
         e.cap = l.cap;
         e.first = l.index;
         e.count = 1;
-        t += e.run ? ENTRY_RUN : ENTRY_SINGLE;
+        t += entry_size(format, e.run);
     }
     *payload = p;
     *trailer = t;
@@ -628,15 +664,24 @@ inline size_t blob_size2(const Host& host) noexcept {
 namespace detail {
 
 /** Write leaf `l`'s payload slot at `slot`. Returns its width. */
-inline uint32_t pack_leaf(uint8_t* slot, const debug::RetainLeafInfo& l, const Host& host) noexcept {
-    const uint32_t w = leaf_width(l.tag, l.cap);
+inline uint32_t pack_leaf(uint8_t* slot, const debug::RetainLeafInfo& l, const Host& host,
+                          uint8_t format) noexcept {
+    const uint32_t w = leaf_width(l.tag, l.cap, format);
     if (is_text(l.tag)) {
-        const uint16_t room = static_cast<uint16_t>(w - 1u);
-        uint16_t n = host.read_text(l.arr, l.elem, slot + 1, room);
+        // Bytes are uint32_t; the host's uint16_t is enough because pack2 and
+        // pack2_begin refuse a blob over BLOB_MAX before any slot is written.
+        const uint32_t prefix = text_prefix(format);
+        const uint32_t room = w - prefix;
+        uint32_t n = host.read_text(l.arr, l.elem, slot + prefix, static_cast<uint16_t>(room));
         if (n > room) n = room;
-        if (l.tag == debug::TAG_WSTRING) n &= static_cast<uint16_t>(~1u);
-        slot[0] = static_cast<uint8_t>(l.tag == debug::TAG_WSTRING ? n / 2u : n);
-        memset(slot + 1 + n, 0, room - n);
+        if (l.tag == debug::TAG_WSTRING) n &= ~1u;
+        const uint16_t units = static_cast<uint16_t>(l.tag == debug::TAG_WSTRING ? n / 2u : n);
+        if (format >= FORMAT_V3) {
+            put_u16(slot, units);
+        } else {
+            slot[0] = static_cast<uint8_t>(units);
+        }
+        memset(slot + prefix + n, 0, room - n);
     } else if (host.read(l.arr, l.elem, slot) != w) {
         // One unreadable leaf costs its own value, not every other one.
         memset(slot, 0, w);
@@ -649,7 +694,7 @@ inline uint32_t pack_leaf(uint8_t* slot, const debug::RetainLeafInfo& l, const H
  * entry. Returns the bytes added.
  */
 inline uint32_t pack_entry(uint8_t* out, size_t at, const debug::RetainLeafInfo& l, EntryCursor& e,
-                           uint8_t** count_field, uint16_t* entries) noexcept {
+                           uint8_t** count_field, uint16_t* entries, uint8_t format) noexcept {
     if (e.extends(l)) {
         ++e.count;
         put_u16(*count_field, e.count);
@@ -664,13 +709,19 @@ inline uint32_t pack_entry(uint8_t* out, size_t at, const debug::RetainLeafInfo&
     e.count = 1;
     put_u32(out + at, l.id);
     out[at + 4] = static_cast<uint8_t>(l.tag | (e.run ? TRAILER_RUN_FLAG : 0));
-    out[at + 5] = l.cap;
+    // Format 3 carries the cap as a u16; everything after it moves one byte.
+    const size_t c = format >= FORMAT_V3 ? 1u : 0u;
+    if (format >= FORMAT_V3) {
+        put_u16(out + at + 5, l.cap);
+    } else {
+        out[at + 5] = static_cast<uint8_t>(l.cap);
+    }
     ++*entries;
-    if (!e.run) return ENTRY_SINGLE;
-    put_u32(out + at + 6, static_cast<uint32_t>(l.index));
-    *count_field = out + at + 10;
+    if (!e.run) return entry_size(format, false);
+    put_u32(out + at + 6 + c, static_cast<uint32_t>(l.index));
+    *count_field = out + at + 10 + c;
     put_u16(*count_field, 1);
-    return ENTRY_RUN;
+    return entry_size(format, true);
 }
 
 }  // namespace detail
@@ -682,6 +733,7 @@ inline uint32_t pack_entry(uint8_t* out, size_t at, const debug::RetainLeafInfo&
  */
 inline size_t pack2(uint8_t* out, size_t cap, const Host& host) noexcept {
     if (debug::retain_var_count == 0 || out == nullptr) return 0;
+    const uint8_t format = blob_format(host);
     uint32_t payload = 0, trailer = 0;
     layout2(host, &payload, &trailer);
     const size_t total = static_cast<size_t>(HEADER_SIZE) + payload + trailer;
@@ -692,7 +744,7 @@ inline size_t pack2(uint8_t* out, size_t cap, const Host& host) noexcept {
     for (uint16_t i = 0; i < debug::retain_var_count; ++i) {
         debug::RetainLeafInfo l;
         if (!host.leaf(i, &l)) return 0;
-        at += detail::pack_leaf(out + at, l, host);
+        at += detail::pack_leaf(out + at, l, host, format);
     }
 
     // Trailer: entries first, then its two header fields once the count is known.
@@ -704,13 +756,13 @@ inline size_t pack2(uint8_t* out, size_t cap, const Host& host) noexcept {
     for (uint16_t i = 0; i < debug::retain_var_count; ++i) {
         debug::RetainLeafInfo l;
         if (!host.leaf(i, &l)) return 0;
-        at += detail::pack_entry(out, at, l, e, &count_field, &entries);
+        at += detail::pack_entry(out, at, l, e, &count_field, &entries, format);
     }
     put_u16(out + trailer_at, static_cast<uint16_t>(trailer));
     put_u16(out + trailer_at + 2, entries);
 
     put_u16(out + 0, MAGIC);
-    out[2] = FORMAT_V2;
+    out[2] = format;
     out[3] = 0;
     put_u32(out + 4, debug::retain_layout_hash);
     put_u16(out + 8, static_cast<uint16_t>(payload));
@@ -728,7 +780,9 @@ inline size_t pack2(uint8_t* out, size_t cap, const Host& host) noexcept {
  * so a host computes it once and passes it to every begin.
  */
 struct Packer2 {
-    enum Phase : uint8_t { Idle, Payload, Trailer, Checksum, Done, Failed };
+    // Scan (appended, so the others keep their values) finds the format before
+    // the first payload slot is written.
+    enum Phase : uint8_t { Idle, Payload, Trailer, Checksum, Done, Failed, Scan };
     uint8_t*  out         = nullptr;
     uint32_t  payload     = 0;
     uint32_t  trailer     = 0;
@@ -740,6 +794,7 @@ struct Packer2 {
     uint8_t*  count_field = nullptr;
     detail::EntryCursor e;
     Phase     phase       = Idle;
+    uint8_t   format      = FORMAT_V2;
 
     /** Bytes of the finished blob; 0 until Done. */
     size_t size() const noexcept {
@@ -761,15 +816,15 @@ inline bool pack2_begin(Packer2& p, uint8_t* out, size_t cap, uint32_t payload, 
     p.out = out;
     p.payload = payload;
     p.trailer = trailer;
+    // The format byte and the header checksum follow the Scan phase.
     put_u16(out + 0, MAGIC);
     out[2] = FORMAT_V2;
     out[3] = 0;
     put_u32(out + 4, debug::retain_layout_hash);
     put_u16(out + 8, static_cast<uint16_t>(payload));
-    p.crc = crc32(out, 10);
     p.at = HEADER_SIZE;
     p.crc_at = HEADER_SIZE;
-    p.phase = Packer2::Payload;
+    p.phase = Packer2::Scan;
     return true;
 }
 
@@ -784,14 +839,30 @@ inline Packer2::Phase pack2_step(Packer2& p, const Host& host, uint16_t budget) 
     const uint32_t payload_end = HEADER_SIZE + p.payload;
     const uint32_t blob_end = payload_end + p.trailer;
     switch (p.phase) {
-        case Packer2::Payload:
+        case Packer2::Scan:
             for (uint16_t n = 0; n < budget && p.next < debug::retain_var_count; ++n) {
                 debug::RetainLeafInfo l;
-                if (!host.leaf(p.next, &l) || p.at + leaf_width(l.tag, l.cap) > payload_end) {
+                if (!host.leaf(p.next, &l)) {
                     p.phase = Packer2::Failed;
                     return p.phase;
                 }
-                p.at += detail::pack_leaf(p.out + p.at, l, host);
+                if (is_text(l.tag) && text_capacity(l.cap) > 254u) p.format = FORMAT_V3;
+                ++p.next;
+            }
+            if (p.next < debug::retain_var_count) return p.phase;
+            p.out[2] = p.format;
+            p.crc = crc32(p.out, 10);
+            p.next = 0;
+            p.phase = Packer2::Payload;
+            return p.phase;
+        case Packer2::Payload:
+            for (uint16_t n = 0; n < budget && p.next < debug::retain_var_count; ++n) {
+                debug::RetainLeafInfo l;
+                if (!host.leaf(p.next, &l) || p.at + leaf_width(l.tag, l.cap, p.format) > payload_end) {
+                    p.phase = Packer2::Failed;
+                    return p.phase;
+                }
+                p.at += detail::pack_leaf(p.out + p.at, l, host, p.format);
                 ++p.next;
             }
             if (p.next < debug::retain_var_count) return p.phase;
@@ -811,12 +882,12 @@ inline Packer2::Phase pack2_step(Packer2& p, const Host& host, uint16_t budget) 
                     return p.phase;
                 }
                 const uint32_t need =
-                    p.e.extends(l) ? 0u : (l.index != debug::RETAIN_NO_INDEX ? ENTRY_RUN : ENTRY_SINGLE);
+                    p.e.extends(l) ? 0u : entry_size(p.format, l.index != debug::RETAIN_NO_INDEX);
                 if (p.at + need > blob_end) {
                     p.phase = Packer2::Failed;
                     return p.phase;
                 }
-                p.at += detail::pack_entry(p.out, p.at, l, p.e, &p.count_field, &p.entries);
+                p.at += detail::pack_entry(p.out, p.at, l, p.e, &p.count_field, &p.entries, p.format);
                 ++p.next;
             }
             if (p.next < debug::retain_var_count) return p.phase;
@@ -855,6 +926,7 @@ struct StoredTrailer {
     const uint8_t* entries;     // first entry
     uint16_t       count;       // entries
     const uint8_t* payload;     // first payload byte
+    uint8_t        format;      // FORMAT_V2 or FORMAT_V3
 
     // Search cursor: the entry the last lookup matched (lookups mostly walk
     // forward, so starting there makes an unchanged or lightly edited layout
@@ -866,7 +938,7 @@ struct StoredTrailer {
 
     struct Hit {
         uint8_t        tag;
-        uint8_t        cap;
+        uint16_t       cap;
         const uint8_t* value;
         uint32_t       ordinal;
     };
@@ -878,11 +950,12 @@ struct StoredTrailer {
             const uint8_t* p = entries + pos;
             const uint8_t  tb = p[4];
             const uint8_t  tag = static_cast<uint8_t>(tb & ~TRAILER_RUN_FLAG);
-            const uint8_t  cap = p[5];
-            const uint32_t w = leaf_width(tag, cap);
+            const uint32_t c = format >= FORMAT_V3 ? 1u : 0u;
+            const uint16_t cap = c != 0 ? get_u16(p + 5) : p[5];
+            const uint32_t w = leaf_width(tag, cap, format);
             const bool     run = (tb & TRAILER_RUN_FLAG) != 0;
-            const int32_t  first = run ? static_cast<int32_t>(get_u32(p + 6)) : 0;
-            const uint16_t n = run ? get_u16(p + 10) : 1;
+            const int32_t  first = run ? static_cast<int32_t>(get_u32(p + 6 + c)) : 0;
+            const uint16_t n = run ? get_u16(p + 10 + c) : 1;
             if (get_u32(p) == id) {
                 const bool match =
                     run ? (index != debug::RETAIN_NO_INDEX &&
@@ -904,7 +977,7 @@ struct StoredTrailer {
             }
             // Next entry, wrapping to the first.
             ++e;
-            pos = static_cast<uint16_t>(pos + (run ? ENTRY_RUN : ENTRY_SINGLE));
+            pos = static_cast<uint16_t>(pos + entry_size(format, run));
             off += w * n;
             ord += n;
             if (e == count) {
@@ -973,7 +1046,7 @@ inline LoadResult unpack2(const uint8_t* blob, size_t len, const Host& host,
     if (len < HEADER_SIZE) return detail::finish(r, LoadResult::Truncated, report);
     if (get_u16(blob) != MAGIC) return detail::finish(r, LoadResult::BadMagic, report);
     r.format = blob[2];
-    if (r.format != FORMAT_V1 && r.format != FORMAT_V2) {
+    if (r.format != FORMAT_V1 && r.format != FORMAT_V2 && r.format != FORMAT_V3) {
         return detail::finish(r, LoadResult::BadFormat, report);
     }
     r.stored_layout = get_u32(blob + 4);
@@ -1014,7 +1087,8 @@ inline LoadResult unpack2(const uint8_t* blob, size_t len, const Host& host,
         return detail::finish(r, LoadResult::Ok, report);
     }
 
-    // ---- format 2: validate everything before writing anything --------------
+    // ---- formats 2 and 3: validate everything before writing anything -------
+    const uint32_t c3 = r.format == FORMAT_V3 ? 1u : 0u;  // format 3: u16 cap
     if (len - HEADER_SIZE - payload < TRAILER_HEADER) {
         return detail::finish(r, LoadResult::Truncated, report);
     }
@@ -1036,22 +1110,28 @@ inline LoadResult unpack2(const uint8_t* blob, size_t len, const Host& host,
     {
         uint32_t pos = TRAILER_HEADER, widths = 0;
         for (uint16_t k = 0; k < entry_count; ++k) {
-            if (pos + ENTRY_SINGLE > trailer_len) return detail::finish(r, LoadResult::BadTrailer, report);
+            if (pos + entry_size(r.format, false) > trailer_len) {
+                return detail::finish(r, LoadResult::BadTrailer, report);
+            }
             const uint8_t tb = trailer[pos + 4];
             const uint8_t tag = static_cast<uint8_t>(tb & ~TRAILER_RUN_FLAG);
-            const uint32_t w = leaf_width(tag, trailer[pos + 5]);
+            const uint16_t cap = c3 != 0 ? get_u16(trailer + pos + 5) : trailer[pos + 5];
+            const uint32_t w = leaf_width(tag, cap, r.format);
             if (tag >= debug::TAG__COUNT || w == 0) {
                 return detail::finish(r, LoadResult::BadTrailer, report);
             }
             uint32_t n = 1;
             if (tb & TRAILER_RUN_FLAG) {
-                if (pos + ENTRY_RUN > trailer_len) return detail::finish(r, LoadResult::BadTrailer, report);
-                n = get_u16(trailer + pos + 10);
-                const int64_t last = static_cast<int64_t>(static_cast<int32_t>(get_u32(trailer + pos + 6))) + n - 1;
+                if (pos + entry_size(r.format, true) > trailer_len) {
+                    return detail::finish(r, LoadResult::BadTrailer, report);
+                }
+                n = get_u16(trailer + pos + 10 + c3);
+                const int64_t last =
+                    static_cast<int64_t>(static_cast<int32_t>(get_u32(trailer + pos + 6 + c3))) + n - 1;
                 if (n == 0 || last > INT32_MAX) return detail::finish(r, LoadResult::BadTrailer, report);
-                pos += ENTRY_RUN;
+                pos += entry_size(r.format, true);
             } else {
-                pos += ENTRY_SINGLE;
+                pos += entry_size(r.format, false);
             }
             widths += w * n;
             stored_leaves += n;
@@ -1062,11 +1142,12 @@ inline LoadResult unpack2(const uint8_t* blob, size_t len, const Host& host,
         }
     }
 
-    // ---- format 2: match by name and restore --------------------------------
+    // ---- formats 2 and 3: match by name and restore --------------------------
     detail::StoredTrailer stored;
     stored.entries = trailer + TRAILER_HEADER;
     stored.count = entry_count;
     stored.payload = blob + HEADER_SIZE;
+    stored.format = r.format;
     bool identical = stored_leaves == debug::retain_var_count;
     uint32_t matched = 0;
     for (uint16_t i = 0; i < debug::retain_var_count; ++i) {
@@ -1082,15 +1163,20 @@ inline LoadResult unpack2(const uint8_t* blob, size_t len, const Host& host,
             identical = false;  // its enumeration grew: the layout changed
         }
         ++matched;
-        if (hit.ordinal != i || hit.tag != l.tag || hit.cap != l.cap) identical = false;
+        // A string's cap 0 and 254 are one length.
+        const bool same_cap = is_text(l.tag) ? text_capacity(hit.cap) == text_capacity(l.cap)
+                                             : hit.cap == l.cap;
+        if (hit.ordinal != i || hit.tag != l.tag || !same_cap) identical = false;
 
         if (hit.tag == l.tag && is_text(l.tag)) {
             const uint16_t stored_cap = text_capacity(hit.cap);
-            uint16_t units = hit.value[0];
+            uint16_t units = c3 != 0 ? get_u16(hit.value) : hit.value[0];
             if (units > stored_cap) units = stored_cap;
             if (units > text_capacity(l.cap)) ++r.truncated;  // write_text keeps the first ones
-            const uint16_t nbytes = static_cast<uint16_t>(l.tag == debug::TAG_WSTRING ? units * 2u : units);
-            if (host.write_text(l.arr, l.elem, hit.value + 1, nbytes) == WRITE_OK) {
+            // Inside a validated blob, so it fits the host's uint16_t.
+            const uint32_t nbytes = l.tag == debug::TAG_WSTRING ? units * 2u : units;
+            if (host.write_text(l.arr, l.elem, hit.value + text_prefix(r.format),
+                                static_cast<uint16_t>(nbytes)) == WRITE_OK) {
                 ++r.kept;
             } else {
                 ++r.refused;

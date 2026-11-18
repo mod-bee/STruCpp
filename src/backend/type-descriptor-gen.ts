@@ -45,6 +45,7 @@ import type {
 import { isElementaryType } from "../semantic/type-registry.js";
 import { TYPE_CLASS_BY_IEC_TYPE } from "../semantic/type-utils.js";
 import { mangledMemberName } from "./member-mangling.js";
+import { MAX_STRING_LENGTH } from "../semantic/string-lengths.js";
 
 /** `TYPE_CLASS` as generated code spells it. */
 const cls = (name: string): string => `strucpp::${name}`;
@@ -357,16 +358,16 @@ export class TypeClassifier {
     if (typeClass === undefined) return undefined;
 
     if (typeClass === "TYPE_STRING" || typeClass === "TYPE_WSTRING") {
-      // A capacity given as a constant NAME is resolved elsewhere in the
-      // pipeline and is not a number here. Refuse rather than guess 254 and
-      // hand a block a capacity the member does not have.
+      // The analyzer resolves a constant NAME to its value; one it could not
+      // resolve is not a number here. Refuse rather than guess 254 and hand a
+      // block a capacity the member does not have.
       const cap =
         maxLength === undefined
           ? DEFAULT_STRING_CAP
           : typeof maxLength === "number"
             ? maxLength
             : Number.NaN;
-      if (!Number.isInteger(cap) || cap < 1 || cap > DEFAULT_STRING_CAP) {
+      if (!Number.isInteger(cap) || cap < 1 || cap > MAX_STRING_LENGTH) {
         return undefined;
       }
       return { typeClass, typeName: upper, cap };
@@ -509,7 +510,7 @@ export class TypeDescriptorGenerator {
       return `'${typeRef.name}' is a function block instance or a type this compiler cannot lay out`;
     }
     if (typeof typeRef.maxLength === "string") {
-      return `its length is the constant '${typeRef.maxLength}', which is not a number at this point in the pipeline`;
+      return `its length '${typeRef.maxLength}' is not a constant the compiler can evaluate`;
     }
     return `'${typeRef.name}' is not a type the descriptor can lay out`;
   }

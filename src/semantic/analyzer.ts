@@ -45,6 +45,7 @@ import type {
   VariableSymbol,
 } from "./symbol-table.js";
 import { TypeChecker } from "./type-checker.js";
+import { constantScopes } from "./string-lengths.js";
 import {
   interfaceClosure,
   interfaceExtendsItself,
@@ -1946,79 +1947,14 @@ export class SemanticAnalyzer {
    * requires a constant there, and nothing would make the read well defined.
    */
   private foldConstantInitializers(ast: CompilationUnit): void {
-    const globalConstants = new Map<string, Expression>();
-    const globalVariables = new Set<string>();
-    const collect = (
-      blocks: VarBlock[],
-      into: Map<string, Expression>,
-    ): void => {
-      for (const block of blocks) {
-        if (block.blockType !== "VAR_GLOBAL") continue;
-        for (const decl of block.declarations) {
-          for (const name of decl.names) {
-            if (block.isConstant && decl.initialValue !== undefined) {
-              into.set(name.toUpperCase(), decl.initialValue);
-            } else if (block.blockType === "VAR_GLOBAL") {
-              globalVariables.add(name.toUpperCase());
-            }
-          }
-        }
-      }
-    };
-    collect(ast.globalVarBlocks, globalConstants);
-    for (const config of ast.configurations) {
-      collect(config.varBlocks, globalConstants);
-    }
-
+    const scopes = constantScopes(ast);
     // The globals' own initial values may name other global constants.
     this.foldInitializersIn(
-      [
-        ...ast.globalVarBlocks,
-        ...ast.configurations.flatMap((c) => c.varBlocks),
-      ],
-      globalConstants,
+      scopes.globalBlocks,
+      scopes.globalConstants,
       new Set(),
     );
-
-    // What each set of declarations sees, and which of them to fold: a
-    // method sees its block's declarations as well as its own.
-    const pous: Array<{ blocks: VarBlock[]; own: VarBlock[] }> = [
-      ...ast.programs.map((p) => ({ blocks: p.varBlocks, own: p.varBlocks })),
-      ...ast.functions.map((f) => ({ blocks: f.varBlocks, own: f.varBlocks })),
-      ...ast.functionBlocks.flatMap((fb) => [
-        { blocks: fb.varBlocks, own: fb.varBlocks },
-        ...fb.methods.map((m) => ({
-          blocks: [...fb.varBlocks, ...m.varBlocks],
-          own: m.varBlocks,
-        })),
-      ]),
-    ];
-    for (const { blocks, own } of pous) {
-      const constants = new Map<string, Expression>();
-      const externalVariables = new Set<string>();
-      // Top-level constants are visible unless a declaration here hides them.
-      const declared = new Set(
-        blocks.flatMap((b) =>
-          b.declarations.flatMap((d) => d.names.map((n) => n.toUpperCase())),
-        ),
-      );
-      for (const [name, value] of globalConstants) {
-        if (!declared.has(name)) constants.set(name, value);
-      }
-      for (const block of blocks) {
-        for (const decl of block.declarations) {
-          for (const name of decl.names) {
-            const upper = name.toUpperCase();
-            if (block.blockType === "VAR_EXTERNAL") {
-              const value = globalConstants.get(upper);
-              if (value !== undefined) constants.set(upper, value);
-              else if (globalVariables.has(upper)) externalVariables.add(upper);
-            } else if (block.isConstant && decl.initialValue !== undefined) {
-              constants.set(upper, decl.initialValue);
-            }
-          }
-        }
-      }
+    for (const { own, constants, externalVariables } of scopes.pous) {
       this.foldInitializersIn(own, constants, externalVariables);
     }
   }
@@ -3379,7 +3315,7 @@ export class SemanticAnalyzer {
         cur.extends === undefined
           ? undefined
           : ast.functionBlocks.find(
-              (f) => f.name.toUpperCase() === cur!.extends!.toUpperCase(),
+              (f) => f.name.toUpperCase() === cur.extends!.toUpperCase(),
             )
     ) {
       lineage.push(cur);
