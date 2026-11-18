@@ -99,6 +99,7 @@ import { checkFunctionBlockRules } from "./fb-rules.js";
 import { checkFbLifecycleRules } from "./fb-lifecycle.js";
 
 import { checkDeclarationNames } from "./declaration-names.js";
+import { bindOwnPropertyAccess } from "./own-property-access.js";
 
 // =============================================================================
 // Located Variable Address Parsing
@@ -458,6 +459,9 @@ export class SemanticAnalyzer {
 
     // Standard calls are read by position from here on.
     this.bindStdFunctionArguments([ast]);
+
+    // A block's own property named bare reads and writes as THIS^.<property>.
+    bindOwnPropertyAccess(ast);
 
     // Initial values hold constants' values, not references to them.
     this.foldConstantInitializers(ast);
