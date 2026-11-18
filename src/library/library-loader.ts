@@ -720,10 +720,10 @@ function substituteConstants(
       return e;
     }
     const copy = { ...e } as Record<string, unknown>;
-    for (const [key, child] of Object.entries(e)) {
+    for (const [key, child] of Object.entries(e) as Array<[string, unknown]>) {
       if (key === "sourceSpan" || key === "parent") continue;
       if (Array.isArray(child)) {
-        copy[key] = child.map((c) =>
+        copy[key] = (child as unknown[]).map((c): unknown =>
           isExpressionNode(c)
             ? visit(c)
             : isArgument(c)
@@ -1264,7 +1264,8 @@ export function registerLibrarySymbols(
     // one it depends on exports) takes that type, registered above: a
     // placeholder made it a distinct type, so passing the global to the
     // library's own function of that type was refused.
-    const varType: IECType = ELEMENTARY_TYPES[g.type.toUpperCase()] ??
+    const varType: IECType =
+      ELEMENTARY_TYPES[g.type.toUpperCase()] ??
       symbolTables.lookupType(g.type)?.resolvedType ??
       ({ typeKind: "elementary", name: g.type, sizeBits: 0 } as ElementaryType);
     try {

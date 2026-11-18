@@ -181,8 +181,9 @@ function serializeVarType(
 
 /** A type reference as the manifest records it (a result or property type). */
 function serializeTypeRef(typeRef: TypeReference): LibraryTypeRef {
-  const { name: _name, ...ref } = serializeVarType("", typeRef);
-  return ref;
+  const ref: Partial<LibraryVarType> = serializeVarType("", typeRef);
+  delete ref.name;
+  return ref as LibraryTypeRef;
 }
 
 /** The manifest entry of one property (CODESYS "Object: Property"). */

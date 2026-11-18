@@ -201,7 +201,7 @@ const RETAIN_HEADER_SIZE = 14;
  */
 function fnv1a32(text: string): number {
   let hash = 0x811c9dc5;
-  for (const byte of Buffer.from(text, "utf8")) {
+  for (const byte of new TextEncoder().encode(text)) {
     hash ^= byte;
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }

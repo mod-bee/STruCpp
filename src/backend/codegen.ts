@@ -11685,7 +11685,7 @@ export class CodeGenerator {
     if (stTypeName === undefined || value.kind !== "VariableExpression") {
       return undefined;
     }
-    const v = value as VariableExpression;
+    const v = value;
     if (
       v.fieldAccess.length > 0 ||
       (v.accessChain?.length ?? 0) > 0 ||
