@@ -2421,7 +2421,10 @@ export class SemanticAnalyzer {
             );
       return { what: `function '${sym.name}'`, slots };
     }
-    if (sym?.kind !== "variable") return undefined;
+    // A method's or function's own name is its result variable (no declaration).
+    if (sym?.kind !== "variable" || sym.declaration === undefined) {
+      return undefined;
+    }
 
     // A trailing field may name a method of the instance before it.
     const last = path[path.length - 1];
