@@ -316,7 +316,8 @@ function nameSpan(decl: VarDeclaration, i: number): SourceSpan {
 }
 
 /**
- * A block's methods against each other, and its variables against every
+ * A block's methods against each other, its properties against each other and
+ * against its methods, and its variables against every
  * method it has: its own, inherited and those of the interfaces it implements
  * (6.1.2; 6.6.5.5.5 rule 2, which forbids a method named like a variable of
  * the base, applies all the more to a variable of the block itself).
@@ -338,6 +339,22 @@ function checkMembers(
     methods.add(upper);
   }
   const all = fbMethodNames(ast, fb.name);
+  const properties = new Set<string>();
+  for (const p of fb.properties) {
+    const upper = p.name.toUpperCase();
+    if (properties.has(upper)) {
+      err(
+        `Property '${p.name}' is already declared in '${fb.name}': identifiers are case-insensitive (IEC 61131-3 6.1.2)`,
+        p.sourceSpan,
+      );
+    } else if (all.has(upper)) {
+      err(
+        `Property '${p.name}' of '${fb.name}' has the name of a method of the block: a property and a method of one block cannot share a name (IEC 61131-3 6.1.2)`,
+        p.sourceSpan,
+      );
+    }
+    properties.add(upper);
+  }
   if (all.size === 0) return;
   for (const block of fb.varBlocks) {
     for (const decl of block.declarations) {
