@@ -247,13 +247,8 @@ The interactive REPL binary uses [isocline](https://github.com/daanx/isocline) (
 
 A `VAR_INPUT` declared `ANY` (or `ANY_INT`, `ANY_BIT`, …) is not passed by
 value. Codegen replaces it with an `IEC_ANY` descriptor and passes the argument
-by reference, which is why only a variable may be supplied to a function
-block's pin — a literal has no address to keep. A function or method call may
-also take a literal or an expression: a STRING or WSTRING literal is described
-from read-only static storage made once (`DISIZE` is SIZEOF of its type,
-`STRING(n)`), anything else from a temporary that lives for the call. A callee
-reads such an argument and never writes through its `PVALUE` (IEC 61131-3
-§6.6.3.4.2, Figure 13: an input is not assigned inside the POU).
+by reference, which is why only a variable may be supplied — a literal has no
+address to take.
 
 `IEC_ANY`'s first three fields are CODESYS's `__SYSTEM.AnyType` field for field
 (`TYPECLASS`, `PVALUE`, `DISIZE`), so an imported CODESYS POU reading them by
