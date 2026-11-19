@@ -6788,7 +6788,7 @@ export class CodeGenerator {
         // (wchar_t — wchar_t is 32-bit on Linux/AVR, so L"…" wouldn't
         // bind to IECWStringVar's char16_t* constructor).
         const wInner = expr.rawValue.replace(/^["']|["']$/g, "");
-        const wEscaped = translateIECString(wInner);
+        const wEscaped = translateIECString(wInner, true);
         return `u"${wEscaped}"`;
       }
       case "TIME": {

@@ -844,7 +844,7 @@ export class TypeCodeGenerator {
         // (wchar_t) is 32-bit on Linux/AVR and wouldn't bind to
         // IECWStringVar's char16_t* ctor.
         const inner = expr.rawValue.replace(/^["']|["']$/g, "");
-        return `u"${translateIECString(inner)}"`;
+        return `u"${translateIECString(inner, true)}"`;
       }
       case "TIME": {
         const timeVal = parseTimeLiteral(String(expr.value));
