@@ -121,17 +121,31 @@ export function formatArrayElementAccess(
  * Translate IEC 61131-3 `$`-escape sequences in a string literal's body to C++
  * escape sequences, and escape what C++ needs escaped.
  *
- * Handles `$N`/`$n` (newline), `$L`/`$l` (line feed), `$R`/`$r` (CR), `$T`/`$t`
- * (tab), `$P`/`$p` (form feed), `$$` (literal `$`), `$'` (single quote), `$XX`
- * (hex byte) and `''` (doubled single quote), then escapes backslash and
- * double-quote so the result is safe inside a C++ `"…"` literal.
+ * Handles the combinations of IEC 61131-3:2013 6.3.3, Table 7 (`$$`, `$'`,
+ * `$"`, `$L`, `$N`, `$P`, `$R`, `$T`, either case), the doubled single quote,
+ * and Table 6: `$hh` (feature 1g) and, in a WSTRING, `$hhhh` (feature 2h).
+ * Backslash and double quote are escaped so the result is safe inside `"…"`.
+ *
+ * A `$hh` byte is written as a three-digit octal escape, which ends by itself.
+ * A `$hhhh` code unit is a `\x` escape, which C++ reads for as long as hex
+ * digits follow, so a hex digit right after one is written in octal too.
  *
  * Shared by the expression emitter and the type generator: a STRING literal has
  * to lower identically whether it appears in a statement, a variable
  * initialiser, or a STRUCT element default.
  */
-export function translateIECString(inner: string): string {
+export function translateIECString(inner: string, wide = false): string {
   let result = "";
+  let afterHex = false;
+  const octal = (code: number): string =>
+    "\\" + code.toString(8).padStart(3, "0");
+  const put = (text: string): void => {
+    result += text;
+    afterHex = false;
+  };
+  const putChar = (ch: string): void => {
+    put(afterHex && /^[0-9A-Fa-f]$/.test(ch) ? octal(ch.charCodeAt(0)) : ch);
+  };
   for (let i = 0; i < inner.length; i++) {
     const ch = inner[i]!;
     if (ch === "$" && i + 1 < inner.length) {
@@ -139,53 +153,60 @@ export function translateIECString(inner: string): string {
       switch (next.toUpperCase()) {
         case "N":
         case "L":
-          result += "\\n";
+          put("\\n");
           i++;
           break;
         case "R":
-          result += "\\r";
+          put("\\r");
           i++;
           break;
         case "T":
-          result += "\\t";
+          put("\\t");
           i++;
           break;
         case "P":
-          result += "\\f";
+          put("\\f");
           i++;
           break;
         case "$":
-          result += "$";
+          putChar("$");
           i++;
           break;
         case "'":
-          result += "'";
+          putChar("'");
           i++;
           break;
-        default:
-          // $XX hex escape: two hex digits
-          if (
-            i + 2 < inner.length &&
-            /^[0-9A-Fa-f]{2}$/.test(inner.substring(i + 1, i + 3))
-          ) {
-            result += "\\x" + inner.substring(i + 1, i + 3);
+        case '"':
+          put('\\"');
+          i++;
+          break;
+        default: {
+          const hex4 = inner.substring(i + 1, i + 5);
+          const hex2 = inner.substring(i + 1, i + 3);
+          if (wide && /^[0-9A-Fa-f]{4}$/.test(hex4)) {
+            put("\\x" + hex4);
+            afterHex = true;
+            i += 4;
+          } else if (/^[0-9A-Fa-f]{2}$/.test(hex2)) {
+            put(octal(parseInt(hex2, 16)));
             i += 2;
           } else {
             // Unknown $-escape, pass through
-            result += "\\\\$";
+            put("\\\\$");
           }
           break;
+        }
       }
     } else if (ch === "'" && i + 1 < inner.length && inner[i + 1] === "'") {
       // ST doubled-quote → single quote
-      result += "'";
+      putChar("'");
       i++;
     } else if (ch === "\\") {
-      result += "\\\\";
+      put("\\\\");
     } else if (ch === '"') {
-      result += '\\"';
+      put('\\"');
     } else {
-      result += ch;
+      putChar(ch);
     }
   }
   return result;

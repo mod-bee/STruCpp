@@ -36,6 +36,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "iec_type_class.hpp"
@@ -141,5 +142,40 @@ template <typename V, typename Describe>
 inline IEC_ANY any_of_temporary(V&& value, Describe describe) {
     return describe(value);
 }
+
+template <typename T> class IECVar;
+template <size_t MaxLen> class IECString;
+template <size_t MaxLen> class IECStringVar;
+template <size_t MaxLen> class IECWString;
+template <size_t MaxLen> class IECWStringVar;
+
+/**
+ * The payload of a variable reached through a dereference (`p^`): a POINTER TO
+ * addresses the bare value, a STRING its characters, where a variable of its
+ * own is wrapped. Either way PVALUE is the payload, as for any variable.
+ */
+template <typename T>
+inline uint8_t* any_payload(T& value) { return reinterpret_cast<uint8_t*>(&value); }
+template <typename T>
+inline uint8_t* any_payload(IECVar<T>& var) { return reinterpret_cast<uint8_t*>(var.raw_ptr()); }
+template <size_t N>
+inline uint8_t* any_payload(IECStringVar<N>& var) { return reinterpret_cast<uint8_t*>(var.raw_ptr()); }
+template <size_t N>
+inline uint8_t* any_payload(IECWStringVar<N>& var) { return reinterpret_cast<uint8_t*>(var.raw_ptr()); }
+template <size_t N>
+inline uint8_t* any_payload(IECString<N>& text) { return reinterpret_cast<uint8_t*>(text.data()); }
+template <size_t N>
+inline uint8_t* any_payload(IECWString<N>& text) { return reinterpret_cast<uint8_t*>(text.data()); }
+
+/** After a call, a dereferenced STRING's length again from its characters,
+ *  which the callee may have written through PVALUE. */
+template <size_t N>
+inline void any_sync_length(IECStringVar<N>& var) { var.sync_length(); }
+template <size_t N>
+inline void any_sync_length(IECWStringVar<N>& var) { var.sync_length(); }
+template <size_t N>
+inline void any_sync_length(IECString<N>& text) { text = IECString<N>(text.data()); }
+template <size_t N>
+inline void any_sync_length(IECWString<N>& text) { text = IECWString<N>(text.data()); }
 
 } // namespace strucpp

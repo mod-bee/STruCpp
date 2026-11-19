@@ -102,9 +102,9 @@ Located variables (`AT %IX0.0`) use `raw_ptr()` to bind to an I/O image table at
 
 Two pointers into an `IECVar`, and picking the wrong one is silently wrong for exactly one kind of variable.
 
-| | Points at | Use for |
-|---|---|---|
-| `raw_ptr()` | `value_`, always | **Binding** — the I/O image writes through it every scan |
+|              | Points at                                        | Use for                                                            |
+| ------------ | ------------------------------------------------ | ------------------------------------------------------------------ |
+| `raw_ptr()`  | `value_`, always                                 | **Binding** — the I/O image writes through it every scan           |
 | `read_ptr()` | `forced_value_` while forced, `value_` otherwise | **Reading** — anything serving the value to a person or a protocol |
 
 `force()` writes through to `value_`, so for an ordinary variable the two agree the moment a force is applied. A **located** variable is the exception: the PLC program drives `value_` directly through the image binding every scan, without going through `set()`, so `raw_ptr()` would show the program's value while `get()` still reports the forced one. `read_ptr()` is `get()`'s semantics with `get()`'s copy removed, which is what an external reader needs to serve a value without copying it. `IECStringVar::c_str()` resolves the force the same way.
@@ -227,17 +227,17 @@ All time/date types use nanosecond-precision `int64_t` storage. Arithmetic opera
 
 Template implementations of all IEC 61131-3 standard functions:
 
-| Category | Functions |
-|----------|-----------|
-| Numeric | ABS, SQRT, EXPT, LN, LOG, EXP |
-| Trigonometric | SIN, COS, TAN, ASIN, ACOS, ATAN, ATAN2 |
-| Selection | SEL, MIN, MAX, LIMIT, MUX |
-| Comparison | GT, GE, EQ, LE, LT, NE |
-| Bitwise | AND, OR, XOR, NOT, MOVE |
-| Bit Shift | SHL, SHR, ROR, ROL |
-| Conversion | *_TO_* functions (INT_TO_REAL, REAL_TO_INT, etc.) |
-| String | LEN, LEFT, RIGHT, MID, CONCAT, FIND, REPLACE, INSERT, DELETE, UPPER, LOWER, TRIM |
-| System | ADR, SIZEOF |
+| Category      | Functions                                                                        |
+| ------------- | -------------------------------------------------------------------------------- |
+| Numeric       | ABS, SQRT, EXPT, LN, LOG, EXP                                                    |
+| Trigonometric | SIN, COS, TAN, ASIN, ACOS, ATAN, ATAN2                                           |
+| Selection     | SEL, MIN, MAX, LIMIT, MUX                                                        |
+| Comparison    | GT, GE, EQ, LE, LT, NE                                                           |
+| Bitwise       | AND, OR, XOR, NOT, MOVE                                                          |
+| Bit Shift     | SHL, SHR, ROR, ROL                                                               |
+| Conversion    | _*TO*_ functions (INT_TO_REAL, REAL_TO_INT, etc.)                                |
+| String        | LEN, LEFT, RIGHT, MID, CONCAT, FIND, REPLACE, INSERT, DELETE, UPPER, LOWER, TRIM |
+| System        | ADR, SIZEOF                                                                      |
 
 Variadic functions (ADD, MUL, MIN, MAX) accept 2+ arguments via template parameter packs.
 
@@ -258,7 +258,7 @@ position still works. OpenPLC appends to that, never reorders it: `DICOUNT`,
 `DISTRIDE`, `ELEMCLASS`, and now `TYPEDESC`.
 
 `PVALUE` addresses the payload rather than the `IECVar<T>` wrapper around it,
-and the descriptor *aliases* its operand — so writing `*(T*)any.PVALUE` writes
+and the descriptor _aliases_ its operand — so writing `*(T*)any.PVALUE` writes
 what the caller passed, which is how a callee writes values back.
 
 A STRUCT reaches an `ANY` pin as `TYPE_USERDEF`, but a pointer and a byte count
@@ -294,29 +294,35 @@ one of its own pins after one — the editor binds a POU's Variables Table with
 reading the wrapper instead would get the forcing flag back as data.
 
 A STRING member's payload is the characters, with no header in front. The
-length is cached in a field *after* them, so a block that writes a string
+length is cached in a field _after_ them, so a block that writes a string
 member must have it recomputed; codegen emits
 `strucpp::sync_strings(&v, &T__TYPEDESC)` after any call that passes a struct
 holding one. Nested structs and arrays of structs carry `NESTED`. `member_info(m, base)` converts one member into a real `VAR_INFO`.
 
 ### Naming the argument
 
-`TYPEDESC` names a struct's *type* and its *members*. Neither is the name of
+`TYPEDESC` names a struct's _type_ and its _members_. Neither is the name of
 the variable the caller wired up, and a scalar has no `TYPEDESC` at all — so
 `NAME` and `TYPENAME` are filled for **every** argument:
 
-| argument | `NAME` | `TYPENAME` | `TYPEDESC` |
-|---|---|---|---|
-| `setpoint : REAL` | `setpoint` | `REAL` | null |
-| `myText : STRING(20)` | `myText` | `STRING` | null |
-| `mode : E` (enum) | `mode` | `E` | null |
-| `trend : ARRAY[0..2] OF INT` | `trend` | `ARRAY OF INT` | null |
-| `trend[2]` | `trend[2]` | `INT` | null |
-| `plant : S_Plant` | `plant` | `S_Plant` | `&S_PLANT__TYPEDESC` |
-| `plant.speedRpm` | `plant.speedRpm` | `INT` | null |
+| argument                                        | `NAME`           | `TYPENAME`           | `TYPEDESC`           |
+| ----------------------------------------------- | ---------------- | -------------------- | -------------------- |
+| `setpoint : REAL`                               | `setpoint`       | `REAL`               | null                 |
+| `myText : STRING(20)`                           | `myText`         | `STRING`             | null                 |
+| `mode : E` (enum)                               | `mode`           | `E`                  | null                 |
+| `trend : ARRAY[0..2] OF INT`                    | `trend`          | `ARRAY OF INT`       | null                 |
+| `trend[2]`                                      | `trend[2]`       | `INT`                | null                 |
+| `plant : S_Plant`                               | `plant`          | `S_Plant`            | `&S_PLANT__TYPEDESC` |
+| `plant.speedRpm`                                | `plant.speedRpm` | `INT`                | null                 |
+| `trend[i]`                                      | `trend[*]`       | `INT`                | null                 |
+| `p^` (`p : POINTER TO INT`)                     | `p^`             | `INT`                | null                 |
+| `(setpoint)`                                    | `setpoint`       | `REAL`               | null                 |
+| `'text'`, `RUN` (an enumeration value), `k + 1` | null             | `STRING`, `E`, `INT` | null                 |
 
 So a callee can name a scalar pin from `NAME`, and each member of a struct pin
-from the member's own name. Both are null only on an unwired pin.
+from the member's own name. `NAME` names the variable whenever one is behind
+the argument, and is null for a literal, an enumeration value or an
+expression, which have none. Both are null on an unwired pin.
 
 #### Case
 
@@ -338,7 +344,7 @@ Two consequences for a callee:
   otherwise one variable would be reported under two spellings depending on
   how the pin happened to be typed.
 
-The generated C++ *symbols* stay folded: `S_PLANT__TYPEDESC` is a name only
+The generated C++ _symbols_ stay folded: `S_PLANT__TYPEDESC` is a name only
 generated code uses. Elementary type names (`INT`, `STRING`) stay upper
 case because they are words of the standard's grammar rather than names anyone
 chose — which is how CODESYS reports them in `VAR_INFO.TypeName` too.
@@ -399,7 +405,7 @@ long that lives), as is a function block instance member and an `__XWORD`.
 
 `TYPEDESC` is null for an elementary type, an enumeration, an array of
 elementary types, and a function block instance. IEC 61131-3 §6.4.3 scopes
-`ANY_DERIVED` to the user-defined *data* types of Table 11 (a function block is
+`ANY_DERIVED` to the user-defined _data_ types of Table 11 (a function block is
 a POU, not one of those), CODESYS documents only elementary arguments, and a
 generated FB class may carry a vptr or an `EXTENDS` base where `offsetof` is
 not answerable.
@@ -422,29 +428,29 @@ not being able to browse a variable the compiler never saw.
 
 ## Header Summary
 
-| Header | Purpose |
-|--------|---------|
-| `iec_types.hpp` | Elementary type aliases (including LTIME/LDATE/LTOD/LDT) |
-| `iec_var.hpp` | IECVar wrapper with forcing |
-| `iec_traits.hpp` | Type category traits |
-| `iec_string.hpp` | STRING type and functions |
-| `iec_wstring.hpp` | WSTRING type and functions |
-| `iec_char.hpp` | CHAR type |
-| `iec_array.hpp` | Array templates (1D, 2D, 3D) |
-| `iec_struct.hpp` | Struct support |
-| `iec_enum.hpp` | Enum support |
-| `iec_subrange.hpp` | Subrange type with validation |
-| `iec_time.hpp` | TIME/LTIME types and arithmetic |
-| `iec_date.hpp` | DATE/LDATE type |
-| `iec_tod.hpp` | TIME_OF_DAY/LTOD type |
-| `iec_dt.hpp` | DATE_AND_TIME/LDT type |
-| `iec_located.hpp` | Located variable (AT %IX0.0) support |
-| `iec_pointer.hpp` | POINTER TO type |
-| `iec_ptr.hpp` | REF_TO, REFERENCE_TO, and ADR support |
-| `iec_retain.hpp` | RETAIN variable tracking |
-| `iec_memory.hpp` | Dynamic allocation (__NEW/__DELETE) |
-| `iec_any.hpp` | Generic (`ANY`) parameter descriptor — CODESYS `__SYSTEM.AnyType` |
+| Header               | Purpose                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| `iec_types.hpp`      | Elementary type aliases (including LTIME/LDATE/LTOD/LDT)                |
+| `iec_var.hpp`        | IECVar wrapper with forcing                                             |
+| `iec_traits.hpp`     | Type category traits                                                    |
+| `iec_string.hpp`     | STRING type and functions                                               |
+| `iec_wstring.hpp`    | WSTRING type and functions                                              |
+| `iec_char.hpp`       | CHAR type                                                               |
+| `iec_array.hpp`      | Array templates (1D, 2D, 3D)                                            |
+| `iec_struct.hpp`     | Struct support                                                          |
+| `iec_enum.hpp`       | Enum support                                                            |
+| `iec_subrange.hpp`   | Subrange type with validation                                           |
+| `iec_time.hpp`       | TIME/LTIME types and arithmetic                                         |
+| `iec_date.hpp`       | DATE/LDATE type                                                         |
+| `iec_tod.hpp`        | TIME_OF_DAY/LTOD type                                                   |
+| `iec_dt.hpp`         | DATE_AND_TIME/LDT type                                                  |
+| `iec_located.hpp`    | Located variable (AT %IX0.0) support                                    |
+| `iec_pointer.hpp`    | POINTER TO type                                                         |
+| `iec_ptr.hpp`        | REF_TO, REFERENCE_TO, and ADR support                                   |
+| `iec_retain.hpp`     | RETAIN variable tracking                                                |
+| `iec_memory.hpp`     | Dynamic allocation (**NEW/**DELETE)                                     |
+| `iec_any.hpp`        | Generic (`ANY`) parameter descriptor — CODESYS `__SYSTEM.AnyType`       |
 | `iec_type_class.hpp` | `__SYSTEM.TYPE_CLASS`, shared by `IEC_ANY`, `VAR_INFO` and `MemberDesc` |
-| `iec_typedesc.hpp` | STRUCT member layout tables reached through `IEC_ANY::TYPEDESC` |
-| `iec_varinfo.hpp` | `__SYSTEM.VAR_INFO`, what `__VARINFO(x)` yields |
-| `iec_std_lib.hpp` | Standard function implementations |
+| `iec_typedesc.hpp`   | STRUCT member layout tables reached through `IEC_ANY::TYPEDESC`         |
+| `iec_varinfo.hpp`    | `__SYSTEM.VAR_INFO`, what `__VARINFO(x)` yields                         |
+| `iec_std_lib.hpp`    | Standard function implementations                                       |
