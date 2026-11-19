@@ -11389,8 +11389,35 @@ export class CodeGenerator {
     // An IEC_ANY aliases its operand: it hands the callee a pointer the
     // callee keeps. So the operand has to name the storage, not a read of it
     // — see generateAliasLvalue.
-    const value = this.generateAliasLvalue(expr);
-    return this.anyDescriptorForStorage(expr, declaredType, value);
+    // A REFERENCE TO variable is described as the variable it refers to.
+    const alias = this.generateAliasLvalue(expr);
+    const value = this.isReferenceToVariable(expr)
+      ? `${alias}.target()`
+      : alias;
+    return this.anyDescriptorForStorage(
+      expr,
+      declaredType,
+      value,
+      true,
+      this.endsInDereference(expr),
+    );
+  }
+
+  /** `p^`, `r^`, `(p^)`, `a.p^`: what a pointer or reference points at. */
+  private endsInDereference(expr: Expression): boolean {
+    if (expr.kind === "ParenthesizedExpression") {
+      return this.endsInDereference(expr.expression);
+    }
+    if (expr.kind === "DrefExpression") return true;
+    if (expr.kind !== "VariableExpression") return false;
+    const chain = expr.accessChain ?? [];
+    if (chain.length > 0)
+      return chain[chain.length - 1]!.kind === "dereference";
+    return (
+      expr.isDereference &&
+      expr.fieldAccess.length === 0 &&
+      expr.subscripts.length === 0
+    );
   }
 
   /** Whether an argument names storage an IEC_ANY can point at. */
@@ -11491,7 +11518,12 @@ export class CodeGenerator {
     declaredType: string,
     value: string,
     syncStrings = true,
+    dereferenced = false,
   ): string | undefined {
+    // Through a pointer the payload is bare, not a variable wrapping it.
+    const payload = dereferenced
+      ? `strucpp::any_payload(${value})`
+      : `reinterpret_cast<uint8_t*>(${value}.raw_ptr())`;
     const element = arrayElementTypeName(declaredType);
     if (element) {
       return this.anyDescriptorForArray(
@@ -11508,11 +11540,15 @@ export class CodeGenerator {
         (typeClass === "TYPE_STRING" || typeClass === "TYPE_WSTRING")
       ) {
         // The characters travel through raw_ptr(); the cached length does not.
-        this.pendingStringSyncs.push(`${value}.sync_length();`);
+        this.pendingStringSyncs.push(
+          dereferenced
+            ? `strucpp::any_sync_length(${value});`
+            : `${value}.sync_length();`,
+        );
       }
       return (
         `strucpp::IEC_ANY{ strucpp::TYPE_CLASS::${typeClass}, ` +
-        `reinterpret_cast<uint8_t*>(${value}.raw_ptr()), ` +
+        `${payload}, ` +
         `static_cast<int32_t>(strucpp::IEC_SIZEOF(${value})), 1, ` +
         `static_cast<int32_t>(sizeof(${value})), ` +
         `strucpp::TYPE_CLASS::${typeClass}, nullptr, ` +
@@ -11525,9 +11561,7 @@ export class CodeGenerator {
     if (this.isUserDefinedType(declaredType)) {
       const isEnum = this.enumTypeMembers.has(declaredType.toUpperCase());
       const cls = isEnum ? "TYPE_ENUM" : "TYPE_USERDEF";
-      const ptr = isEnum
-        ? `reinterpret_cast<uint8_t*>(${value}.raw_ptr())`
-        : `reinterpret_cast<uint8_t*>(&${value})`;
+      const ptr = isEnum ? payload : `reinterpret_cast<uint8_t*>(&${value})`;
       const size = isEnum
         ? `static_cast<int32_t>(strucpp::IEC_SIZEOF(${value}))`
         : `static_cast<int32_t>(sizeof(${value}))`;

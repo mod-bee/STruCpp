@@ -4,9 +4,6 @@
  * expression (no variable), and the variable's name for every variable: a
  * structure member, an array element, a parenthesised variable, a
  * dereference, a REFERENCE TO, a global and an in-out.
- *
- * A dereference and a REFERENCE TO are checked in the generated code only:
- * their descriptors do not compile yet (`(*P).raw_ptr()` on a raw DINT).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -83,6 +80,8 @@ END_VAR
   n := NameOf(X := pr.s);
   n := NameOf(X := arr[1]);
   n := NameOf(X := arr[i]);
+  n := NameOf(X := p^);
+  n := NameOf(X := rr);
   n := NameOf(X := (dv));
   n := NameOf(X := gv);
   n := NameOf(X := m);
@@ -111,6 +110,8 @@ const EXPECTED = [
   "pr.s",
   "arr[1]",
   "arr[*]",
+  "p^",
+  "rr",
   "dv",
   "gv",
   "m",
@@ -154,16 +155,5 @@ describeIfGpp("NAME of a generic argument", () => {
     );
     const out = execSync(`"${bin}"`, { encoding: "utf-8" });
     expect(out.trim().split("\n")).toEqual(EXPECTED);
-  });
-
-  it("names a dereference and a REFERENCE TO", () => {
-    const deref = SOURCE.replace(
-      "  n := pb.Look(X := sv);\n",
-      "  n := pb.Look(X := sv);\n  n := NameOf(X := p^);\n  n := NameOf(X := rr);\n",
-    );
-    const result = compile(deref, { headerFileName: "generated.hpp" });
-    expect(result.errors.map((e) => e.message)).toEqual([]);
-    expect(result.cppCode).toContain('nullptr, "p^", "DINT" }');
-    expect(result.cppCode).toContain('nullptr, "rr", "DINT" }');
   });
 });
