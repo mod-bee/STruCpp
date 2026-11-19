@@ -130,9 +130,12 @@ function applyBlockFlags(
   block: { isConstant: boolean; isRetain: boolean; isNonRetain: boolean },
 ): number {
   let flags = inherited;
-  if (block.isConstant) flags |= LEAF_FLAG_READONLY;
   if (block.isRetain) flags |= LEAF_FLAG_RETAIN;
   if (block.isNonRetain) flags &= ~LEAF_FLAG_RETAIN;
+  // A constant is never retained, not even inside a RETAIN instance: CONSTANT,
+  // RETAIN and NON_RETAIN are alternatives (IEC 61131-3 Annex A, p.224).
+  if (block.isConstant)
+    flags = (flags | LEAF_FLAG_READONLY) & ~LEAF_FLAG_RETAIN;
   return flags;
 }
 
@@ -1372,14 +1375,16 @@ export function generateDebugTable(
         // A `VAR NON_RETAIN` member opts out of the instance's RETAIN
         // (6.5.6.2), as in a user-defined block (applyBlockFlags): walked, like
         // a member of an unretained instance, only for RETAIN state nested in it.
+        // A constant is never retained (applyBlockFlags), so never walked here.
+        const variables = fbSym.locals.filter((v) => v.isConstant !== true);
         const localsToWalk = instanceRetained
-          ? fbSym.locals.filter(
+          ? variables.filter(
               (v) =>
                 v.isNonRetain !== true ||
                 v.isRetain ||
                 holdsRetain(v.declaration.type),
             )
-          : fbSym.locals.filter(
+          : variables.filter(
               (v) => v.isRetain || holdsRetain(v.declaration.type),
             );
         if (localsToWalk.length > 0 || instanceRetained) {

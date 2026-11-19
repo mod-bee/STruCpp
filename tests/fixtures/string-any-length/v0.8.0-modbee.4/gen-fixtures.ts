@@ -135,6 +135,35 @@ console.log(execFileSync(large, ["set", lv, "save2", path.join(out, "large.v2.bi
 // The program files of `large` are not needed later: only its blob.
 fs.rmSync(path.join(out, "large"), { recursive: true });
 
+// A RETAIN block with a CONSTANT member: this build put the constant in the image.
+export const CONSTFB = `FUNCTION_BLOCK FB_C
+VAR CONSTANT L : INT := 7; END_VAR
+VAR n : DINT; s : STRING(10); END_VAR
+  n := n + L;
+END_FUNCTION_BLOCK
+PROGRAM Main
+VAR RETAIN c : FB_C; cs : ARRAY[1..2] OF FB_C; hours : LINT; END_VAR
+  c();
+END_PROGRAM
+CONFIGURATION Config0
+  RESOURCE Res0 ON PLC
+    TASK task0(INTERVAL := T#20ms, PRIORITY := 0);
+    PROGRAM instance0 WITH task0 : Main;
+  END_RESOURCE
+END_CONFIGURATION`;
+const constfb = build("constfb", CONSTFB);
+const CONSTFB_VALUES: Record<string, [string, string]> = {
+  "INSTANCE0.C.N": ["s", le(123, 4)],
+  "INSTANCE0.C.S": ["t", hex("ten-chars!")],
+  "INSTANCE0.CS[2].N": ["s", le(-5, 4)],
+  "INSTANCE0.HOURS": ["s", le(99n, 8)],
+};
+const cv = values(path.join(out, "constfb/debug-map.json"), CONSTFB_VALUES);
+fs.writeFileSync(path.join(out, "constfb.values.json"), JSON.stringify(CONSTFB_VALUES, null, 1));
+console.log(execFileSync(constfb, ["set", cv, "save2", path.join(out, "constfb.v2.bin")], { encoding: "utf-8" }));
+console.log("constfb retained:", JSON.parse(fs.readFileSync(path.join(out, "constfb/debug-map.json"), "utf-8")).retainVars.map((v: { path: string }) => v.path).join(" "));
+fs.rmSync(path.join(out, "constfb"), { recursive: true });
+
 const lib = compileStlib([{ source: LIB, fileName: "lib.st" }], {
   name: "strlen-lib",
   version: "1.0.0",

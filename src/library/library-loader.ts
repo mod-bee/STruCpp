@@ -168,6 +168,7 @@ function makeVarSymbol(
     isRetain: v.retain === true,
     // A `NON_RETAIN` member stays out of a RETAIN instance (6.5.6.2).
     ...(v.nonRetain === true ? { isNonRetain: true } : {}),
+    ...(v.readOnly === true ? { isConstant: true } : {}),
     // Only present when the library's codegen mangled the member; the walk
     // prefers it over re-deriving the rule against the wrong unit.
     ...(v.cppName !== undefined ? { cppName: v.cppName } : {}),

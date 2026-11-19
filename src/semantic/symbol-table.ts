@@ -68,6 +68,8 @@ export interface VariableSymbol extends BaseSymbol {
   /** A library block's member declared in a `NON_RETAIN` section: never
    *  retained, even in a RETAIN instance (IEC 61131-3 6.5.6.2). */
   isNonRetain?: boolean;
+  /** A library block's member declared CONSTANT (manifest `readOnly`). */
+  isConstant?: boolean;
   address?: string | undefined;
   /** Default value as an ST expression string, for library function/FB
    *  parameters reconstructed from a manifest (whose `declaration` carries no

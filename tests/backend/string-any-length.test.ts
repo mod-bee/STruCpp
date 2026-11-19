@@ -270,15 +270,14 @@ END_PROGRAM${CFG}`,
       { headerFileName: "generated.hpp", libraries: [archive] },
     );
     expect(result.errors.map((e) => e.message)).toEqual([]);
+    // The constant L is not retained.
     expect(result.debugMap!.retainVars!.map((v) => v.path)).toEqual([
       "INSTANCE0.X.I",
-      "INSTANCE0.X.L",
       "INSTANCE0.X.NOTE",
     ]);
-    // Format 3: header 14; payload [u16 len] + 40, INT 2, [u16 len] + 300;
-    // trailer 4 + 3 * 7.
+    // Format 3: header 14; payload [u16 len] + 40, [u16 len] + 300; trailer 4 + 2 * 7.
     expect(result.debugMap!.retainFormat).toBe(3);
-    expect(result.debugMap!.retainBlobSize).toBe(14 + 2 + 42 + 302 + 4 + 21);
+    expect(result.debugMap!.retainBlobSize).toBe(14 + 42 + 302 + 4 + 14);
     expect(result.debugTableCpp).toMatch(
       /string_cap<[^>]*NOTE[^>]*>::value == 300/,
     );
