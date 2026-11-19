@@ -11253,6 +11253,13 @@ export class CodeGenerator {
    * whatever sat between the tokens. A non-constant subscript renders `[*]`.
    */
   private argumentSourceName(expr: Expression): string | undefined {
+    if (expr.kind === "ParenthesizedExpression") {
+      return this.argumentSourceName(expr.expression);
+    }
+    if (expr.kind === "DrefExpression") {
+      const target = this.argumentSourceName(expr.operand);
+      return target === undefined ? undefined : `${target}^`;
+    }
     if (expr.kind !== "VariableExpression") return undefined;
     const v = expr;
     // The DECLARATION's spelling, not the call site's. `Plant.spPressureAlt`
@@ -11316,10 +11323,16 @@ export class CodeGenerator {
    * Emitted for every argument kind, not just a struct: a scalar wired to an
    * `ANY` pin is otherwise anonymous, and a block that has to name what it was
    * handed has nothing to name it with.
+   *
+   * `NAME` names the variable behind the argument, and is null exactly when
+   * there is none: a literal, an enumeration value, an expression.
    */
   private anyIdentityFields(expr: Expression, declaredType: string): string {
+    const name = this.isAnyAddressable(expr)
+      ? this.argumentSourceName(expr)
+      : undefined;
     return (
-      `${this.cppNameLiteral(this.argumentSourceName(expr))}, ` +
+      `${this.cppNameLiteral(name)}, ` +
       `${this.cppNameLiteral(this.declaredTypeDisplayName(declaredType))}`
     );
   }

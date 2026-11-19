@@ -312,9 +312,15 @@ the variable the caller wired up, and a scalar has no `TYPEDESC` at all — so
 | `trend[2]` | `trend[2]` | `INT` | null |
 | `plant : S_Plant` | `plant` | `S_Plant` | `&S_PLANT__TYPEDESC` |
 | `plant.speedRpm` | `plant.speedRpm` | `INT` | null |
+| `trend[i]` | `trend[*]` | `INT` | null |
+| `p^` (`p : POINTER TO INT`) | `p^` | `INT` | null |
+| `(setpoint)` | `setpoint` | `REAL` | null |
+| `'text'`, `RUN` (an enumeration value), `k + 1` | null | `STRING`, `E`, `INT` | null |
 
 So a callee can name a scalar pin from `NAME`, and each member of a struct pin
-from the member's own name. Both are null only on an unwired pin.
+from the member's own name. `NAME` names the variable whenever one is behind
+the argument, and is null for a literal, an enumeration value or an
+expression, which have none. Both are null on an unwired pin.
 
 #### Case
 
